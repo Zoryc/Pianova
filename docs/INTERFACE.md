@@ -310,6 +310,10 @@ export interface PianoProps {
   noteNaming: NoteNaming
   /** slot -> label of the computer key that plays it. */
   keyLabels: ReadonlyMap<number, string>
+  keyStyle: KeyStyle
+  /** For the colour of lit keys (`paletteForNote`). */
+  accent: AccentChoice
+  customColour: string
   onNoteDown(midi: Midi): void
   onNoteUp(midi: Midi): void
   editMode?: boolean
