@@ -1,0 +1,792 @@
+/*
+ * The app shell: page layout, header and tabs, toolbar, panels, the stage
+ * around the piano, and the start overlay.
+ *
+ * Colours, radii and fonts come from theme.css. Spacing is in multiples of
+ * 4px. Every control is at least 36px high, and reacts to hover and press
+ * with a short transition.
+ */
+
+/* ---------- Page ---------- */
+
+/*
+ * The piano never leaves the screen.
+ *
+ * The page is as high as the window, and its rows are: the header, the
+ * current mode (<main>), a spare row, and the footer. <main> covers its own
+ * row and the spare row.
+ *
+ * The spare row is the room for the light trails. It is as high as the trails
+ * like to be while the window has that much room, and it is the first thing
+ * to give up its height, down to nothing, when the window is low or a panel
+ * opens. Only when the page does not fit even without the trails does it
+ * become higher than the window, and scroll.
+ *
+ * Inside <main> the spare height is handed down to the trails: the stage is
+ * the one part of the mode that grows, and the trails are the one part of the
+ * stage that grows (see "Stage" below). Everything else is as high as its
+ * content, so a new panel needs no rule of its own to take part.
+ */
+.app {
+  /* How high the light trails like to be. Nothing while they are switched off. */
+  --trails-height: 0px;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, var(--trails-height)) auto;
+  /* The rows keep to the top: a high window is left empty below the footer. */
+  align-content: start;
+  gap: 12px;
+  height: 100%;
+  /* Never lower than the page without the trails: from there on it scrolls. */
+  min-height: min-content;
+  /*
+   * The box is as wide as the window, so a click anywhere lands inside it,
+   * while its content stays centred and at most 1280px wide.
+   */
+  padding: 12px max(24px, calc((100% - 1280px) / 2));
+}
+
+/*
+ * With the trails switched on: a share of the window's height, between 104px
+ * and 200px (about 150px on a laptop screen).
+ */
+.app:has(.stage__trails) {
+  --trails-height: clamp(104px, 19vh, 200px);
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 32px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  grid-row: span 2;
+}
+
+/* Everything that belongs to the current mode, stacked. It fills <main>. */
+.mode-panel {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.app-footer__status:not(:empty) {
+  margin-left: 16px;
+}
+
+.app-footer__status[data-status='error'] {
+  color: var(--danger);
+}
+
+/* The credit that the licence of the piano recordings asks for. */
+.app-footer__credit {
+  margin-left: 16px;
+}
+
+.app-footer a {
+  color: inherit;
+  transition: color 120ms ease-out;
+}
+
+.app-footer a:hover {
+  color: var(--text);
+}
+
+/* ---------- Mode tabs ---------- */
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  user-select: none;
+}
+
+.mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mode-tab[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.mode-tab[aria-disabled='true'] {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.mode-tab__badge {
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* ---------- Panels ---------- */
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+/* ---------- Buttons ---------- */
+
+/*
+ * Each kind of button only sets the --button-* variables; this rule turns
+ * them into the actual look, so kinds and states combine without clashing.
+ */
+.button {
+  --button-fill: var(--panel-raised);
+  --button-fill-hover: color-mix(in srgb, var(--text) 10%, var(--panel-raised));
+  --button-line: var(--border-strong);
+  --button-ink: var(--text);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--button-line);
+  border-radius: 999px;
+  background: var(--button-fill);
+  color: var(--button-ink);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--button-fill-hover);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The main action. */
+.button--primary {
+  --button-fill: var(--accent);
+  --button-fill-hover: var(--accent-strong);
+  --button-line: var(--accent);
+  --button-ink: var(--accent-ink);
+}
+
+/* "Customize keys" while customizing: the same cool blue as the key being changed. */
+.button--primary[aria-pressed='true'] {
+  --button-fill: var(--info);
+  --button-fill-hover: color-mix(in srgb, var(--text) 30%, var(--info));
+  --button-line: var(--info);
+  --button-ink: var(--info-ink);
+}
+
+/* A button that stays in the background until it is needed. */
+.button--quiet {
+  --button-fill: transparent;
+  --button-fill-hover: var(--panel-raised);
+  --button-line: transparent;
+  --button-ink: var(--text-muted);
+}
+
+.button--quiet:hover,
+.button--quiet[aria-expanded='true'] {
+  --button-ink: var(--text);
+}
+
+.button--quiet[aria-expanded='true'] {
+  --button-fill: var(--panel-raised);
+  --button-line: var(--border-strong);
+}
+
+/* The "Yes" of a reset. */
+.button--danger {
+  --button-fill-hover: color-mix(in srgb, var(--danger) 18%, var(--panel-raised));
+  --button-line: var(--danger);
+  --button-ink: var(--danger);
+}
+
+/* A single character: − or +. */
+.button--round {
+  width: 36px;
+  padding: 0;
+  font-size: 18px;
+}
+
+.button__chevron {
+  font-size: 12px;
+  transition: transform 160ms ease-out;
+}
+
+.button[aria-expanded='true'] .button__chevron {
+  transform: rotate(180deg);
+}
+
+/* ---------- A control with its label ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field__label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.field__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.field__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.field__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ---------- Slider ---------- */
+
+.slider {
+  width: 128px;
+  height: 36px;
+  margin: 0;
+  border-radius: 999px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.slider__value {
+  min-width: 4ch;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- On/off switch ---------- */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.switch:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
+.switch:active {
+  transform: translateY(1px);
+}
+
+.switch__track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background-color 120ms ease-out;
+}
+
+.switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition:
+    transform 120ms ease-out,
+    background-color 120ms ease-out;
+}
+
+/* Wide enough for "Off", so the switch keeps its width when it changes. */
+.switch__state {
+  min-width: 3ch;
+  text-align: left;
+}
+
+.switch[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.switch[aria-checked='true']:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.switch[aria-checked='true'] .switch__track {
+  background: color-mix(in srgb, var(--accent-ink) 30%, transparent);
+}
+
+.switch[aria-checked='true'] .switch__thumb {
+  background: var(--accent-ink);
+  transform: translateX(16px);
+}
+
+/* ---------- One choice out of a few ---------- */
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  user-select: none;
+}
+
+.segmented__option {
+  min-height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.segmented__option:hover {
+  color: var(--text);
+}
+
+.segmented__option:active {
+  transform: translateY(1px);
+}
+
+.segmented__option[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* ---------- A number with − and + ---------- */
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.stepper__value {
+  min-width: 3ch;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ---------- Drop-down ---------- */
+
+.select {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background-color: var(--panel-raised);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease-out;
+}
+
+.select:hover {
+  border-color: var(--text-faint);
+}
+
+/* ---------- "Really reset?" Yes / No ---------- */
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm__question {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------- Toolbar ---------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 20px;
+  padding: 12px 16px;
+  user-select: none;
+}
+
+/* Pushed to the far right of its row. */
+.toolbar__advanced {
+  margin-left: auto;
+}
+
+/* The name of a computer key, drawn like the key itself. */
+.keycap {
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Wide enough for "Do3 – Do6", so the two buttons around it never move. */
+.piano-range {
+  min-width: 11ch;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ---------- Advanced panel ---------- */
+
+/*
+ * Compact, so that it takes little height away from the piano: the heading,
+ * its sentence and the reset button share the first row, and the options are
+ * below. The reset button comes last in the page (for reading it and for the
+ * Tab key) and is placed at the end of the first row here.
+ */
+.advanced {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 8px 16px;
+}
+
+.advanced__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 12px;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.advanced__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.advanced__intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.advanced__reset {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+/* As many equal columns as fit: three, two or one. */
+.advanced__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 12px 16px;
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+
+/* On a wide window the six options sit side by side in one row. */
+@media (min-width: 1240px) {
+  .advanced__options {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+/* Here the label is the name of a setting, so it reads as a small heading. */
+.advanced .field__label {
+  color: var(--text);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+/* The slider takes the width its column has left, up to a length that is easy to set. */
+.advanced .slider {
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
+}
+
+/* Narrower options, so that three of them fit in one of six columns. */
+.advanced .segmented__option {
+  padding: 0 8px;
+}
+
+/* ---------- Now playing ---------- */
+
+/* A fixed height, so the piano below never moves when the line changes. */
+.now-playing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 32px;
+  overflow: hidden;
+}
+
+.now-playing__notes {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.now-playing__note {
+  flex: none;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-strong);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.now-playing__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.now-playing__badge {
+  flex: none;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 50%, transparent);
+  border-radius: 999px;
+  color: var(--info);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ---------- Customize keys ---------- */
+
+.key-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 12px 16px;
+  border-color: color-mix(in srgb, var(--info) 50%, var(--border));
+  background: color-mix(in srgb, var(--info) 6%, var(--panel));
+}
+
+.key-editor__text {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.key-editor__lead {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* Room for one line is kept, so the panel does not grow when a message appears. */
+.key-editor__detail {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 1.4em;
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* It is always on the page, with or without its text: only the text needs space after it. */
+.key-editor__hint:not(:empty) {
+  margin-right: 16px;
+}
+
+.key-editor__message {
+  color: var(--info);
+}
+
+.key-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Stage: the light trails directly on top of the piano ---------- */
+
+/*
+ * The trails and the piano are both exactly as wide as the inside of this
+ * box, one straight above the other, so the trails rise out of the keys.
+ * Neither may get a margin, a gap or a width of its own.
+ */
+.stage {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(to bottom, var(--panel), var(--bg));
+  box-shadow: var(--shadow);
+  transition: border-color 160ms ease-out;
+}
+
+.stage--editing {
+  border-color: color-mix(in srgb, var(--info) 50%, var(--border));
+}
+
+/*
+ * The light trails take the height the stage has left above the piano. That
+ * is the spare row of the page (see the top of this file): as high as the
+ * trails like to be, less on a low window or under an open panel, or nothing
+ * at all. The canvas inside fills this box.
+ */
+.stage__trails {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* ---------- Start overlay ---------- */
+
+/*
+ * A button that covers the whole window. A button does not stretch by
+ * itself, so its width and height are set here.
+ */
+.start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  border: 0;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+/* It covers the screen, so a focus ring around it would only outline the window. */
+.start-overlay:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.start-overlay__card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  transition: border-color 160ms ease-out;
+}
+
+.start-overlay:hover .start-overlay__card {
+  border-color: var(--accent);
+}
+
+.start-overlay__name {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.start-overlay__action {
+  color: var(--accent-strong);
+  font-size: 18px;
+}

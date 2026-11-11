@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules
+dist
+.vite
+coverage
+
+# Local-only files that must never be published
+*.local
+.env
+.env.*
+.claude/
+*.log
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db

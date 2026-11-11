@@ -1,0 +1,273 @@
+/*
+ * The on-screen piano.
+ *
+ * Keys are absolutely positioned inside the piano box. Piano.tsx gives each
+ * key its `left` and `width` (percentages taken from KEY_RECTS) and the box
+ * its `--piano-black-key-height`. The box must never get horizontal padding
+ * or a border: that would shift the keys away from the light trails drawn
+ * above them.
+ */
+
+.piano {
+  /* How far a key moves down while it is played. */
+  --piano-key-travel: 2px;
+  /* Colour mixed into the key under the mouse: warm when playing, cool when picking a key to change. */
+  --piano-hover-tint: var(--accent);
+
+  position: relative;
+  isolation: isolate;
+  /* Inside a flex parent, keep the height below rather than being squeezed or stretched. */
+  flex: none;
+  width: 100%;
+  aspect-ratio: 11 / 2;
+  min-height: 140px;
+  max-height: 240px;
+  overflow: hidden;
+  /* Lets the labels size themselves from the piano's width (cqw units). */
+  container-type: inline-size;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  /* Shows as a thin dark line under the keys, and above a key that is pressed down. */
+  background: var(--key-black-shade);
+  font-family: var(--font);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.piano--editing {
+  --piano-hover-tint: var(--key-selected);
+}
+
+/*
+ * Windows contrast themes repaint every button in one system colour and drop
+ * shadows and gradients, which is all a key is drawn with: the keys would
+ * merge into one flat block that shows neither played nor selected keys. So
+ * the piano keeps its own colours in those themes. The keys and their labels
+ * inherit the setting.
+ */
+@media (forced-colors: active) {
+  .piano {
+    forced-color-adjust: none;
+  }
+}
+
+/* ---------- Keys ---------- */
+
+/*
+ * Each kind of key and each state only sets the --piano-* variables below;
+ * this rule turns them into the actual look, so states can be combined
+ * without repeating the declarations.
+ */
+.piano-key {
+  position: absolute;
+  top: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0 0 var(--piano-key-radius) var(--piano-key-radius);
+  overflow: hidden;
+  appearance: none;
+  font: inherit;
+  cursor: default;
+  touch-action: none;
+  background-color: var(--piano-key-fill);
+  box-shadow: var(--piano-key-shadow);
+  transition:
+    background-color 140ms ease-out,
+    box-shadow 140ms ease-out,
+    transform 140ms ease-out;
+}
+
+.piano--editing .piano-key {
+  cursor: pointer;
+}
+
+.piano-key--white {
+  --piano-key-fill: var(--key-white);
+  /*
+   * In order: a one-pixel sliver of the key's own colour past its right edge,
+   * the line between neighbours, the front edge, and the shade under the
+   * piano's lid. The sliver hides under the next key; it is there because key
+   * edges are rounded to whole pixels, which could otherwise leave a dark
+   * hairline gap between two keys at some window widths.
+   */
+  --piano-key-shadow:
+    1px 0 0 var(--piano-key-fill),
+    inset -1px 0 0 var(--key-white-shade),
+    inset 0 -4px 0 var(--key-white-shade),
+    inset 0 10px 8px -8px color-mix(in srgb, var(--key-black-shade) 45%, transparent);
+  --piano-key-radius: min(var(--radius-sm), 0.5cqw);
+  --piano-cap-fill: var(--key-black);
+  --piano-cap-ink: var(--key-white);
+  --piano-cap-size: clamp(11px, 1.45cqw, 18px);
+  --piano-note-ink: color-mix(in srgb, var(--key-black) 70%, var(--key-white));
+  --piano-note-size: clamp(9px, 1.05cqw, 13px);
+  --piano-labels-inset: clamp(7px, 0.9cqw, 11px);
+
+  z-index: 1;
+  /* Stops short of the bottom of the box, leaving room to move down when played. */
+  height: calc(100% - var(--piano-key-travel) - 1px);
+  background-image: linear-gradient(
+    to bottom,
+    transparent 55%,
+    color-mix(in srgb, var(--key-white-shade) 75%, transparent)
+  );
+}
+
+.piano-key--black {
+  --piano-key-fill: var(--key-black);
+  /* Top highlight, front edge, and the shadow cast on the white keys. */
+  --piano-key-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--key-white) 22%, transparent),
+    inset 0 -7px 0 var(--key-black-shade),
+    0 3px 6px color-mix(in srgb, var(--key-black-shade) 55%, transparent);
+  --piano-key-radius: min(var(--radius-sm), 0.4cqw);
+  --piano-cap-fill: var(--key-white);
+  --piano-cap-ink: var(--key-black);
+  --piano-cap-size: clamp(9px, 1.1cqw, 14px);
+  --piano-note-ink: color-mix(in srgb, var(--key-white) 72%, var(--key-black));
+  --piano-note-size: clamp(7px, 0.95cqw, 11px);
+  --piano-labels-inset: clamp(9px, 0.9cqw, 12px);
+
+  z-index: 2;
+  height: var(--piano-black-key-height);
+  background-image: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--key-white) 14%, transparent),
+    transparent 45%
+  );
+}
+
+/* The glow at the bottom of a white key that is being played. */
+.piano-key--white::after {
+  content: '';
+  position: absolute;
+  inset: 40% 0 0;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--accent) 85%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+/* ---------- States. Later rules win: hover < played < selected. ---------- */
+
+@media (hover: hover) {
+  .piano-key--white:hover {
+    --piano-key-fill: color-mix(in srgb, var(--piano-hover-tint) 16%, var(--key-white));
+  }
+
+  .piano-key--black:hover {
+    --piano-key-fill: color-mix(in srgb, var(--piano-hover-tint) 28%, var(--key-black));
+  }
+}
+
+/* Played: quick on the way down; the slower base transition applies on the way back up. */
+.piano-key.is-lit {
+  transform: translateY(var(--piano-key-travel));
+  transition-duration: 60ms;
+}
+
+.piano-key--white.is-lit {
+  --piano-key-fill: var(--key-white-pressed);
+  --piano-key-shadow:
+    1px 0 0 var(--piano-key-fill),
+    inset -1px 0 0 color-mix(in srgb, var(--accent) 55%, var(--key-white-shade)),
+    inset 0 -1px 0 color-mix(in srgb, var(--accent) 55%, var(--key-white-shade)),
+    inset 0 10px 8px -8px color-mix(in srgb, var(--key-black-shade) 60%, transparent);
+}
+
+.piano-key--white.is-lit::after {
+  opacity: 1;
+  transition-duration: 60ms;
+}
+
+.piano-key--black.is-lit {
+  --piano-key-fill: var(--key-black-pressed);
+  --piano-key-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--accent-strong) 70%, transparent),
+    inset 0 -3px 0 color-mix(in srgb, var(--key-black-shade) 45%, transparent),
+    0 0 14px 1px color-mix(in srgb, var(--accent) 65%, transparent);
+  --piano-note-ink: var(--accent-ink);
+}
+
+/* Selected in edit mode: the key waiting for the user to press a computer key. */
+.piano-key.is-selected {
+  --piano-key-fill: var(--key-selected);
+  --piano-note-ink: var(--info-ink);
+}
+
+.piano-key--white.is-selected::after {
+  opacity: 0;
+}
+
+/*
+ * Keyboard focus (keys are reached with Tab in edit mode). Drawn inside the
+ * key because the box clips anything outside it; the thin dark inner line
+ * keeps the ring visible on white, black and selected keys alike.
+ */
+.piano-key:focus-visible {
+  outline: 3px solid var(--info);
+  outline-offset: -3px;
+  box-shadow:
+    var(--piano-key-shadow),
+    inset 0 0 0 4px var(--info-ink);
+}
+
+/* ---------- Labels ---------- */
+
+.piano-key__labels {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(2px, 0.3cqw, 4px);
+  padding: 0 1px var(--piano-labels-inset);
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* The computer key that plays this piano key, drawn as a small keycap. */
+.piano-key__cap {
+  min-width: min(1.75em, 100%);
+  max-width: 100%;
+  padding: 0.2em 0.25em;
+  overflow: hidden;
+  border-radius: min(var(--radius-sm), 0.4em);
+  background: var(--piano-cap-fill);
+  color: var(--piano-cap-ink);
+  font-family: var(--font-mono);
+  font-size: var(--piano-cap-size);
+  font-weight: 700;
+  /* A long label ("Num 1") wraps onto two lines instead of spilling out of a narrow key. */
+  overflow-wrap: anywhere;
+}
+
+.piano-key__cap--long {
+  font-size: calc(var(--piano-cap-size) * 0.7);
+}
+
+.piano-key--black .piano-key__cap {
+  min-width: min(1.6em, 100%);
+  padding: 0.15em 0.2em;
+}
+
+.piano-key__note {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--piano-note-ink);
+  font-size: var(--piano-note-size);
+  font-weight: 500;
+}
+
+/* C keys are the landmarks: they carry the octave number and stand out a little. */
+.piano-key__note--c {
+  color: var(--key-black);
+  font-weight: 700;
+}

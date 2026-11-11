@@ -1,0 +1,101 @@
+/*
+ * Shared design tokens and base styles. Every other stylesheet uses these
+ * variables instead of hard-coded colours, so the look stays consistent.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #101218;
+  --bg-glow: #1a1f2e;
+  --panel: #1a1d26;
+  --panel-raised: #232733;
+  --border: #303544;
+  --border-strong: #444b5e;
+
+  /* Text */
+  --text: #eceef4;
+  --text-muted: #9ba3b5;
+  --text-faint: #6b7385;
+
+  /* Accent: warm amber for "playing / on", cool blue for "selected / info" */
+  --accent: #f6b73c;
+  --accent-strong: #ffcf66;
+  --accent-ink: #2a1c00;
+  --info: #5cc8ff;
+  --info-ink: #00202e;
+  --danger: #ff6b6b;
+  --success: #5fd38d;
+
+  /* Piano keys */
+  --key-white: #f8f6f1;
+  --key-white-shade: #dcd8cf;
+  --key-white-pressed: #ffd98a;
+  --key-black: #1b1d24;
+  --key-black-shade: #050608;
+  --key-black-pressed: #c88a1a;
+  --key-selected: #5cc8ff;
+
+  /* Shape and type */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+
+  --focus-ring: 0 0 0 3px rgb(92 200 255 / 0.55);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--text);
+  background: radial-gradient(1200px 600px at 50% -10%, var(--bg-glow), var(--bg) 70%) fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/*
+ * The focus ring is a shadow. Windows contrast themes remove every shadow
+ * and give every outline a colour of their own, so the outline, which is
+ * invisible otherwise, is what shows the focus there.
+ */
+:focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
