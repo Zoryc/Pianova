@@ -34,16 +34,18 @@ The player is just another **input** on the note bus, with source `'playback'`. 
 
 | File | What it is |
 |---|---|
-| `src/songs/song.ts` (+ test) | `Song` types and small helpers. |
+| `src/songs/song.ts` (+ test) | `Song` types (already written: `SongNote`, `SongTrack`, `Song`, `SongSummary`, `ArrangeOptions`, `PlayableNote`, `Arrangement`) and small helpers. |
+| `src/songs/starterSongs.ts` (+ test) | The built-in public-domain tunes. |
 | `src/songs/midiImport.ts` (+ test) | Bytes of a MIDI file → `Song`. |
 | `src/songs/arrange.ts` (+ test) | `Song` + options → the notes to play. Pure. |
 | `src/songs/songLibrary.ts` (+ test) | The saved songs and their options, over browser storage. |
 | `src/songs/songPlayer.ts` (+ test) | Plays an arrangement onto the note bus. |
 | `src/app/pianoApp.ts` | Gains the `player` and `songLibrary` singletons. |
-| `src/ui/SongsPanel.tsx` | Import button and the song list. |
-| `src/ui/PlayerBar.tsx` | Play / pause / stop / progress / speed / song options. |
+| `src/ui/SongsPanel.tsx` | Import button and the song list (see `docs/INTERFACE.md` section 9). |
+| `src/ui/PlayerLine.tsx` | Play / pause / stop / progress / speed / song options. |
 | `src/ui/useSongs.ts` | Hooks and the glue: importing files, loading a song into the player, re-arranging when options change. |
-| `src/styles/songs.css` | Styles for the two components, using `theme.css` tokens only. |
+| `src/ui/DropOverlay.tsx` | "Drop the MIDI file to add it". |
+| `src/ui/songs.css` | Styles for these components, using `theme.css` tokens only. |
 
 Runtime dependency: **`midi-file`** (MIT, no dependencies of its own), used only for reading the bytes of the file into events. Everything musical (timing, notes, pedal, parts) is our own tested code.
 
@@ -190,17 +192,23 @@ export interface Arrangement {
 /** The parts `options` selects (percussion is never included, even when listed). */
 export function selectedTracks(song: Song, options: ArrangeOptions): readonly SongTrack[]
 
-/** The base octave (MIN_BASE_OCTAVE..MAX_BASE_OCTAVE) whose 37-key window holds the most of these notes; ties go to the octave nearest DEFAULT_BASE_OCTAVE, then the lower one. DEFAULT_BASE_OCTAVE for no notes. */
-export function bestBaseOctave(notes: readonly { midi: Midi }[]): number
+/**
+ * The base octave (MIN_BASE_OCTAVE..MAX_BASE_OCTAVE) at which the computer keys can play the most of these notes:
+ * a note counts when its slot at that base octave is in `playableSlots` (the slots that have a key; when omitted,
+ * every slot of the keyboard zone counts). Ties go to the octave nearest DEFAULT_BASE_OCTAVE, then the lower one.
+ * DEFAULT_BASE_OCTAVE for no notes.
+ */
+export function bestBaseOctave(notes: readonly { midi: Midi }[], playableSlots?: ReadonlySet<number>): number
 
-export function arrange(song: Song, options: ArrangeOptions, baseOctave: number): Arrangement
+/** `range` is the piano on screen (see `PianoRange` in src/core/layout.ts). */
+export function arrange(song: Song, options: ArrangeOptions, range: PianoRange): Arrangement
 ```
 
 Steps of `arrange`, in order:
 
 1. Merge the notes of the selected parts.
 2. `melodyOnly`: notes that start within 30 ms of each other form a chord, of which only the highest is kept; then each kept note is cut short where the next kept note starts, so one note sounds at a time.
-3. `fitToPiano`: a note outside `slotToMidi(0, baseOctave) .. slotToMidi(SLOT_COUNT - 1, baseOctave)` is moved by whole octaves to the nearest position inside it.
+3. `fitToPiano`: a note outside `range.first .. range.last` is moved by whole octaves to the nearest position inside it.
 4. Same-pitch clean-up (needed because the bus ignores a second press of a note that is already held by the same source): of several notes of one pitch starting within 1 ms keep the longest; a note still sounding when the same pitch starts again is cut to end at that start.
 5. Drop notes shorter than 1 ms after cutting; sort; compute `duration` and `offPianoCount`.
 

@@ -11,7 +11,7 @@ The two words that decide every choice here are **elegant** and **fun**. Elegant
 Rules:
 
 - **The stage fills the window.** No page scrolling, ever. Black background (`--stage-bg`), no panels around the piano.
-- **One accent colour** for all light (bars, sparks, lit keys, the line above the keys). The player chooses it; the default is red.
+- **One colour of light** at a time (bars, sparks, lit keys, the line above the keys). The player chooses it; the default is red. The one exception is the Rainbow choice, where each note has its own colour.
 - **Calm chrome.** The menu bar and panels are dark, translucent and quiet; they never compete with the light.
 - **Simple first, advanced on demand** still holds: everything works with no setup, and every option lives in one Settings panel, organized in tabs.
 - **Desktop only.** The app is for a PC with a keyboard and a mouse. There is no phone or tablet support: no small-screen layouts, no touch-specific behaviour, nothing designed or tested for touch. (Windows narrower than about 800 px only need to stay usable, not pretty.)
@@ -71,10 +71,13 @@ export interface PianoRange {
  */
 export function pianoRange(size: PianoSize, baseOctave: number): PianoRange
 export function isInRange(midi: Midi, range: PianoRange): boolean
+export function isPianoSizeSetting(value: unknown): value is PianoSizeSetting
 ```
 
+These exist already (written and tested): `src/core/layout.ts` has the piano sizes and ranges above, and `src/core/pianoGeometry.ts` has the key positions below. The old slot-based `src/core/keyGeometry.ts` is deleted once nothing uses it.
+
 ```ts
-// src/core/keyGeometry.ts (replaces the slot-based version)
+// src/core/pianoGeometry.ts
 export interface KeyRect {
   midi: Midi
   black: boolean
@@ -87,7 +90,7 @@ export const BLACK_KEY_WIDTH_RATIO = 0.62
 /** One entry per note of the range, lowest first. Same array for the same range (cached). */
 export function keyRects(range: PianoRange): readonly KeyRect[]
 /** Null when the note is outside the range. */
-export function keyRect(midi: Midi, range: PianoRange): KeyRect | null
+export function keyRectOf(midi: Midi, range: PianoRange): KeyRect | null
 export function whiteKeyCount(range: PianoRange): number
 ```
 
@@ -129,7 +132,7 @@ export type KeyStyle = 'classic' | 'midnight' | 'glass'
 
 Saved settings from before this change load fine: missing fields take their defaults. `customColour` is sanitized with `isHexColour` (anything else falls back to the default).
 
-### 4a. Colour (`src/core/colour.ts`, pure, unit-tested)
+### 4.1 Colour (`src/core/colour.ts`, pure, unit-tested)
 
 All light on screen comes from one base colour, from which a small palette is derived, so that a colour chosen by the player works as well as the built-in ones.
 
@@ -156,7 +159,7 @@ export function paletteForNote(midi: Midi, accent: AccentChoice, customColour: s
 
 The app root carries the chrome palette as CSS variables set from TypeScript (`--light`, `--light-bright`, `--light-deep`) and the glow strength as `--glow` (0..1). CSS uses only those variables; the canvas uses the palettes directly. A lit piano key gets its own `--key-light` and `--key-light-bright` inline, from `paletteForNote`, so rainbow works on the keys too.
 
-### 4c. Themes (`src/state/themes.ts`)
+### 4.2 Themes (`src/state/themes.ts`)
 
 A theme is a named set of look settings applied with one click. Simple first: the player picks a theme; everything a theme sets can still be fine-tuned afterwards.
 
@@ -186,7 +189,7 @@ export function matchingTheme(settings: Settings): ThemeId | null
 
 The defaults of the settings are the Ember theme.
 
-## 4b. Key presets and keyboard types (additions to `src/input`)
+### 4.3 Key presets and keyboard types (additions to `src/input`)
 
 ```ts
 // src/input/keymap.ts
@@ -235,11 +238,66 @@ Priority: an explicit keyboard type (not 'auto') wins over everything for the ke
 | `src/ui/useAutoHide.ts` | The hide-when-the-mouse-is-still logic (pure core + hook). |
 | `src/ui/SettingsPanel.tsx` + `src/ui/settings/*.tsx` | The Settings panel and its five tabs (`SoundTab`, `KeysTab`, `PianoTab`, `LookTab`, `AboutTab`). |
 | `src/ui/FloatingPanel.tsx` | The panel that floats over the sky, used by Settings and Songs. |
-| `src/ui/SongsPanel.tsx`, `src/ui/PlayerLine.tsx` | Songs drawer and the player line (section 9). |
+| `src/ui/SongsPanel.tsx`, `src/ui/PlayerLine.tsx`, `src/ui/useSongs.ts`, `src/ui/DropOverlay.tsx` | The Songs panel, the player line and their glue (section 9). |
 | `src/ui/controls.tsx` | Shared small controls (kept, restyled). |
 | `src/styles/theme.css`, `src/styles/app.css` | Tokens and chrome styles. |
 
 Removed: `Toolbar.tsx`, `AdvancedPanel.tsx`, `KeyEditor.tsx`, `NoteTrails.tsx`, `noteTrailsModel.ts`, `noteTrails.css`, `NowPlaying.tsx` (its content moves into the stage), and the page footer.
+
+### 5.0 Contracts between the components
+
+These are built by different people at the same time, so the seams are fixed here.
+
+```ts
+// src/ui/FloatingPanel.tsx
+export interface FloatingPanelProps {
+  /** The element id, for aria-controls on the button that opens the panel. */
+  id: string
+  title: string
+  onClose(): void
+  /** Shown in the heading row after the title (the Settings tabs go here). */
+  headerExtra?: ReactNode
+  children: ReactNode
+}
+/**
+ * Mounted while open, unmounted when closed (the parent decides). On mount, focus moves to the
+ * panel's first control; on unmount, back to whatever had it before. It draws the heading, the
+ * close button (which calls onClose) and a scrolling body. It does not listen for Escape and does
+ * not watch clicks outside itself: the app shell does both.
+ */
+export function FloatingPanel(props: FloatingPanelProps): JSX.Element
+
+// src/ui/SettingsPanel.tsx
+export interface SettingsPanelProps {
+  id: string
+  settings: Settings
+  /** What `useKeyEditor` returns; the Keys tab shows its state and calls its actions. */
+  keyEditor: KeyEditor
+  layoutMap: LayoutMap | null
+  onClose(): void
+}
+/** Calls keyEditor.open() when the Keys tab becomes the active tab, and keyEditor.close() when it stops being active or the panel goes away. */
+export function SettingsPanel(props: SettingsPanelProps): JSX.Element
+
+// src/ui/SongsPanel.tsx
+export interface SongsPanelProps {
+  id: string
+  onClose(): void
+}
+export function SongsPanel(props: SongsPanelProps): JSX.Element
+
+// src/ui/PlayerLine.tsx: renders nothing when no song is loaded
+export function PlayerLine(): JSX.Element | null
+
+// src/app/songsApp.ts: the song singletons (the bus comes from src/app/pianoApp.ts)
+export const player: SongPlayer
+export { songLibrary } from '../songs/songLibrary'
+```
+
+- **Shared styles.** The small controls in `src/ui/controls.tsx` (`Field`, `PercentSlider`, `Switch`, `Segmented`, `Stepper`, `ConfirmButton`) keep their props and class names; their look, and the look of `.button`, `.button--primary`, `.button--quiet`, `.select`, `.keycap` and the floating panel, is defined once in `src/ui/chrome.css`. Panels and tabs use those components and classes and add only layout of their own in their own stylesheet. Nobody hard-codes a colour: tokens from `theme.css` only.
+- **Escape** is handled in one place, the app shell's keyboard intercept, in this order: a piano key selected for customizing is deselected; otherwise an open panel is closed. A text field handles its own Escape (for example cancelling a rename) and the app leaves it alone.
+- **A click on the empty sky** closes an open panel; the stage reports it to the app shell.
+- **Edit mode** (selecting piano keys) is on exactly while the Settings panel is open on the Keys tab.
 
 ### 5.1 Piano
 
@@ -471,7 +529,7 @@ Everything in `docs/ARCHITECTURE.md` section 7, plus:
 - No scrollbars at any window size from 800×500 up.
 - Readable and usable at 1366×633 with the full piano: every keycap legible.
 - The loop is idle (no animation frames) when nothing moves.
-- Works with the menu hidden: the player is never trapped (mouse movement, Tab and touch all bring it back).
+- Works with the menu hidden: the player is never trapped (mouse movement and Tab both bring it back).
 
 ## 9. Songs on this screen
 
@@ -483,4 +541,4 @@ Replaces section 5 of `docs/SONGS.md`. The modules of its section 4 are unchange
 - While a song is loaded a 2 px progress line in the accent colour runs along the very top edge of the window, always visible, even when the menu is hidden.
 - **Falling notes**: the stage's sky gets a `FallingSource` built from the player and the current arrangement.
 - **Starter songs**: the Songs panel lists the built-in starter songs (`docs/SONGS.md` 4.6) in their own group, "Starter songs", under the player's own songs ("Your songs"). They have a Play button but no Rename or Delete. With no imported songs the "Your songs" group shows the empty-list sentence: "No songs of your own yet. Import a MIDI file to add one."
-- **Loading a song** no longer needs to move the piano when the piano size is 88 (everything is visible). For smaller sizes it moves `baseOctave` to `bestBaseOctave` as specified. `offPianoCount` and "Fit to the piano" are computed against the piano on screen (`pianoRange`), not the keyboard zone: `arrange(song, options, range)` takes a `PianoRange` instead of a base octave, and `bestBaseOctave` stays as it is.
+- **Loading a song** moves the keyboard zone (`settings.baseOctave`) to where the player's computer keys can play the most notes of the song: `bestBaseOctave(notes, slotsWithAKey)` (see `docs/SONGS.md` 4.3). With the starter songs and the default keys this leaves the zone where it is. `offPianoCount` and "Fit to the piano" are computed against the piano on screen (a `PianoRange`), not the keyboard zone.

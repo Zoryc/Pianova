@@ -42,3 +42,23 @@ export type NoteNaming = 'letters' | 'solfege'
 
 /** How long a note keeps ringing after its key is released. */
 export type ReleaseLength = 'short' | 'normal' | 'long'
+
+/** A named colour of light. */
+export type AccentName = 'red' | 'amber' | 'blue' | 'green' | 'purple' | 'white'
+
+/** A named colour, a colour of the player's own, or a different colour for every note. */
+export type AccentChoice = AccentName | 'custom' | 'rainbow'
+
+/** What is drawn behind the notes. */
+export type BackgroundName = 'black' | 'night' | 'stars' | 'aurora'
+
+/** Bars of light filled with colour, or drawn as glowing outlines. */
+export type BarStyle = 'solid' | 'neon'
+
+export type SparksLevel = 'off' | 'some' | 'lots'
+
+/** Which letters are printed on the player's keyboard ('auto' = ask the browser). */
+export type KeyboardType = 'auto' | 'qwerty' | 'azerty' | 'qwertz'
+
+/** How the piano keys are drawn. */
+export type KeyStyle = 'classic' | 'midnight' | 'glass'

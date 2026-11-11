@@ -2,6 +2,8 @@
 
 This is the source of truth for how the app is put together. `ROADMAP.md` (repo root) lists the phases.
 
+> **The screen has been redesigned.** `docs/INTERFACE.md` replaces sections 5.6, 5.7, 5.8 and 6 of this document (the piano component, the app shell, the light trails and the visual direction) and adds to sections 5.1 to 5.3. `docs/SONGS.md` describes songs. Where they disagree with this document, they win.
+
 ## 1. Who it is for and what Phase 1 must do
 
 The app is for casual players, not programmers, who play with a **computer keyboard** in a desktop browser (Chrome or Edge). The guiding goal: something simple that plays easily, with no Shift and no double key presses.
