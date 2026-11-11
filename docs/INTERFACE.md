@@ -299,6 +299,37 @@ export { songLibrary } from '../songs/songLibrary'
 - **A click on the empty sky** closes an open panel; the stage reports it to the app shell.
 - **Edit mode** (selecting piano keys) is on exactly while the Settings panel is open on the Keys tab.
 
+The stage, as built (`src/ui/Stage.tsx`):
+
+```ts
+export interface StageProps {
+  /** The stage is the page of the Free Play tab: its own id, and the id of that tab. */
+  id: string
+  labelledBy: string
+  bus: NoteBus
+  settings: Settings
+  /** slot -> label of the computer key that plays it (the keycaps on the piano). */
+  keyLabels: ReadonlyMap<number, string>
+  /** Note -> label, for the letters on falling notes. Empty when that setting is off. */
+  hints: ReadonlyMap<Midi, string>
+  falling: FallingSource | null
+  audioStatus: AudioStatus
+  /** Whether to say how to play, until the first note (off behind the start overlay and in edit mode). */
+  showHint: boolean
+  editMode: boolean
+  selectedSlot: number | null
+  onSelectSlot(slot: number): void
+  onNoteDown(midi: Midi): void
+  onNoteUp(midi: Midi): void
+  /** The piano on screen shows other notes than before (also called for the first piano). */
+  onRangeChange(range: PianoRange): void
+  onSkyClick(): void
+}
+```
+
+- The stage follows the bus itself for the lit keys and the note names, so the app shell (the menu, the panels) is not drawn again for every note.
+- **How the window is shared** (`src/styles/app.css`, `src/ui/stage.css`): the screen is a grid of three rows: the menu, what is left, the piano. The stage lies on all three (`subgrid`): the piano on the last row, the sky on the rows above it (both when the menu hides by itself, only the middle one when it is always shown). An open panel is on the middle row, so it is under the menu and can never cover the piano, with no measuring in code.
+
 ### 5.1 Piano
 
 ```ts
@@ -326,6 +357,7 @@ Everything the current piano does stays (pointer handling with capture, glissand
 
 - It draws `keyRects(range)`. Notes are identified by midi; the slot of a key is `midiToSlot(midi, baseOctave)` (null outside the keyboard zone).
 - **Look**: like a real piano seen from above. White keys ivory with a very soft vertical gradient and a thin dark gap between them, slightly rounded bottom corners; black keys near-black with a faint highlight along the top and left edges, about 62% of the key length. A thin strip of dark red felt (2–3 px) is fine but optional. No panel, border or rounded box around the piano.
+- **The light of the line on the keys**: the light line above the piano shines on the far end of the keys: a wash of the accent that lies over the keys and fades out down them (about a third of their length at most). It follows `--glow`, down to nothing at 0. Behind see-through keys (Glass) the same light carries on as a faint haze (`--piano-bed`, set by the key style).
 - **Key styles** (the `keyStyle` setting, a `data-key-style` attribute on the piano; each style is a small block of CSS variables in `piano.css`, so the component has no per-style code):
   - *Classic*: the ivory and ebony described above.
   - *Midnight*: white keys are a very dark blue-grey with a faint lighter edge, black keys are pure black with a thin lighter outline, so the keyboard almost disappears until it is played; labels are light. Lit keys look the same as in Classic, which makes them stand out strongly.
@@ -388,11 +420,11 @@ The background reacts to the music, gently: while notes sound, it is drawn sligh
 
 **Colours**: each bar, spark and bloom uses `paletteForNote(midi, accent, customColour)`, so with Rainbow every note has its own colour; guides and the light line use the chrome palette.
 
-**The look of a bar**: a rounded rectangle slightly narrower than its key, filled with a vertical gradient (`--light-bright` near the line to `--light` to `--light-deep` far from it) and a soft glow of the same colour around it. Bars for black keys are narrower and a little darker, as the keys are. Use additive blending so overlapping light adds up, as in the reference.
+**The look of a bar**: a rounded rectangle slightly narrower than its key, filled with a vertical gradient (`--light-bright` near the line to `--light` to `--light-deep` far from it) and a soft glow of the same colour around it. A solid bar is hottest down its middle, like a tube of light: its `bright` tint is added there and fades to nothing at its two edges (stronger with more glow, none at glow 0). Bars for black keys are narrower and a little darker, as the keys are. Use additive blending so overlapping light adds up, as in the reference.
 
 **Sparks**: while a note is sounding (held in free play; landing in a song), small bright particles are born on the light line at that key, fly upward with a little sideways drift, slow down and fade within about a second. Soft, like embers, never fireworks. Hard budget: at most 600 live sparks and a birth rate per sounding note that keeps 10 simultaneous notes inside that budget. `sparks`: *Some* is the calm default, *Lots* is about three times the birth rate (same budget), *Off* is none. No sparks either when the system asks for reduced motion.
 
-**The impact glow**: where a sounding note meets the line, a soft bright bloom (radial gradient) of about two key widths. The more notes sound at once, the brighter the whole light line glows (gently, capped), so chords feel bigger than single notes. A new note gives its bloom a brief flash that settles within 150 ms: the feeling of striking something.
+**The impact glow**: where a sounding note meets the line, a soft bright bloom (radial gradient) of about two key widths, with a thin bright streak across it that lies along the line. The more notes sound at once, the brighter the whole light line glows (gently, capped), so chords feel bigger than single notes. A new note gives its bloom a brief flash that settles within 150 ms: the feeling of striking something.
 
 **Guides**: very faint vertical lines at each C (the octave boundaries) from the top of the sky to the line, as in the reference.
 
@@ -502,6 +534,7 @@ Everything about the computer keys is in this one tab, top to bottom:
 - **A first-time hint**: until the first note is played, the sky shows, centred and quiet: "Press the keys shown on the piano, or click it". It fades out at the first note and does not come back.
 - **Sound status**: when it is not `ready`, a small quiet line at the bottom-left of the sky (above the light line): the same three messages as before. `role="status"`.
 - **Transposed badge**: next to the sound status line when transpose is not 0.
+- **Words over the light**: the note names, the sound status and the badge stand where the light rises and lands. Every letter there has a dark edge around it (invisible against the dark sky), and the badge is smoked glass, so they stay readable when a bar of light passes behind them. The first-time hint steps aside while a panel is open, instead of showing through the panel.
 
 ## 6. Tokens (`src/styles/theme.css`)
 
@@ -511,7 +544,7 @@ Keep the existing tokens that are still used and add:
 --stage-bg: #000;
 --panel-glass: rgb(16 17 22 / 0.86);
 --bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0));
---key-ivory, --key-ivory-shade, --key-ebony, --key-ebony-edge
+--key-ivory, --key-ivory-shine, --key-ivory-shade, --key-ebony, --key-ebony-edge
 --light, --light-bright, --light-deep     /* set on the app root from TypeScript (section 4a); the values in the stylesheet are the Ember defaults */
 --glow: 0.6;                              /* set on the app root from TypeScript */
 ```

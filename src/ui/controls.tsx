@@ -1,12 +1,14 @@
 /**
- * The small building blocks of the toolbar and the panels. They are styled in
- * src/styles/app.css.
+ * The small building blocks of the top bar and the panels. Their look is in
+ * src/ui/chrome.css, which also styles the plain classes used next to them
+ * (.button, .select, .keycap).
  *
  * On/off and choice controls are buttons rather than checkboxes and radio
  * inputs, because Space belongs to the piano (it is the sustain key).
  */
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { JSX, MouseEvent, ReactNode } from 'react'
+import './chrome.css'
 import { formatPercent, toPercent } from './format'
 
 interface FieldProps {

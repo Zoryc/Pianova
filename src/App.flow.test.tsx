@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 /**
  * The whole app in a simulated browser, driven with real key and mouse
- * events: from a computer key to a note on the bus and on the screen, and the
- * "Customize keys" flow. The sound engine is replaced by a silent stand-in.
+ * events: from a computer key to a note on the bus and on the screen, and
+ * choosing your own keys on the Keys tab of Settings. The sound engine is
+ * replaced by a silent stand-in.
  *
  * Keys are sent by physical position: '[KeyA>]' holds the A key down,
  * '[/KeyA]' lets it go and '[KeyA]' taps it.
  */
 import { StrictMode } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -51,6 +52,11 @@ const audio = vi.hoisted(() => {
       calls.length = 0
       status = 'idle'
     },
+    /** The sound stops working, as when the browser refuses to start it. */
+    fail(): void {
+      status = 'error'
+      for (const listener of [...listeners]) listener()
+    },
   }
 })
 
@@ -62,22 +68,27 @@ vi.mock('./audio/audioEngine', async (importOriginal) => {
 import { App } from './App'
 import { bus } from './app/pianoApp'
 import type { NoteEvent } from './core/types'
-import { DEFAULT_BINDINGS } from './input/keymap'
+import { DEFAULT_BINDINGS, KEY_PRESETS } from './input/keymap'
+import type { Bindings, KeyPresetId } from './input/keymap'
 import { DEFAULT_SETTINGS, STORAGE_KEY, createSettingsStore, settingsStore } from './state/settings'
 import { KEYS_RESET_MESSAGE, UNUSABLE_KEY_MESSAGE } from './ui/keyEditorModel'
+import { closeSong } from './ui/useSongs'
 
 type User = ReturnType<typeof userEvent.setup>
 
 const START_TEXT = 'Click or press any key to start'
-const EDITOR_INSTRUCTION = 'Click a piano key, then press the key you want to use for it.'
+const EDITOR_INSTRUCTION = 'Click a piano key below, then press the key you want to use for it.'
+
+const SETTINGS_TABS = ['Sound', 'Keys', 'Piano', 'Look', 'About'] as const
+type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 /** Every note the bus has announced since the test began, e.g. ['on:60', 'off:60']. */
 let notes: string[] = []
 let stopRecording: () => void = () => {}
 
 beforeAll(() => {
-  // jsdom has no canvas and no pointer capture. The light trails then draw
-  // nothing, and the piano falls back on its own safety nets.
+  // jsdom has no canvas and no pointer capture. The sky then draws nothing,
+  // and the piano falls back on its own safety nets.
   HTMLCanvasElement.prototype.getContext = (() => null) as HTMLCanvasElement['getContext']
   const element = Element.prototype as Partial<Element>
   element.setPointerCapture ??= () => {}
@@ -85,10 +96,21 @@ beforeAll(() => {
   element.hasPointerCapture ??= () => false
 })
 
+/**
+ * Puts every setting back to how the app starts. The tests tell "no key was
+ * changed" by the keys still being the very object the app starts with. The
+ * store keeps its own copy of keys that only read the same as that object
+ * (after "Reset to default keys", say), so the keys are first made different.
+ */
+function startFromDefaultSettings(): void {
+  settingsStore.set({ bindings: { KeyA: 0 } })
+  settingsStore.reset()
+}
+
 beforeEach(() => {
   audio.reset()
   window.localStorage.clear()
-  settingsStore.reset()
+  startFromDefaultSettings()
   notes = []
   stopRecording = bus.subscribe((event: NoteEvent) => {
     notes.push(`${event.type}:${event.midi}`)
@@ -98,8 +120,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   stopRecording()
+  // No test here plays a song. One that started by mistake must not play on into the next test.
+  closeSong()
   bus.allOff()
-  settingsStore.reset()
+  startFromDefaultSettings()
   window.localStorage.clear()
   vi.restoreAllMocks()
 })
@@ -127,45 +151,123 @@ function held(): number[] {
   return [...bus.getActiveNotes()].sort((a, b) => a - b)
 }
 
+function piano(): HTMLElement {
+  return screen.getByRole('group', { name: 'Piano' })
+}
+
 /** A key of the on-screen piano, by what a screen reader calls it ("C4, key A"). */
 function pianoKey(name: string): HTMLElement {
   return screen.getByRole('button', { name })
+}
+
+/** Whether a piano key is drawn as being played. */
+function isLit(key: HTMLElement): boolean {
+  return key.classList.contains('is-lit')
+}
+
+/** The piano keys drawn as being played, by what a screen reader calls them. */
+function litKeys(): string[] {
+  return [...piano().querySelectorAll('.piano-key.is-lit')].map(
+    (key) => key.getAttribute('aria-label') ?? '',
+  )
 }
 
 function isSustainOn(): boolean {
   return settingsStore.get().sustain
 }
 
-/** The note names written on the "now playing" line. */
+/** The note names written above the piano. */
 function nowPlaying(): string[] {
   const list = screen.queryByRole('list', { name: 'Notes being played' })
   return list ? [...list.querySelectorAll('li')].map((item) => item.textContent ?? '') : []
 }
 
-function editorPanel(): HTMLElement | null {
-  return screen.queryByRole('region', { name: 'Customize keys' })
+/** The top bar, with everything that hides and shows with it. */
+function menu(): HTMLElement {
+  const element = document.querySelector<HTMLElement>('.menu')
+  if (element === null) throw new Error('The menu is not on the page.')
+  return element
 }
 
-/** The first line of the "Customize keys" panel: the instruction, or "Press a key for C4…". */
+/** The sky above the piano, where a click lands on nothing. */
+function emptySky(): HTMLElement {
+  const element = document.querySelector<HTMLElement>('.stage__sky')
+  if (element === null) throw new Error('The sky is not on the page.')
+  return element
+}
+
+function settingsButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'Settings' })
+}
+
+function settingsPanel(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Settings' })
+}
+
+/**
+ * Opens Settings if it is closed, and shows one of its tabs. (Settings opens
+ * on the tab it was last on, also when that was in the test before.)
+ */
+async function openSettingsOn(user: User, tab: SettingsTab): Promise<HTMLElement> {
+  if (settingsPanel() === null) await user.click(settingsButton())
+  const panel = screen.getByRole('dialog', { name: 'Settings' })
+  await user.click(within(panel).getByRole('tab', { name: tab }))
+  return panel
+}
+
+async function closeSettings(user: User): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'Close Settings' }))
+  expect(settingsPanel()).toBeNull()
+}
+
+/** Makes `tab` the tab Settings opens on the next time. */
+async function leaveSettingsOn(user: User, tab: SettingsTab): Promise<void> {
+  await openSettingsOn(user, tab)
+  await closeSettings(user)
+}
+
+/**
+ * True while the computer keys are being chosen: Settings is open on its Keys
+ * tab, and a click on a piano key selects it instead of playing it.
+ */
+function isChoosingKeys(): boolean {
+  return piano().classList.contains('piano--editing')
+}
+
+/** The "Change one key" part of the Keys tab, or null when that tab is not showing. */
+function keyChanger(): HTMLElement | null {
+  return screen.queryByRole('region', { name: 'Change one key' })
+}
+
+/** Its first line: the instruction, or "Press a key for C4…". */
 function editorLead(): string {
-  return editorPanel()?.querySelector('.key-editor__lead')?.textContent ?? ''
+  return keyChanger()?.querySelector('.change-key__lead')?.textContent ?? ''
 }
 
-/** What the "Customize keys" panel says the last action did. */
+/** What it says the last action did. */
 function editorMessage(): string {
-  return editorPanel()?.querySelector('[role="status"]')?.textContent ?? ''
+  return keyChanger()?.querySelector('[role="status"]')?.textContent ?? ''
 }
 
+/** Opens Settings on its Keys tab: from then on a click on a piano key selects it. */
 async function openEditor(user: User): Promise<void> {
-  await user.click(screen.getByRole('button', { name: 'Customize keys' }))
+  await openSettingsOn(user, 'Keys')
+  expect(isChoosingKeys()).toBe(true)
   expect(editorLead()).toBe(EDITOR_INSTRUCTION)
 }
 
-/** Opens "Customize keys" and clicks a piano key, which then waits for a computer key. */
+/** Shows the Keys tab if needed and clicks a piano key, which then waits for a computer key. */
 async function selectPianoKey(user: User, name: string, note: string): Promise<void> {
-  if (editorPanel() === null) await openEditor(user)
+  if (!isChoosingKeys()) await openEditor(user)
   await user.click(pianoKey(name))
   expect(editorLead()).toBe(`Press a key for ${note}…`)
+}
+
+/** The keys of one of the ready-made layouts of the Keys tab. */
+function layoutKeys(id: KeyPresetId): Bindings {
+  const layout = KEY_PRESETS.find((preset) => preset.id === id)
+  if (layout === undefined) throw new Error(`There is no "${id}" layout.`)
+  return layout.bindings
 }
 
 function withoutKey(bindings: Readonly<Record<string, number>>, code: string): Record<string, number> {
@@ -180,6 +282,37 @@ function repeatKey(code: string, key = ''): boolean {
 function setPageVisibility(state: 'visible' | 'hidden'): void {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
   fireEvent(document, new Event('visibilitychange'))
+}
+
+/** Every button, slider and link in these parts of the page, in the order of the page. */
+function controlsIn(...places: readonly (Element | null)[]): HTMLElement[] {
+  return places.flatMap((place) =>
+    place === null
+      ? []
+      : [...place.querySelectorAll<HTMLElement>('button, input[type="range"], a[href]')].filter(
+          (control) => !control.matches(':disabled'),
+        ),
+  )
+}
+
+/** What a control is called, for the message of a check that fails. */
+function nameOf(control: HTMLElement): string {
+  const name = control.getAttribute('aria-label') ?? control.textContent ?? ''
+  return `${control.tagName.toLowerCase()} "${name.trim()}"`
+}
+
+/** True when no button, slider, link or list is left holding the keyboard focus. */
+function noControlHasFocus(): boolean {
+  const focused = document.activeElement
+  return focused === null || !focused.matches('button, input, select, a')
+}
+
+/** Presses Tab until `target()` has the keyboard focus, as someone without a mouse does. */
+async function tabTo(user: User, target: () => HTMLElement): Promise<void> {
+  for (let presses = 0; presses < 80 && document.activeElement !== target(); presses += 1) {
+    await user.tab()
+  }
+  expect(document.activeElement).toBe(target())
 }
 
 describe('the start overlay', () => {
@@ -234,9 +367,38 @@ describe('the start overlay', () => {
       await user.keyboard(`[${code}]`)
 
       expect(screen.queryByText(START_TEXT)).toBeNull()
-      expect(editorPanel()).toBeNull()
+      // No panel opened, nothing took the keyboard focus, and the piano is there to be played.
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(document.activeElement).toBe(document.body)
+      expect(isChoosingKeys()).toBe(false)
       expect(notes).toEqual([])
       expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+    },
+  )
+
+  /*
+   * A browser does not count every key as the player's go-ahead for sound:
+   * Escape and Shift are not. Asking for sound then would fail, so the app
+   * waits for the next key press, which also plays its note.
+   */
+  it.each(['Escape', 'ShiftLeft'])(
+    'starts the sound at the next key when the browser does not count %s',
+    async (code) => {
+      const activation = { hasBeenActive: false }
+      Object.defineProperty(navigator, 'userActivation', { configurable: true, value: activation })
+      try {
+        const user = drawApp()
+
+        await user.keyboard(`[${code}]`)
+        expect(screen.queryByText(START_TEXT)).toBeNull()
+        expect(audio.calls).toEqual([])
+
+        activation.hasBeenActive = true
+        await user.keyboard('[KeyA>]')
+        expect(audio.calls).toEqual(['start', 'on:60'])
+      } finally {
+        Reflect.deleteProperty(navigator, 'userActivation')
+      }
     },
   )
 
@@ -386,6 +548,26 @@ describe('from a computer key to the screen', () => {
     expect(notes).toEqual(['on:77'])
   })
 
+  // The stage says "Click anywhere to try again". A key press is as good as a
+  // click: it starts the sound again, and its note is played.
+  it('tries to start the sound again at the next key press or click after it failed', async () => {
+    const user = await startApp()
+    const status = (): string => document.querySelector('.stage__status')?.textContent ?? ''
+
+    act(() => audio.fail())
+    expect(status()).toBe('Sound could not start. Click anywhere to try again.')
+    await user.keyboard('[KeyA>]')
+    expect(audio.calls).toEqual(['start', 'on:60'])
+    expect(status()).toBe('')
+    await user.keyboard('[/KeyA]')
+
+    act(() => audio.fail())
+    audio.calls.length = 0
+    await user.click(emptySky())
+    expect(audio.calls).toEqual(['start'])
+    expect(status()).toBe('')
+  })
+
   /*
    * The saved keys are an object, and every object answers to names such as
    * "constructor". A key press that carries one of them as its code (only a
@@ -413,6 +595,7 @@ describe('no stuck notes', () => {
     fireEvent.blur(window)
     expect(notes).toEqual(['on:60', 'on:62', 'off:60', 'off:62'])
     expect(nowPlaying()).toEqual([])
+    expect(litKeys()).toEqual([])
 
     // Back in the window with the keys still down.
     repeatKey('KeyA', 'a')
@@ -448,11 +631,66 @@ describe('no stuck notes', () => {
     expect(notes).toEqual(['on:60', 'on:64', 'off:60', 'off:64'])
   })
 
-  it('releases held keys when the piano moves higher, and plays the new note next time', async () => {
+  // Whoever lets go of every note at once (the bus's `allOff`): the sound,
+  // the lit keys and the names above the piano all follow.
+  it('leaves nothing lit or sounding when every note is let go at once', async () => {
     const user = await startApp()
+    await user.keyboard('[KeyA>][KeyD>]')
+    expect(litKeys()).toEqual(['C4, key A', 'E4, key D'])
+
+    act(() => bus.allOff())
+
+    expect(audio.calls).toEqual(['on:60', 'on:64', 'off:60', 'off:64'])
+    expect(litKeys()).toEqual([])
+    expect(pianoKey('C4, key A').getAttribute('aria-pressed')).toBe('false')
+    expect(pianoKey('E4, key D').getAttribute('aria-pressed')).toBe('false')
+    expect(nowPlaying()).toEqual([])
+
+    // The keys are still down: their repeats and their release do nothing more.
+    repeatKey('KeyA', 'a')
+    await user.keyboard('[/KeyA][/KeyD]')
+    expect(audio.calls).toHaveLength(4)
+
     await user.keyboard('[KeyA>]')
+    expect(held()).toEqual([60])
+    expect(litKeys()).toEqual(['C4, key A'])
+  })
+
+  /*
+   * ARCHITECTURE.md 5.5: while the Windows or Command key is down, some
+   * systems never tell the page that another key came up. So when it comes
+   * up itself, every note the keyboard holds is let go.
+   */
+  it('lets go of every held note when the Windows or Command key comes up', async () => {
+    const user = await startApp()
+
+    // Going down, it cuts nothing.
+    await user.keyboard('[KeyA>][KeyS>]{Meta>}')
+    expect(held()).toEqual([60, 62])
+
+    await user.keyboard('{/Meta}')
+    expect(notes).toEqual(['on:60', 'on:62', 'off:60', 'off:62'])
+    expect(litKeys()).toEqual([])
+    expect(nowPlaying()).toEqual([])
+
+    // A and S were down all along: letting go of them changes nothing, and they play again.
+    repeatKey('KeyA', 'a')
+    await user.keyboard('[/KeyA][/KeyS]')
+    expect(notes).toHaveLength(4)
+    await user.keyboard('[KeyA>]')
+    expect(notes).toEqual(['on:60', 'on:62', 'off:60', 'off:62', 'on:60'])
+  })
+
+  // "Lower" and "Higher" are on the Keys tab, where the keyboard still plays
+  // as long as no piano key is waiting for a computer key.
+  it('releases held keys when the computer keys move higher, and plays the new note next time', async () => {
+    const user = await startApp()
+    await openSettingsOn(user, 'Keys')
+    await user.keyboard('[KeyA>]')
+    expect(notes).toEqual(['on:60'])
 
     await user.click(screen.getByRole('button', { name: /Higher/ }))
+    expect(settingsStore.get().baseOctave).toBe(4)
     expect(notes).toEqual(['on:60', 'off:60'])
     expect(nowPlaying()).toEqual([])
 
@@ -462,19 +700,30 @@ describe('no stuck notes', () => {
 
     await user.keyboard('[KeyA>]')
     expect(notes).toEqual(['on:60', 'off:60', 'on:72'])
+    // On this tab "pressed" says which piano key is selected, so the light itself is looked at.
+    expect(isLit(pianoKey('C5, key A'))).toBe(true)
+    expect(nowPlaying()).toEqual(['C5'])
+    await user.keyboard('[/KeyA]')
+    expect(held()).toEqual([])
+    expect(isLit(pianoKey('C5, key A'))).toBe(false)
+
+    // Back to playing, where "pressed" says which keys sound.
+    await closeSettings(user)
+    await user.keyboard('[KeyA>]')
     expect(pianoKey('C5, key A').getAttribute('aria-pressed')).toBe('true')
     await user.keyboard('[/KeyA]')
     expect(held()).toEqual([])
   })
 
   /*
-   * Spec 5.5: "on key up release that note", and a key whose note was
-   * released by someone else no longer counts as holding it. K is held (C5)
-   * while the piano is moved higher, which silences it. A now plays C5:
-   * tapping A must start and stop it, whatever K is doing.
+   * ARCHITECTURE.md 5.5: "on key up release that note", and a key whose note
+   * was released by someone else no longer counts as holding it. K is held
+   * (C5) while the computer keys are moved higher, which silences it. A now
+   * plays C5: tapping A must start and stop it, whatever K is doing.
    */
-  it('releases a note on key up after the piano moved while another key was held', async () => {
+  it('releases a note on key up after the computer keys moved while another key was held', async () => {
     const user = await startApp()
+    await openSettingsOn(user, 'Keys')
     await user.keyboard('[KeyK>]')
     expect(held()).toEqual([72])
 
@@ -490,15 +739,106 @@ describe('no stuck notes', () => {
     expect(nowPlaying()).toEqual([])
   })
 
-  it('releases held keys when "Customize keys" is opened', async () => {
+  it('releases held keys when the Keys tab of Settings is chosen', async () => {
     const user = await startApp()
+    await leaveSettingsOn(user, 'Sound')
     await user.keyboard('[KeyA>]')
 
-    await user.click(screen.getByRole('button', { name: 'Customize keys' }))
+    // Settings alone does not stop the piano…
+    await user.click(settingsButton())
+    expect(isChoosingKeys()).toBe(false)
+    expect(notes).toEqual(['on:60'])
 
+    // …choosing the computer keys does.
+    await user.click(screen.getByRole('tab', { name: 'Keys' }))
+    expect(isChoosingKeys()).toBe(true)
+    expect(notes).toEqual(['on:60', 'off:60'])
+    expect(nowPlaying()).toEqual([])
+
+    await user.keyboard('[/KeyA]')
+    expect(notes).toEqual(['on:60', 'off:60'])
+  })
+
+  it('releases held keys when Settings opens on its Keys tab', async () => {
+    const user = await startApp()
+    await leaveSettingsOn(user, 'Keys')
+    await user.keyboard('[KeyA>]')
+    expect(notes).toEqual(['on:60'])
+
+    await user.click(settingsButton())
+
+    expect(isChoosingKeys()).toBe(true)
     expect(notes).toEqual(['on:60', 'off:60'])
     await user.keyboard('[/KeyA]')
     expect(notes).toEqual(['on:60', 'off:60'])
+  })
+
+  // INTERFACE.md 7: held notes are also let go when the piano on screen changes.
+  it('releases held keys when the piano is given another size', async () => {
+    const user = await startApp()
+    const settings = await openSettingsOn(user, 'Piano')
+    await user.keyboard('[KeyA>][KeyD>]')
+    expect(held()).toEqual([60, 64])
+
+    await user.click(within(settings).getByRole('button', { name: '61' }))
+    expect(piano().querySelectorAll('.piano-key')).toHaveLength(61)
+    expect(notes).toEqual(['on:60', 'on:64', 'off:60', 'off:64'])
+    expect(nowPlaying()).toEqual([])
+
+    // The keys are still down: their repeats and their release do nothing more.
+    repeatKey('KeyA', 'a')
+    await user.keyboard('[/KeyA][/KeyD]')
+    expect(notes).toHaveLength(4)
+
+    await user.keyboard('[KeyA>]')
+    expect(held()).toEqual([60])
+    expect(pianoKey('C4, key A').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  // "Two octaves" has no note on the A key. Whether the note A is holding is
+  // cut at once or at its key up is the app's choice; it must not stay.
+  it('leaves no note behind when a ready-made layout takes the key of a held note away', async () => {
+    const user = await startApp()
+    const settings = await openSettingsOn(user, 'Keys')
+    await user.keyboard('[KeyA>]')
+    expect(held()).toEqual([60])
+
+    await user.click(within(settings).getByRole('button', { name: 'Two octaves' }))
+    expect(Object.hasOwn(settingsStore.get().bindings, 'KeyA')).toBe(false)
+
+    repeatKey('KeyA', 'a')
+    await user.keyboard('[/KeyA]')
+    expect(held()).toEqual([])
+    expect(notes).toEqual(['on:60', 'off:60'])
+    expect(nowPlaying()).toEqual([])
+
+    // A plays nothing in this layout; Q is its middle C.
+    await user.keyboard('[KeyA][KeyQ>]')
+    expect(notes).toEqual(['on:60', 'off:60', 'on:60'])
+  })
+
+  // "Reset all settings" (the About tab) also puts the computer keys back
+  // where they were at the start, which moves the note under a held key.
+  it('releases held keys when every setting is reset and the computer keys move back', async () => {
+    settingsStore.set({ baseOctave: 4 })
+    const user = await startApp()
+    const settings = await openSettingsOn(user, 'About')
+    await user.keyboard('[KeyA>]')
+    expect(notes).toEqual(['on:72'])
+
+    await user.click(within(settings).getByRole('button', { name: 'Reset all settings' }))
+    // Nothing is reset before the answer.
+    expect(notes).toEqual(['on:72'])
+    await user.click(within(settings).getByRole('button', { name: 'Yes' }))
+
+    expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+    expect(notes).toEqual(['on:72', 'off:72'])
+    expect(litKeys()).toEqual([])
+    expect(nowPlaying()).toEqual([])
+
+    repeatKey('KeyA', 'a')
+    await user.keyboard('[/KeyA][KeyA>]')
+    expect(notes).toEqual(['on:72', 'off:72', 'on:60'])
   })
 
   it('releases held keys when the app goes away, and stops listening', async () => {
@@ -515,6 +855,37 @@ describe('no stuck notes', () => {
 })
 
 describe('Space, the sustain key', () => {
+  /**
+   * With the keyboard focus on each of `controls` in turn: one tap of Space
+   * turns sustain on or off once and changes nothing else, a letter still
+   * plays its note, and the control was not pressed (it keeps the focus).
+   */
+  async function expectThePianoKeepsItsKeys(
+    user: User,
+    controls: readonly HTMLElement[],
+  ): Promise<void> {
+    for (const control of controls) {
+      const name = nameOf(control)
+      control.focus()
+      expect(document.activeElement, name).toBe(control)
+      const before = settingsStore.get()
+      notes.length = 0
+
+      await user.keyboard('[Space][KeyA]')
+
+      expect(settingsStore.get(), name).toEqual({ ...before, sustain: !before.sustain })
+      expect(notes, name).toEqual(['on:60', 'off:60'])
+      expect(document.activeElement, name).toBe(control)
+    }
+  }
+
+  /** True when the page still shows exactly these controls: none was pressed on the way. */
+  function areStillThere(controls: readonly HTMLElement[], now: readonly HTMLElement[]): boolean {
+    return (
+      controls.length === now.length && controls.every((control, index) => control === now[index])
+    )
+  }
+
   it('toggles sustain once per tap with nothing focused, and shows it', async () => {
     const user = await startApp()
     const sustain = screen.getByRole('switch', { name: 'Sustain' })
@@ -537,16 +908,20 @@ describe('Space, the sustain key', () => {
     expect(notes).toEqual([])
   })
 
-  it('toggles once and does not press the button that has focus', async () => {
-    const user = await startApp()
-    const advanced = screen.getByRole('button', { name: /Advanced/ })
-    advanced.focus()
+  it.each(['Settings', 'Songs'])(
+    'toggles once and does not press the %s button that has focus',
+    async (name) => {
+      const user = await startApp()
+      const button = screen.getByRole('button', { name })
+      button.focus()
 
-    await user.keyboard('[Space]')
+      await user.keyboard('[Space]')
 
-    expect(isSustainOn()).toBe(true)
-    expect(advanced.getAttribute('aria-expanded')).toBe('false')
-  })
+      expect(isSustainOn()).toBe(true)
+      expect(button.getAttribute('aria-expanded')).toBe('false')
+      expect(screen.queryByRole('dialog')).toBeNull()
+    },
+  )
 
   it('toggles exactly once when the Sustain switch itself has focus', async () => {
     const user = await startApp()
@@ -574,7 +949,7 @@ describe('Space, the sustain key', () => {
   it('still plays notes while a button or a slider has focus', async () => {
     const user = await startApp()
 
-    screen.getByRole('button', { name: /Advanced/ }).focus()
+    settingsButton().focus()
     await user.keyboard('[KeyA]')
     screen.getByRole('slider', { name: 'Volume' }).focus()
     await user.keyboard('[KeyS]')
@@ -582,7 +957,119 @@ describe('Space, the sustain key', () => {
     expect(notes).toEqual(['on:60', 'off:60', 'on:62', 'off:62'])
   })
 
-  it('does one thing only on a piano key that has focus in "Customize keys"', async () => {
+  it('toggles once and plays, whatever has the focus in the menu', async () => {
+    const user = await startApp()
+    const controls = controlsIn(menu())
+    // The mode tabs, the volume, sustain, Songs and Settings.
+    expect(controls.length).toBeGreaterThanOrEqual(7)
+
+    await expectThePianoKeepsItsKeys(user, controls)
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(areStillThere(controls, controlsIn(menu()))).toBe(true)
+  })
+
+  // INTERFACE.md 5.4: Settings "is not modal: the piano keeps playing from
+  // the computer keyboard while it is open".
+  it.each(SETTINGS_TABS)(
+    'toggles once and plays, whatever has the focus on the %s tab of Settings',
+    async (tab) => {
+      const user = await startApp()
+      const settings = await openSettingsOn(user, tab)
+      const controls = controlsIn(settings)
+      // The five tabs and the close button, then what the tab itself holds.
+      expect(controls.length).toBeGreaterThan(7)
+
+      await expectThePianoKeepsItsKeys(user, controls)
+
+      expect(settingsPanel()).toBe(settings)
+      const showing = within(settings).getByRole('tab', { selected: true })
+      expect(showing.textContent).toBe(tab)
+      expect(areStillThere(controls, controlsIn(settings))).toBe(true)
+    },
+  )
+
+  it('toggles once and plays, whatever has the focus in the Songs panel', async () => {
+    const user = await startApp()
+    await user.click(screen.getByRole('button', { name: 'Songs' }))
+    const songs = screen.getByRole('dialog', { name: 'Songs' })
+    const controls = controlsIn(songs)
+    // The close button, "Import a MIDI file" and a Play button per starter song.
+    expect(controls.length).toBeGreaterThan(2)
+
+    await expectThePianoKeepsItsKeys(user, controls)
+
+    // No song was started, and the panel is as it was.
+    expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Songs' })).toBe(songs)
+    expect(areStillThere(controls, controlsIn(songs))).toBe(true)
+  })
+
+  it('toggles once while an open panel itself has the focus, and the panel stays', async () => {
+    const user = await startApp()
+    // Opened with the mouse, the panel takes the focus itself.
+    const settings = await openSettingsOn(user, 'Sound')
+    settings.focus()
+    expect(document.activeElement).toBe(settings)
+
+    await user.keyboard('[Space]')
+    expect(isSustainOn()).toBe(true)
+    // Both sustain switches on screen say so: the one in the menu and the one on the tab.
+    for (const sustain of screen.getAllByRole('switch', { name: 'Sustain' })) {
+      expect(sustain.getAttribute('aria-checked')).toBe('true')
+    }
+
+    await user.keyboard('[Space]')
+    expect(isSustainOn()).toBe(false)
+    expect(settingsPanel()).toBe(settings)
+  })
+
+  // In a browser Space also scrolls: the page, or the panel that has the focus.
+  it('is used up going down and coming up, so that it scrolls nothing', async () => {
+    const user = await startApp()
+    expect(fireEvent.keyDown(document.body, { code: 'Space', key: ' ' })).toBe(false)
+    expect(fireEvent.keyUp(document.body, { code: 'Space', key: ' ' })).toBe(false)
+
+    const settings = await openSettingsOn(user, 'Look')
+    settings.focus()
+    expect(fireEvent.keyDown(settings, { code: 'Space', key: ' ' })).toBe(false)
+    expect(fireEvent.keyDown(settings, { code: 'Space', key: ' ', repeat: true })).toBe(false)
+    expect(fireEvent.keyUp(settings, { code: 'Space', key: ' ' })).toBe(false)
+
+    // Two taps: sustain is back where it was.
+    expect(isSustainOn()).toBe(false)
+  })
+
+  // Space never presses a button, so Enter has to: it is how someone without
+  // a mouse works the switches and the buttons.
+  it('leaves Enter to press the control that has the focus', async () => {
+    const user = await startApp()
+    const sustain = screen.getByRole('switch', { name: 'Sustain' })
+    sustain.focus()
+
+    await user.keyboard('[Enter]')
+    expect(isSustainOn()).toBe(true)
+    expect(document.activeElement).toBe(sustain)
+    await user.keyboard('[Enter]')
+    expect(isSustainOn()).toBe(false)
+
+    const settings = await openSettingsOn(user, 'Look')
+    const lightBars = within(settings).getByRole('switch', { name: 'Light bars' })
+    lightBars.focus()
+    await user.keyboard('[Enter]')
+    expect(settingsStore.get().showTrails).toBe(false)
+    expect(lightBars.getAttribute('aria-checked')).toBe('false')
+    expect(document.activeElement).toBe(lightBars)
+
+    const neon = within(settings).getByRole('button', { name: 'Neon' })
+    neon.focus()
+    await user.keyboard('[Enter]')
+    expect(settingsStore.get().barStyle).toBe('neon')
+    expect(document.activeElement).toBe(neon)
+    expect(notes).toEqual([])
+  })
+
+  it('does one thing only on a piano key that has focus while the keys are being chosen', async () => {
     const user = await startApp()
     await openEditor(user)
     const key = pianoKey('C4, key A')
@@ -609,7 +1096,7 @@ describe('Space, the sustain key', () => {
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
   })
 
-  it('toggles sustain in "Customize keys" while no piano key is waiting', async () => {
+  it('toggles sustain on the Keys tab while no piano key is waiting', async () => {
     const user = await startApp()
     await openEditor(user)
 
@@ -620,8 +1107,37 @@ describe('Space, the sustain key', () => {
 })
 
 describe('focus goes back to the piano', () => {
+  /** A link that is clicked stays a link, but the test's page must not try to go anywhere. */
+  function stayOnThePage(event: Event): void {
+    event.preventDefault()
+  }
+
+  /**
+   * Clicks, with the mouse, every button, slider and link that `place()`
+   * holds, one after the other. After each click nothing may be left holding
+   * the keyboard focus. Returns how many were clicked.
+   */
+  async function clickEveryControl(user: User, place: () => Element): Promise<number> {
+    let clicked = 0
+    // A click can swap buttons for others (a question and its answers), so
+    // they are looked up again each time.
+    for (let index = 0; index < controlsIn(place()).length; index += 1) {
+      const control = controlsIn(place())[index]
+      if (control === undefined) break
+      const name = nameOf(control)
+      if (control instanceof HTMLAnchorElement) control.addEventListener('click', stayOnThePage)
+
+      await user.click(control)
+
+      clicked += 1
+      expect(noControlHasFocus(), name).toBe(true)
+    }
+    return clicked
+  }
+
   it('lets go of a button that was clicked, so Enter does not press it again', async () => {
     const user = await startApp()
+    await openSettingsOn(user, 'Keys')
 
     await user.click(screen.getByRole('button', { name: /Higher/ }))
     expect(settingsStore.get().baseOctave).toBe(4)
@@ -632,9 +1148,39 @@ describe('focus goes back to the piano', () => {
     expect(isSustainOn()).toBe(true)
   })
 
+  it('lets go of every control of the menu once it was clicked', async () => {
+    const user = await startApp()
+
+    const clicked = await clickEveryControl(user, menu)
+    expect(clicked).toBeGreaterThanOrEqual(7)
+
+    // Straight back to playing: the next key is the piano's.
+    const sustain = isSustainOn()
+    await user.keyboard('[Space]')
+    expect(isSustainOn()).toBe(!sustain)
+  })
+
+  it.each(SETTINGS_TABS)(
+    'lets go of every button, slider and link of the %s tab once it was clicked',
+    async (tab) => {
+      const user = await startApp()
+      const settings = await openSettingsOn(user, tab)
+
+      const clicked = await clickEveryControl(user, () => within(settings).getByRole('tabpanel'))
+      expect(clicked).toBeGreaterThan(1)
+      expect(settingsPanel()).toBe(settings)
+
+      // Straight back to playing: the next key is the piano's.
+      const sustain = isSustainOn()
+      await user.keyboard('[Space]')
+      expect(isSustainOn()).toBe(!sustain)
+    },
+  )
+
   it('lets go of the Labels list once a choice is made, so the keys play again', async () => {
     const user = await startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    await openSettingsOn(user, 'Piano')
+    const labels = screen.getByRole('combobox', { name: 'Labels on the keys' })
 
     await user.selectOptions(labels, 'Keys only')
     expect(settingsStore.get().labelMode).toBe('keys')
@@ -644,25 +1190,45 @@ describe('focus goes back to the piano', () => {
     expect(notes).toEqual(['on:60'])
   })
 
+  // An arrow key on the closed list changes the choice at once. The page is
+  // told of the change and of nothing else: no click comes with it.
+  it('lets go of the Labels list once a choice is made without the mouse', async () => {
+    const user = await startApp()
+    await openSettingsOn(user, 'Piano')
+    const labels = screen.getByRole('combobox', { name: 'Labels on the keys' })
+    labels.focus()
+    expect(document.activeElement).toBe(labels)
+
+    fireEvent.change(labels, { target: { value: 'notes' } })
+    expect(settingsStore.get().labelMode).toBe('notes')
+    expect(document.activeElement).not.toBe(labels)
+
+    await user.keyboard('[KeyA>]')
+    expect(notes).toEqual(['on:60'])
+  })
+
   /*
-   * Spec 5.7: the Labels list must not keep the keyboard once the player is
-   * done with it, "so the player can go straight back to playing". A list
-   * that is opened and closed again without a new choice announces no
-   * change. If it kept the keyboard, the piano would stay silent, and in a
-   * real browser the letters K and N would change the Labels choice.
+   * The Labels list must not keep the keyboard once the player is done with
+   * it, so that the player can go straight back to playing. A list that is
+   * opened and closed again without a new choice announces no change. If it
+   * kept the keyboard, the piano would stay silent, and in a real browser the
+   * letters K and N would change the Labels choice.
    *
    * The simulated browser has no list to open, so the three tests below send
    * the page what Chrome and Edge send it in each case.
    */
   it('plays again at once after the Labels list is closed with Escape', async () => {
     const user = await startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    await openSettingsOn(user, 'Piano')
+    const labels = screen.getByRole('combobox', { name: 'Labels on the keys' })
 
     await user.click(labels)
     expect(document.activeElement).toBe(labels)
     // The open list keeps the key down to itself: the page only sees the key come up.
     fireEvent.keyUp(labels, { code: 'Escape', key: 'Escape' })
     expect(document.activeElement).not.toBe(labels)
+    // That Escape closed the list, not Settings.
+    expect(settingsPanel()).not.toBeNull()
 
     await user.keyboard('[KeyA>]')
     expect(held()).toEqual([60])
@@ -671,7 +1237,8 @@ describe('focus goes back to the piano', () => {
 
   it('plays again at once after the choice the Labels list already shows is picked again', async () => {
     const user = await startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    await openSettingsOn(user, 'Piano')
+    const labels = screen.getByRole('combobox', { name: 'Labels on the keys' })
 
     await user.click(labels)
     expect(document.activeElement).toBe(labels)
@@ -686,7 +1253,8 @@ describe('focus goes back to the piano', () => {
 
   it('gives the keyboard back at the next key when the Labels list was closed by a click elsewhere', async () => {
     const user = await startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    await openSettingsOn(user, 'Piano')
+    const labels = screen.getByRole('combobox', { name: 'Labels on the keys' })
 
     // The page is told nothing about a click that closes an open list: all it
     // knows is that the list was clicked and still has the keyboard.
@@ -705,7 +1273,7 @@ describe('focus goes back to the piano', () => {
   })
 })
 
-describe('Customize keys', () => {
+describe('choosing your own keys', () => {
   it('gives a computer key to the piano key that was clicked, and saves it', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C3', 'C3')
@@ -723,6 +1291,33 @@ describe('Customize keys', () => {
     expect(saved.bindings?.KeyZ).toBe(0)
     // What the next visit will load.
     expect(createSettingsStore(window.localStorage).get().bindings.KeyZ).toBe(0)
+  })
+
+  // INTERFACE.md 5.5: on the Keys tab "a click selects a key instead of playing it".
+  it('selects the piano key that is pressed with the mouse, and does not play it', async () => {
+    const user = await startApp()
+    await openEditor(user)
+    // The simulated browser lays nothing out. The piano is told where it is,
+    // so that a press with the mouse lands on a key: here its first one, C3.
+    piano().getBoundingClientRect = () => ({ left: 0, top: 0, width: 2200, height: 100 }) as DOMRect
+    const onC3 = { button: 0, pointerId: 1, clientX: 50, clientY: 90 }
+
+    fireEvent.pointerDown(pianoKey('C3'), onC3)
+    fireEvent.pointerUp(pianoKey('C3'), onC3)
+    fireEvent.click(pianoKey('C3'), { detail: 1 })
+
+    expect(notes).toEqual([])
+    expect(editorLead()).toBe('Press a key for C3…')
+    expect(pianoKey('C3').getAttribute('aria-pressed')).toBe('true')
+
+    // Back to playing, the same press plays the key.
+    await closeSettings(user)
+    fireEvent.pointerDown(pianoKey('C3'), onC3)
+    expect(notes).toEqual(['on:48'])
+    fireEvent.pointerUp(pianoKey('C3'), onC3)
+    fireEvent.click(pianoKey('C3'), { detail: 1 })
+    expect(notes).toEqual(['on:48', 'off:48'])
+    expect(isChoosingKeys()).toBe(false)
   })
 
   it('plays nothing for the key press that was captured, its repeats or its release', async () => {
@@ -749,6 +1344,7 @@ describe('Customize keys', () => {
 
     await user.keyboard('[KeyA>]')
     expect(notes).toEqual(['on:60'])
+    expect(isLit(pianoKey('C4, key A'))).toBe(true)
     await user.keyboard('[/KeyA]')
     expect(notes).toEqual(['on:60', 'off:60'])
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
@@ -804,20 +1400,24 @@ describe('Customize keys', () => {
     expect(editorLead()).toBe(EDITOR_INSTRUCTION)
   })
 
-  // The spec does not cover an Escape that is held down. The app's choice:
-  // its repeats do not go on to close the panel.
+  // INTERFACE.md 5.0: Escape first lets go of the piano key that is waiting,
+  // then closes Settings. The spec does not cover an Escape that is held
+  // down. The app's choice: its repeats do not go on to close the panel.
   it('cancels on Escape, and closes on the next Escape only once the first was let go', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
 
     await user.keyboard('[Escape>]')
     expect(editorLead()).toBe(EDITOR_INSTRUCTION)
+    expect(pianoKey('C4, key A').getAttribute('aria-pressed')).toBe('false')
 
     repeatKey('Escape', 'Escape')
-    expect(editorPanel()).not.toBeNull()
+    expect(settingsPanel()).not.toBeNull()
+    expect(isChoosingKeys()).toBe(true)
 
     await user.keyboard('[/Escape][Escape]')
-    expect(editorPanel()).toBeNull()
+    expect(settingsPanel()).toBeNull()
+    expect(isChoosingKeys()).toBe(false)
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
     expect(notes).toEqual([])
   })
@@ -848,6 +1448,8 @@ describe('Customize keys', () => {
       expect(editorMessage()).toBe(UNUSABLE_KEY_MESSAGE)
       expect(editorLead()).toBe('Press a key for C4…')
       expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
+      // The key did nothing else either: Settings is still on its Keys tab.
+      expect(isChoosingKeys()).toBe(true)
 
       await user.keyboard('[KeyZ]')
       expect(settingsStore.get().bindings.KeyZ).toBe(12)
@@ -899,7 +1501,7 @@ describe('Customize keys', () => {
   // none; that the older saved label of that key is then dropped is the app's choice.
   it('captures a dead key and labels it with what a US keyboard prints', async () => {
     const user = await startApp()
-    settingsStore.set({ customLabels: { BracketLeft: 'Ü' } })
+    act(() => settingsStore.set({ customLabels: { BracketLeft: 'Ü' } }))
     await selectPianoKey(user, 'C3', 'C3')
 
     fireEvent.keyDown(document.body, { code: 'BracketLeft', key: 'Dead' })
@@ -925,12 +1527,30 @@ describe('Customize keys', () => {
     expect(notes).toEqual([])
   })
 
-  it('forgets the waiting piano key when "Done" is clicked', async () => {
+  /*
+   * INTERFACE.md 5.5: "Leaving the tab or closing the panel ends selection
+   * mode." However Settings is closed, the piano key that was waiting is
+   * forgotten: the next key press is not captured, now or when the Keys tab
+   * is shown again.
+   */
+  it.each<[string, (user: User) => Promise<void>]>([
+    [
+      'Settings is closed with its close button',
+      (user) => user.click(screen.getByRole('button', { name: 'Close Settings' })),
+    ],
+    ['the "Settings" button closes the panel', (user) => user.click(settingsButton())],
+    ['the empty sky is clicked', (user) => user.click(emptySky())],
+    [
+      'the Songs panel takes the place of Settings',
+      (user) => user.click(screen.getByRole('button', { name: 'Songs' })),
+    ],
+  ])('forgets the waiting piano key when %s', async (_way, leave) => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
 
-    await user.click(screen.getByRole('button', { name: 'Done' }))
-    expect(editorPanel()).toBeNull()
+    await leave(user)
+    expect(settingsPanel()).toBeNull()
+    expect(isChoosingKeys()).toBe(false)
 
     await user.keyboard('[KeyZ][KeyA]')
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
@@ -942,20 +1562,72 @@ describe('Customize keys', () => {
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
   })
 
-  it('forgets the waiting piano key when the "Customize keys" button closes the panel', async () => {
+  it('forgets the waiting piano key when another tab of Settings is chosen', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
 
-    await user.click(screen.getByRole('button', { name: 'Customize keys' }))
-    expect(editorPanel()).toBeNull()
+    const settings = await openSettingsOn(user, 'Sound')
+    expect(isChoosingKeys()).toBe(false)
+    expect(settingsPanel()).toBe(settings)
 
+    await user.keyboard('[KeyZ][KeyA]')
+    expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
+    expect(notes).toEqual(['on:60', 'off:60'])
+
+    await openEditor(user)
+    expect(pianoKey('C4, key A').getAttribute('aria-pressed')).toBe('false')
     await user.keyboard('[KeyZ]')
     expect(settingsStore.get().bindings).toBe(DEFAULT_BINDINGS)
   })
 
+  // INTERFACE.md 5.5: a ready-made layout is applied at once. A piano key that
+  // was waiting no longer does: the next key press plays, in the new layout.
+  it('forgets the waiting piano key when a ready-made layout is chosen', async () => {
+    const user = await startApp()
+    await selectPianoKey(user, 'C4, key A', 'C4')
+
+    await user.click(screen.getByRole('button', { name: 'Two octaves' }))
+    expect(settingsStore.get().bindings).toEqual(layoutKeys('two-octaves'))
+    expect(editorLead()).toBe(EDITOR_INSTRUCTION)
+    expect(pianoKey('C4, key Q').getAttribute('aria-pressed')).toBe('false')
+
+    // Q is middle C in that layout. It is played, not taken as the key for C4.
+    await user.keyboard('[KeyQ>]')
+    expect(notes).toEqual(['on:60'])
+    expect(settingsStore.get().bindings).toEqual(layoutKeys('two-octaves'))
+  })
+
+  // Keys the player chose one by one are not replaced without asking. While
+  // the question waits, nothing has changed and the keyboard plays as before.
+  it('asks before a ready-made layout replaces keys the player chose, and plays on meanwhile', async () => {
+    const user = await startApp()
+    await selectPianoKey(user, 'C3', 'C3')
+    await user.keyboard('[KeyZ]')
+    const ownKeys = settingsStore.get().bindings
+
+    await user.click(screen.getByRole('button', { name: 'White keys only' }))
+    expect(screen.getByText('Replace your own keys with this layout?')).toBeTruthy()
+    expect(settingsStore.get().bindings).toBe(ownKeys)
+    await user.keyboard('[KeyZ][KeyA]')
+    expect(notes).toEqual(['on:48', 'off:48', 'on:60', 'off:60'])
+
+    await user.click(screen.getByRole('button', { name: 'No' }))
+    expect(settingsStore.get().bindings).toBe(ownKeys)
+    expect(screen.queryByText('Replace your own keys with this layout?')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'White keys only' }))
+    await user.click(screen.getByRole('button', { name: 'Yes' }))
+    expect(settingsStore.get().bindings).toEqual(layoutKeys('white-keys'))
+
+    // In this layout Z is still the lowest C, and W is a white key of the top octave.
+    notes.length = 0
+    await user.keyboard('[KeyZ][KeyW]')
+    expect(notes).toEqual(['on:48', 'off:48', 'on:74', 'off:74'])
+  })
+
   // The spec does not say what the reset does to a piano key that is waiting,
-  // or what the panel says afterwards. The app's choice: nothing is waiting
-  // any more, and the panel says that the default keys are back.
+  // or what the tab says afterwards. The app's choice: nothing is waiting
+  // any more, and the tab says that the default keys are back.
   it('puts the default keys back, also while a piano key is waiting', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
@@ -1026,6 +1698,8 @@ describe('Customize keys', () => {
     expect(fireEvent.keyDown(document.body, { code: 'Backspace', key: 'Backspace' })).toBe(true)
     expect(fireEvent.keyDown(document.body, { code: 'ArrowDown', key: 'ArrowDown' })).toBe(true)
     expect(fireEvent.keyDown(document.body, { code: 'KeyS', key: 's' })).toBe(true)
+    // Settings is still open on its Keys tab after all of that.
+    expect(isChoosingKeys()).toBe(true)
   })
 
   it('keeps the keys when the reset is answered with No', async () => {
@@ -1040,7 +1714,33 @@ describe('Customize keys', () => {
     expect(screen.getByRole('button', { name: 'Reset to default keys' })).toBeTruthy()
   })
 
-  it('follows the piano when it is moved while a piano key is waiting', async () => {
+  // The question takes the place of the button that was pressed, and the
+  // answer takes the question away. Someone without a mouse must not lose
+  // their place either time.
+  it('keeps the keyboard focus through "Reset to default keys" and its answers', async () => {
+    const user = await startApp()
+    await selectPianoKey(user, 'C4, key A', 'C4')
+    await user.keyboard('[KeyZ]')
+    const reset = (): HTMLElement => screen.getByRole('button', { name: 'Reset to default keys' })
+    reset().focus()
+
+    // The focus goes to "No", the answer that changes nothing.
+    await user.keyboard('[Enter]')
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'No' }))
+    await user.keyboard('[Enter]')
+    expect(document.activeElement).toBe(reset())
+    expect(settingsStore.get().bindings.KeyZ).toBe(12)
+
+    await user.keyboard('[Enter]')
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Yes' }))
+    await user.keyboard('[Enter]')
+    expect(settingsStore.get().bindings).toEqual(DEFAULT_BINDINGS)
+    expect(editorMessage()).toBe(KEYS_RESET_MESSAGE)
+    expect(document.activeElement).toBe(reset())
+  })
+
+  it('follows the computer keys when they are moved while a piano key is waiting', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
 
@@ -1068,6 +1768,47 @@ describe('Customize keys', () => {
     expect(document.activeElement).toBe(key)
   })
 
+  // From the start overlay to a changed key and back to playing, with Tab,
+  // the arrow keys, Enter and Escape only.
+  it('changes a key from start to finish without the mouse', async () => {
+    const user = drawApp()
+    await user.keyboard('[Enter]')
+    expect(screen.queryByText(START_TEXT)).toBeNull()
+
+    await tabTo(user, settingsButton)
+    await user.keyboard('[Enter]')
+    const settings = screen.getByRole('dialog', { name: 'Settings' })
+    // The focus went into the panel: onto the tab that is showing.
+    expect(document.activeElement).toBe(within(settings).getByRole('tab', { selected: true }))
+
+    // The tabs are one stop for Tab. Home goes to the first one, whichever
+    // tab Settings was last on, and the arrow keys from one to the next.
+    await user.keyboard('[Home]')
+    expect(document.activeElement).toBe(within(settings).getByRole('tab', { name: 'Sound' }))
+    expect(isChoosingKeys()).toBe(false)
+    await user.keyboard('[ArrowRight]')
+    expect(document.activeElement).toBe(within(settings).getByRole('tab', { name: 'Keys' }))
+    expect(isChoosingKeys()).toBe(true)
+
+    await tabTo(user, () => pianoKey('C4, key A'))
+    await user.keyboard('[Enter]')
+    expect(editorLead()).toBe('Press a key for C4…')
+
+    await user.keyboard('[KeyZ]')
+    expect(settingsStore.get().bindings.KeyZ).toBe(12)
+    expect(editorMessage()).toBe('"Z" now plays C4. "A" no longer plays a note.')
+    expect(document.activeElement).toBe(pianoKey('C4, key Z'))
+    expect(notes).toEqual([])
+
+    await user.keyboard('[Escape]')
+    expect(settingsPanel()).toBeNull()
+    // The focus is not lost with the panel: it is on the button that opens it.
+    expect(document.activeElement).toBe(settingsButton())
+
+    await user.keyboard('[KeyZ>]')
+    expect(notes).toEqual(['on:60'])
+  })
+
   it('takes the keyboard away from the piano keys when the panel is closed', async () => {
     const user = await startApp()
     await openEditor(user)
@@ -1076,11 +1817,10 @@ describe('Customize keys', () => {
 
     await user.keyboard('[Escape]')
 
-    expect(editorPanel()).toBeNull()
+    expect(settingsPanel()).toBeNull()
     // Where the keyboard goes instead is not checked here: only that no piano
     // key keeps it, and that the computer keys play again.
-    const piano = screen.getByRole('group', { name: 'Piano' })
-    expect(piano.contains(document.activeElement)).toBe(false)
+    expect(piano().contains(document.activeElement)).toBe(false)
     expect(key.tabIndex).toBe(-1)
 
     await user.keyboard('[KeyA>]')
@@ -1088,20 +1828,19 @@ describe('Customize keys', () => {
   })
 })
 
-describe('Customize keys with the key labels switched off', () => {
+describe('choosing your own keys with the key labels switched off', () => {
   /*
-   * Spec 5.7: "While Customize keys is open the piano always shows the
-   * computer-key labels, whatever the Labels setting says (the saved setting
-   * is not changed)." The panel asks the player to change those keys, so
-   * they have to be on screen. The computer keys are added to what the
-   * player chose: the note names stay hidden with "No labels" and stay
-   * shown with "Notes only".
+   * INTERFACE.md 5.5: while the Keys tab is open "the piano always shows the
+   * keycaps", whatever the Labels setting says, and the saved setting is not
+   * changed. The tab asks the player to change those keys, so they have to
+   * be on screen. The computer keys are added to what the player chose: the
+   * note names stay hidden with "No labels" and stay shown with "Notes only".
    */
   it.each([
     ['No labels', 'none', false],
     ['Notes only', 'notes', true],
   ] as const)(
-    'shows the computer keys on the piano while it is open, with Labels on "%s"',
+    'shows the computer keys on the piano while the Keys tab is open, with Labels on "%s"',
     async (_name, labelMode, showsNoteNames) => {
       settingsStore.set({ labelMode })
       const user = await startApp()
@@ -1115,7 +1854,7 @@ describe('Customize keys with the key labels switched off', () => {
       expect(settingsStore.get().labelMode).toBe(labelMode)
 
       // Back to playing: the labels are the player's own choice again.
-      await user.click(screen.getByRole('button', { name: 'Done' }))
+      await closeSettings(user)
       expect(pianoKey('D4, key S').textContent).not.toContain('S')
       expect(settingsStore.get().labelMode).toBe(labelMode)
     },
@@ -1145,86 +1884,150 @@ function seededRandom(seed: number): () => number {
 describe('random sessions', () => {
   const KEYS = ['KeyA', 'KeyS', 'KeyD', 'KeyK', 'KeyL', 'Quote', 'KeyZ', 'Digit1', 'Space', 'Enter']
   const MODIFIERS = ['shiftKey', 'ctrlKey', 'altKey'] as const
+  const LAYOUTS = ['Home row', 'Two octaves', 'White keys only']
+  const PIANO_SIZES = ['Auto', '88', '61', '49', '37']
 
   /*
-   * Plays, moves the piano, customizes keys, loses the window and hides the
-   * tab at random, with real key downs, repeats and key ups. Once every key
-   * is up again no note may be left sounding, and the keys must still be one
-   * per note.
+   * Plays, moves the computer keys, changes them one by one and by layout,
+   * resizes the piano, opens and closes the panels, loses the window and
+   * hides the tab at random, with real key downs, repeats and key ups. Once
+   * every key is up again no note may be left sounding, and the keys must
+   * still be one per note.
+   *
+   * A session is some 250 actions on the whole screen: it gets more time
+   * than a test usually does, for a machine that is busy with other tests.
    */
-  it.each([21, 22, 23, 24, 25, 26])('leave no note behind once every key is up (seed %i)', async (seed) => {
-    await startApp()
-    const random = seededRandom(seed)
-    const pick = <Item,>(items: readonly Item[]): Item => {
-      const item = items[Math.floor(random() * items.length)]
-      if (item === undefined) throw new Error('nothing to pick from')
-      return item
-    }
-    const down = new Set<string>()
-    const modifiers = { shiftKey: false, ctrlKey: false, altKey: false }
-    const target = (): Element => document.activeElement ?? document.body
-    const click = (element: Element | null | undefined): void => {
-      if (element instanceof HTMLButtonElement && !element.disabled) {
-        fireEvent.click(element, { detail: 1 })
-      }
-    }
-    const button = (name: string | RegExp): HTMLElement | null =>
-      screen.queryByRole('button', { name })
+  const SESSION_TIMEOUT_MS = 20_000
 
-    try {
-      for (let step = 0; step < 250; step += 1) {
-        const roll = random()
-        if (roll < 0.3) {
-          const code = pick(KEYS)
-          fireEvent.keyDown(target(), { code, repeat: down.has(code), ...modifiers })
-          down.add(code)
-        } else if (roll < 0.55) {
-          if (down.size === 0) continue
-          const code = pick([...down])
-          fireEvent.keyUp(target(), { code, ...modifiers })
-          down.delete(code)
-        } else if (roll < 0.62) {
-          const modifier = pick(MODIFIERS)
-          modifiers[modifier] = !modifiers[modifier]
-        } else if (roll < 0.7) {
-          click(button(random() < 0.5 ? /Higher/ : /Lower/))
-        } else if (roll < 0.76) {
-          click(button('Customize keys'))
-        } else if (roll < 0.86) {
-          if (editorPanel() !== null) click(pick(screen.getAllByRole('button', { name: /^[A-G]♯?\d/ })))
-        } else if (roll < 0.9) {
-          for (const code of ['Escape', 'Backspace']) {
-            if (random() < 0.5) {
-              fireEvent.keyDown(target(), { code })
-              fireEvent.keyUp(target(), { code })
+  it.each([21, 22, 23, 24, 25, 26])(
+    'leave no note behind once every key is up (seed %i)',
+    { timeout: SESSION_TIMEOUT_MS },
+    async (seed) => {
+      const user = await startApp()
+      // Settings opens on the tab it was last on, also in the test before this
+      // one. Each session starts from the same tab, so a seed is one session.
+      await leaveSettingsOn(user, 'Sound')
+      notes.length = 0
+      audio.calls.length = 0
+
+      const random = seededRandom(seed)
+      const pick = <Item,>(items: readonly Item[]): Item => {
+        const item = items[Math.floor(random() * items.length)]
+        if (item === undefined) throw new Error('nothing to pick from')
+        return item
+      }
+      const down = new Set<string>()
+      const modifiers = { shiftKey: false, ctrlKey: false, altKey: false }
+      const target = (): Element => document.activeElement ?? document.body
+      const click = (element: Element | null | undefined): void => {
+        if (element instanceof HTMLButtonElement && !element.disabled) {
+          fireEvent.click(element, { detail: 1 })
+        }
+      }
+      const openPanel = (): HTMLElement | null => document.querySelector('[role="dialog"]')
+      /** A button of the menu or of the open panel, by its name. (Not a key of the piano.) */
+      const button = (name: string | RegExp): HTMLElement | null => {
+        for (const place of [menu(), openPanel()]) {
+          if (place === null) continue
+          const found = within(place).queryAllByRole('button', { name })[0]
+          if (found !== undefined) return found
+        }
+        return null
+      }
+      const tabOfSettings = (tab: SettingsTab): HTMLElement | null => {
+        const settings = settingsPanel()
+        return settings === null ? null : within(settings).queryByRole('tab', { name: tab })
+      }
+      /** Opens Settings if it is closed, and shows one of its tabs. */
+      const showTab = (tab: SettingsTab): void => {
+        if (settingsPanel() === null) click(button('Settings'))
+        click(tabOfSettings(tab))
+      }
+      let pianosSeen = 0
+      let keysChosen = 0
+
+      try {
+        for (let step = 0; step < 250; step += 1) {
+          const roll = random()
+          if (roll < 0.28) {
+            const code = pick(KEYS)
+            fireEvent.keyDown(target(), { code, repeat: down.has(code), ...modifiers })
+            down.add(code)
+          } else if (roll < 0.52) {
+            if (down.size === 0) continue
+            const code = pick([...down])
+            fireEvent.keyUp(target(), { code, ...modifiers })
+            down.delete(code)
+          } else if (roll < 0.58) {
+            const modifier = pick(MODIFIERS)
+            modifiers[modifier] = !modifiers[modifier]
+          } else if (roll < 0.63) {
+            showTab('Keys')
+            click(button(random() < 0.5 ? /Higher/ : /Lower/))
+          } else if (roll < 0.68) {
+            click(button('Settings'))
+          } else if (roll < 0.72) {
+            click(tabOfSettings(pick(SETTINGS_TABS)))
+          } else if (roll < 0.8) {
+            if (isChoosingKeys()) {
+              click(pick([...piano().querySelectorAll('.piano-key')]))
+              keysChosen += 1
             }
+          } else if (roll < 0.84) {
+            for (const code of ['Escape', 'Backspace']) {
+              if (random() < 0.5) {
+                fireEvent.keyDown(target(), { code })
+                fireEvent.keyUp(target(), { code })
+              }
+            }
+          } else if (roll < 0.86) {
+            click(button('Close Settings'))
+          } else if (roll < 0.89) {
+            showTab('Keys')
+            click(button(pick(LAYOUTS)))
+          } else if (roll < 0.91) {
+            showTab('Keys')
+            click(button('Reset to default keys'))
+          } else if (roll < 0.93) {
+            // Answers whatever question is waiting: about a layout, or about the reset.
+            click(button(random() < 0.5 ? 'Yes' : 'No'))
+          } else if (roll < 0.95) {
+            showTab('Piano')
+            click(button(pick(PIANO_SIZES)))
+            pianosSeen += 1
+          } else if (roll < 0.96) {
+            fireEvent.click(emptySky(), { detail: 1 })
+          } else if (roll < 0.97) {
+            click(button('Songs'))
+          } else if (roll < 0.985) {
+            // Keys let go while another window has the keyboard never reach the page.
+            fireEvent.blur(window)
+            if (random() < 0.5) down.clear()
+          } else {
+            setPageVisibility('hidden')
+            setPageVisibility('visible')
           }
-        } else if (roll < 0.93) {
-          click(button('Done'))
-        } else if (roll < 0.96) {
-          // Keys let go while another window has the keyboard never reach the page.
-          fireEvent.blur(window)
-          if (random() < 0.5) down.clear()
-        } else {
-          setPageVisibility('hidden')
-          setPageVisibility('visible')
+
+          const slots = Object.values(settingsStore.get().bindings)
+          expect(new Set(slots).size).toBe(slots.length)
         }
 
-        const slots = Object.values(settingsStore.get().bindings)
-        expect(new Set(slots).size).toBe(slots.length)
+        for (const code of [...down]) fireEvent.keyUp(target(), { code })
+      } finally {
+        setPageVisibility('visible')
       }
 
-      for (const code of [...down]) fireEvent.keyUp(target(), { code })
-    } finally {
-      setPageVisibility('visible')
-    }
+      // The session did go through the new screen: keys were chosen and the piano changed.
+      expect(keysChosen).toBeGreaterThan(0)
+      expect(pianosSeen).toBeGreaterThan(0)
 
-    expect(held()).toEqual([])
-    expect(nowPlaying()).toEqual([])
-    const onCount = audio.calls.filter((call) => call.startsWith('on:')).length
-    const offCount = audio.calls.filter((call) => call.startsWith('off:')).length
-    expect(offCount).toBe(onCount)
-  })
+      expect(held()).toEqual([])
+      expect(nowPlaying()).toEqual([])
+      const onCount = audio.calls.filter((call) => call.startsWith('on:')).length
+      const offCount = audio.calls.filter((call) => call.startsWith('off:')).length
+      expect(offCount).toBe(onCount)
+    },
+  )
 })
 
 describe('React StrictMode', () => {
@@ -1237,7 +2040,7 @@ describe('React StrictMode', () => {
     expect(isSustainOn()).toBe(true)
   })
 
-  it('captures a key once while customizing', async () => {
+  it('captures a key once while the keys are being chosen', async () => {
     const user = await startApp()
     const changes = vi.fn()
     const stop = settingsStore.subscribe(changes)

@@ -1,10 +1,12 @@
 /*
  * The pure half of the on-screen piano's pointer handling: which key lies
  * under a point, which keys lie between two points, and which notes the
- * pointers (mouse, fingers, pen) are holding. No DOM and no React here, so it
- * can be unit-tested.
+ * pointers (mouse, fingers, pen) are holding. It works for a piano of any
+ * size. No DOM and no React here, so it can be unit-tested.
  */
-import { KEY_RECTS } from '../core/keyGeometry'
+import type { PianoRange } from '../core/layout'
+import { keyRects } from '../core/pianoGeometry'
+import type { KeyRect } from '../core/pianoGeometry'
 import type { Midi } from '../core/types'
 
 /**
@@ -14,67 +16,93 @@ import type { Midi } from '../core/types'
  */
 export const BLACK_KEY_HEIGHT = 0.62
 
-const BLACK_RECTS = KEY_RECTS.filter((rect) => rect.black)
-const WHITE_RECTS = KEY_RECTS.filter((rect) => !rect.black)
+/** The keys of one piano, sorted for hit-testing. */
+interface KeyRows {
+  /** Edge to edge across the whole piano, lowest first. */
+  whites: readonly KeyRect[]
+  /** On top of the white keys, in the upper part of the piano only. */
+  blacks: readonly KeyRect[]
+  /** How closely a line across this piano is looked at (see `notesAlongLine`). */
+  lineStep: number
+}
 
 /**
- * The slot of the key under a point of the piano box, or null when the point
- * is outside the box. `x` and `y` are fractions of the box's width and height,
- * measured from its top-left corner.
+ * `keyRects` gives the same array for the same range, so the rows are worked
+ * out once per piano.
  */
-export function slotAtPoint(x: number, y: number): number | null {
+const rowsOfRects = new WeakMap<readonly KeyRect[], KeyRows>()
+
+function keyRows(range: PianoRange): KeyRows {
+  const rects = keyRects(range)
+  const known = rowsOfRects.get(rects)
+  if (known) return known
+
+  const whites = rects.filter((rect) => !rect.black)
+  const rows: KeyRows = {
+    whites,
+    blacks: rects.filter((rect) => rect.black),
+    // Every eighth of a white key. That is finer than the narrowest part of
+    // any key (the strip of a white key that shows between two black keys),
+    // so only a corner clipped for less than that can go unnoticed.
+    lineStep: 1 / (Math.max(1, whites.length) * 8),
+  }
+  rowsOfRects.set(rects, rows)
+  return rows
+}
+
+/**
+ * The note of the key under a point of the piano box, or null when the point
+ * is outside the box. `x` and `y` are fractions of the box's width and height,
+ * measured from its top-left corner. `range` is the piano that is drawn.
+ */
+export function noteAtPoint(x: number, y: number, range: PianoRange): Midi | null {
   // Written so that NaN (a box with no size yet) also counts as outside.
   const inside = x >= 0 && x < 1 && y >= 0 && y < 1
   if (!inside) return null
 
+  const { whites, blacks } = keyRows(range)
   if (y < BLACK_KEY_HEIGHT) {
-    const black = BLACK_RECTS.find((rect) => x >= rect.left && x < rect.left + rect.width)
-    if (black) return black.slot
+    const black = blacks.find((rect) => x >= rect.left && x < rect.left + rect.width)
+    if (black) return black.midi
   }
   // White keys sit edge to edge, so the last one that starts at or before x is the one under it.
-  return WHITE_RECTS.findLast((rect) => x >= rect.left)?.slot ?? null
+  return whites.findLast((rect) => x >= rect.left)?.midi ?? null
 }
 
 /**
- * How closely a line across the piano is looked at, as a fraction of the
- * piano's width: every eighth of a white key. That is finer than the
- * narrowest part of any key (the strip of a white key that shows between two
- * black keys), so only a corner clipped for less than that can go unnoticed.
- */
-const LINE_STEP = 1 / (WHITE_RECTS.length * 8)
-
-/**
- * The keys on the straight line between two points of the piano box, in the
- * order a pointer moving along it reaches them: from the key under the start
- * point to the key under the end point. This is what keeps a fast drag from
- * skipping keys, because the browser reports only a few points of it.
+ * The notes of the keys on the straight line between two points of the piano
+ * box, in the order a pointer moving along it reaches them: from the key
+ * under the start point to the key under the end point. This is what keeps a
+ * fast drag from skipping keys, because the browser reports only a few points
+ * of it.
  *
  * A line that starts or ends off the piano is not filled in: the result is
  * then only what is under its end point (null when that point is off the
- * piano). Coordinates are fractions of the box, as for `slotAtPoint`.
+ * piano). Coordinates are fractions of the box, as for `noteAtPoint`.
  */
-export function slotsAlongLine(
+export function notesAlongLine(
   fromX: number,
   fromY: number,
   toX: number,
   toY: number,
-): readonly (number | null)[] {
-  const first = slotAtPoint(fromX, fromY)
-  const last = slotAtPoint(toX, toY)
+  range: PianoRange,
+): readonly (Midi | null)[] {
+  const first = noteAtPoint(fromX, fromY, range)
+  const last = noteAtPoint(toX, toY, range)
   if (first === null || last === null) return [last]
 
-  const slots = [first]
+  const notes = [first]
   // Steps are counted across the piano only. Straight up or down, a line
   // crosses nothing but the lower edge of the black keys, and its two end
   // points already give the key on either side of that.
-  const steps = Math.ceil(Math.abs(toX - fromX) / LINE_STEP)
+  const steps = Math.ceil(Math.abs(toX - fromX) / keyRows(range).lineStep)
   for (let step = 1; step < steps; step++) {
     const share = step / steps
-    const slot = slotAtPoint(fromX + (toX - fromX) * share, fromY + (toY - fromY) * share)
-    if (slot !== null && slot !== slots.at(-1)) slots.push(slot)
+    const note = noteAtPoint(fromX + (toX - fromX) * share, fromY + (toY - fromY) * share, range)
+    if (note !== null && note !== notes.at(-1)) notes.push(note)
   }
-  if (last !== slots.at(-1)) slots.push(last)
-  return slots
+  if (last !== notes.at(-1)) notes.push(last)
+  return notes
 }
 
 /**

@@ -1,0 +1,710 @@
+/*
+ * The Settings panel: how its five tabs are laid out, and the few controls
+ * that exist only here (the theme and key-layout cards, the colour swatches
+ * and the tiny pictures).
+ *
+ * The look of the shared controls (buttons, switches, sliders, tabs, the
+ * panel itself) is in src/ui/chrome.css, and nothing here changes it. Every
+ * colour comes from theme.css, or is handed over by a component as a variable
+ * when it is the colour of a light (those come from src/core/colour.ts).
+ *
+ * As chrome.css explains, the focus ring is a shadow drawn by theme.css. So
+ * nothing here that can take the keyboard focus gets a shadow of its own.
+ */
+
+/* ---------- A tab's page ---------- */
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  /* The rules marked @container below go by the width of the panel, not of the window. */
+  container-type: inline-size;
+}
+
+/*
+ * One option per row: its name and its explanation on the left, its control
+ * on the right, centred on the two lines of text.
+ */
+.settings-page .field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'label control'
+    'hint control';
+  align-items: center;
+  gap: 2px 24px;
+  padding: 10px 0;
+}
+
+/* With no explanation there is one line of text, and the control is centred on it. */
+.settings-page .field:not(:has(.field__hint)) {
+  grid-template-areas: 'label control';
+}
+
+.settings-page .field__label {
+  grid-area: label;
+}
+
+.settings-page .field__hint {
+  grid-area: hint;
+}
+
+.settings-page .field__control {
+  grid-area: control;
+  justify-content: flex-end;
+}
+
+/* A hairline between one row and the next, but not under a title. */
+.settings-page > * + .field,
+.settings-page > * + .change-key,
+.settings-page > * + .settings-actions {
+  border-top: 1px solid var(--control-line);
+}
+
+.settings-page > .settings-section-title + * {
+  border-top: 0;
+}
+
+/* A slider has the room to be longer here than in the top bar: easier to set. */
+.settings-page .slider {
+  width: 200px;
+}
+
+/* The name and the explanation of something that is not a shared Field. */
+.settings-label {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* What a row of numbers counts, written after it: "keys". */
+.settings-unit {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* A row that holds only a button, at the end of a tab. */
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 0 0;
+}
+
+/* A small title with a line on either side: "Advanced", "Fine-tune". */
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-section-title::before,
+.settings-section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--control-line);
+}
+
+/* A narrow panel: the control goes under the text instead of beside it. */
+@container (max-width: 560px) {
+  .settings-page .field,
+  .settings-page .field:not(:has(.field__hint)) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'label'
+      'hint'
+      'control';
+  }
+
+  .settings-page .field__control {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
+/* ---------- A choice made by picking a card ---------- */
+
+.choice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 12px;
+}
+
+/*
+ * The name on the left; on the right "Custom", or a question with its two
+ * answers. The row is as high as those answers from the start, so nothing
+ * below it moves when the question appears.
+ */
+.choice-group__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  min-height: 36px;
+}
+
+.choice-group__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.choice-group__custom {
+  padding: 2px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.choice-cards {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-cards--themes {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.choice-cards--presets {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@container (max-width: 640px) {
+  .choice-cards--themes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 480px) {
+  .choice-cards--presets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.choice-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--text);
+  text-align: left;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.choice-card:hover {
+  border-color: var(--control-line-strong);
+  background: var(--control-hover);
+}
+
+.choice-card:active {
+  transform: translateY(1px);
+}
+
+/* The card of the current choice: edged with the light, and ticked. */
+.choice-card[aria-pressed='true'] {
+  border-color: var(--light);
+  background: color-mix(in srgb, var(--light) 10%, var(--control));
+}
+
+.choice-card[aria-pressed='true']::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--stage-bg);
+  border-radius: 50%;
+  background: var(--light);
+}
+
+/* The tick: the bottom and right edges of a small box, turned. */
+.choice-card[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  right: 11.5px;
+  z-index: 1;
+  width: 5px;
+  height: 8px;
+  border: solid var(--light-ink);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* The card a question is being asked about. */
+.choice-card[data-asking] {
+  border-style: dashed;
+  border-color: var(--text-muted);
+}
+
+.choice-card__name {
+  margin-top: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.choice-card__description {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* ---------- The tiny picture of a theme ---------- */
+
+/*
+ * The stage in small: a sky with a few bars of light and sparks, the light
+ * line, and an octave of keys. ThemeCards.tsx hands over the theme's own
+ * colours (--preview-*, and --bar-* on each bar) and how strong its glow is.
+ */
+.theme-preview {
+  /* The night sky: almost black at the top, a deep blue-black at the bottom. */
+  --preview-night-sky: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--preview-night) 10%, var(--stage-bg)),
+    color-mix(in srgb, var(--preview-night) 60%, var(--stage-bg))
+  );
+
+  display: flex;
+  flex-direction: column;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--stage-bg);
+}
+
+.theme-preview__sky {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.theme-preview[data-background='night'] .theme-preview__sky {
+  background: var(--preview-night-sky);
+}
+
+/* A handful of stars, more of them near the top. */
+.theme-preview[data-background='stars'] .theme-preview__sky {
+  --star: color-mix(in srgb, var(--text) 85%, transparent);
+  --star-dim: color-mix(in srgb, var(--text) 45%, transparent);
+
+  background:
+    radial-gradient(circle at 9% 16%, var(--star) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 24% 42%, var(--star-dim) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 38% 11%, var(--star-dim) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 47% 30%, var(--star) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 58% 8%, var(--star) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 81% 22%, var(--star-dim) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 92% 9%, var(--star) 0.6px, transparent 1.1px),
+    radial-gradient(circle at 88% 55%, var(--star-dim) 0.6px, transparent 1.1px),
+    var(--preview-night-sky);
+}
+
+/* Two large, soft glows low in the sky, in the theme's own light. */
+.theme-preview[data-background='aurora'] .theme-preview__sky {
+  background:
+    radial-gradient(
+      ellipse 70% 75% at 22% 100%,
+      color-mix(in srgb, var(--preview-light) 50%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 65% 90% at 80% 100%,
+      color-mix(in srgb, var(--preview-deep) 75%, transparent),
+      transparent 70%
+    ),
+    var(--preview-night-sky);
+}
+
+/* The place of a bar: over its key. The bar itself is drawn a little narrower. */
+.theme-preview__bar {
+  position: absolute;
+}
+
+.theme-preview__bar::before {
+  content: '';
+  position: absolute;
+  inset: 0 10%;
+  border-radius: 2px;
+  background: linear-gradient(to top, var(--bar-bright), var(--bar-light) 30%, var(--bar-deep));
+  box-shadow: 0 0 calc(var(--preview-glow) * 6px) var(--bar-light);
+}
+
+.theme-preview[data-bar-style='neon'] .theme-preview__bar::before {
+  border: 1px solid var(--bar-bright);
+  background: color-mix(in srgb, var(--bar-light) 24%, transparent);
+}
+
+.theme-preview__spark {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--preview-bright);
+  box-shadow: 0 0 calc(var(--preview-glow) * 3px) var(--preview-light);
+}
+
+.theme-preview__line {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  height: 1px;
+  background: var(--preview-bright);
+  box-shadow: 0 0 calc(var(--preview-glow) * 8px) 1px var(--preview-light);
+}
+
+.theme-preview .mini-keys {
+  height: 28%;
+}
+
+/* ---------- A tiny picture of piano keys ---------- */
+
+/*
+ * The three key styles in small, after the piano's own (src/ui/piano.css):
+ * how the white and the black keys are filled and edged. Classic is the
+ * default; a key being played looks the same in every style.
+ */
+.mini-keys {
+  --mini-white: var(--key-ivory);
+  --mini-white-edge: color-mix(in srgb, var(--key-ebony) 62%, transparent);
+  --mini-black: var(--key-ebony);
+  --mini-black-edge: var(--key-ebony);
+
+  position: relative;
+  display: block;
+  flex: none;
+  overflow: hidden;
+  background: var(--stage-bg);
+}
+
+.mini-keys[data-key-style='midnight'] {
+  --mini-white: var(--key-ebony);
+  --mini-white-edge: var(--key-ebony-edge);
+  --mini-black: var(--stage-bg);
+  --mini-black-edge: var(--key-ebony-edge);
+}
+
+/* See-through: whatever is behind the picture shows between the outlines. */
+.mini-keys[data-key-style='glass'] {
+  --mini-white: color-mix(in srgb, var(--key-ivory) 7%, transparent);
+  --mini-white-edge: color-mix(in srgb, var(--key-ivory) 42%, transparent);
+  --mini-black: color-mix(in srgb, var(--key-ivory) 20%, transparent);
+  --mini-black-edge: color-mix(in srgb, var(--key-ivory) 55%, transparent);
+
+  background: transparent;
+}
+
+.mini-keys__key {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 0 0 1px 1px;
+}
+
+.mini-keys__key--white {
+  background: var(--mini-white);
+  box-shadow: inset -1px 0 0 var(--mini-white-edge);
+}
+
+/* Drawn over the white keys on either side, and shorter. */
+.mini-keys__key--black {
+  z-index: 1;
+  bottom: 40%;
+  background: var(--mini-black);
+  box-shadow: inset 0 0 0 1px var(--mini-black-edge);
+}
+
+.mini-keys__key--white[data-lit] {
+  background: linear-gradient(to bottom, var(--key-light-bright), var(--key-light));
+}
+
+.mini-keys__key--black[data-lit] {
+  background: var(--key-light);
+}
+
+/* Next to the name of a key style: three keys in a small frame. */
+.key-style-option .mini-keys {
+  width: 32px;
+  height: 20px;
+  border: 1px solid var(--control-line-strong);
+  border-radius: 3px;
+}
+
+/* ---------- The tiny picture of a keyboard ---------- */
+
+/*
+ * Four rows of keys, each starting a little further right than the one
+ * above, as on a real keyboard. --indent (from PresetCards.tsx) is that
+ * distance in keys.
+ */
+.keyboard-picture {
+  --key-size: 8px;
+  --key-gap: 2px;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--key-gap);
+  padding: 4px 2px;
+}
+
+.keyboard-picture__row {
+  display: flex;
+  gap: var(--key-gap);
+  margin-left: calc(var(--indent) * (var(--key-size) + var(--key-gap)));
+}
+
+/* A key the layout does not use. */
+.keyboard-picture__key {
+  flex: none;
+  width: var(--key-size);
+  height: var(--key-size);
+  border-radius: 2px;
+  background: var(--control-hover);
+}
+
+/* A key that plays a white piano key, and one that plays a black piano key. */
+.keyboard-picture__key[data-plays='white'] {
+  background: var(--key-ivory);
+}
+
+.keyboard-picture__key[data-plays='black'] {
+  background: var(--key-ebony);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--key-ivory) 75%, transparent);
+}
+
+/* ---------- Colour swatches ---------- */
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/*
+ * A round patch of colour (.swatch__dot) with a clear ring around it. The
+ * ring is the swatch's border: it shows on the chosen colour.
+ */
+.swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.swatch:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.swatch:active {
+  transform: translateY(1px);
+}
+
+.swatch[aria-checked='true'] {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+/* --swatch (from ColourSwatches.tsx) is a colour, or a wheel of colours for Rainbow. */
+.swatch__dot {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--swatch);
+  /* A hairline, so that a dark colour of the player's own still shows on the dark panel. */
+  box-shadow: inset 0 0 0 1px var(--control-line);
+}
+
+/* A swatch with its name written next to the colour. */
+.swatch--named {
+  padding-right: 12px;
+}
+
+.swatch-own {
+  position: relative;
+  display: inline-flex;
+}
+
+/*
+ * The browser's colour picker opens next to the element it belongs to. That
+ * element is not shown or clicked itself: it sits under its swatch only to
+ * say where the picker should open.
+ */
+.swatch-own__picker {
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ---------- Keys tab ---------- */
+
+.change-key {
+  padding: 12px 0;
+}
+
+.change-key__lead {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+/* A piano key is waiting for its computer key: said in the colour that key has on the piano. */
+.change-key[data-waiting] .change-key__lead {
+  color: var(--key-selected);
+  font-weight: 600;
+}
+
+/* Room for one line is kept, so nothing below moves when a message appears. */
+.change-key__detail {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 1.4em;
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* It is always on the page, with or without its text: only the text needs space after it. */
+.change-key__hint:not(:empty) {
+  margin-right: 16px;
+}
+
+.change-key__message {
+  color: var(--text);
+}
+
+/* Wide enough for "Do3 – Do6", so the two buttons around it never move. */
+.keys-range {
+  min-width: 11ch;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ---------- About tab ---------- */
+
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.about__name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.about__tagline {
+  margin: -4px 0 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.about__line {
+  margin: 0;
+  font-size: 14px;
+}
+
+.about a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.about__reset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--control-line);
+}
+
+/* ---------- Windows contrast themes ---------- */
+
+/*
+ * These themes repaint every control in a few system colours. The colours
+ * that are the point of a swatch or a picture are kept, and what is chosen
+ * is marked in the theme's own "selected" colour.
+ */
+@media (forced-colors: active) {
+  .swatch__dot,
+  .theme-preview,
+  .mini-keys,
+  .keyboard-picture {
+    forced-color-adjust: none;
+  }
+
+  .swatch[aria-checked='true'],
+  .choice-card[aria-pressed='true'] {
+    border-color: Highlight;
+  }
+
+  .choice-card[aria-pressed='true']::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .choice-card[aria-pressed='true']::after {
+    forced-color-adjust: none;
+    border-color: HighlightText;
+  }
+}

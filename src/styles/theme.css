@@ -5,35 +5,20 @@
 :root {
   color-scheme: dark;
 
-  /* Surfaces */
-  --bg: #101218;
-  --bg-glow: #1a1f2e;
-  --panel: #1a1d26;
+  /* A surface that must not be see-through (the list a drop-down opens). */
   --panel-raised: #232733;
-  --border: #303544;
-  --border-strong: #444b5e;
 
   /* Text */
   --text: #eceef4;
   --text-muted: #9ba3b5;
   --text-faint: #6b7385;
 
-  /* Accent: warm amber for "playing / on", cool blue for "selected / info" */
-  --accent: #f6b73c;
-  --accent-strong: #ffcf66;
-  --accent-ink: #2a1c00;
+  /* Cool blue for "selected / being changed", red for "this deletes or went wrong" */
   --info: #5cc8ff;
   --info-ink: #00202e;
   --danger: #ff6b6b;
-  --success: #5fd38d;
 
-  /* Piano keys */
-  --key-white: #f8f6f1;
-  --key-white-shade: #dcd8cf;
-  --key-white-pressed: #ffd98a;
-  --key-black: #1b1d24;
-  --key-black-shade: #050608;
-  --key-black-pressed: #c88a1a;
+  /* The piano key that is waiting for a computer key */
   --key-selected: #5cc8ff;
 
   /* Shape and type */
@@ -44,7 +29,50 @@
   --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
 
-  --focus-ring: 0 0 0 3px rgb(92 200 255 / 0.55);
+  /* A dark gap, then a light ring: it shows on the black stage and around any colour. */
+  --focus-ring: 0 0 0 2px #000, 0 0 0 4px #eceef4;
+
+  /* The stage, and what floats over it */
+  --stage-bg: #000;
+  --panel-glass: rgb(16 17 22 / 0.86);
+  --bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0));
+  /* Dims the stage behind the start overlay. */
+  --scrim: rgb(0 0 0 / 0.62);
+  --shadow-float: 0 24px 64px rgb(0 0 0 / 0.6);
+
+  /*
+   * The light: one colour for the bars, the sparks, the lit keys and the
+   * active controls. The app sets these five on its root element from the
+   * player's settings (src/core/colour.ts); the values here are the default
+   * look, Ember.
+   */
+  --light: #ff2a2a;
+  --light-bright: #ffd4d4;
+  --light-deep: #8c0000;
+  /* Text on something filled with --light: black or white, whichever reads. */
+  --light-ink: #000000;
+  /* How strongly the light glows, 0..1. */
+  --glow: 0.6;
+
+  /* The classic piano keys: each has a lit side (-shine or -edge) and a side in shade */
+  --key-ivory: #f6f2e9;
+  --key-ivory-shine: #fffdf8;
+  --key-ivory-shade: #d5cebf;
+  --key-ebony: #0e0f13;
+  --key-ebony-edge: #3b3e49;
+
+  /* Controls on glass: see-through fills and hairlines that sit on any background */
+  --control: rgb(255 255 255 / 0.06);
+  --control-hover: rgb(255 255 255 / 0.12);
+  --control-pressed: rgb(255 255 255 / 0.18);
+  --control-line: rgb(255 255 255 / 0.14);
+  --control-line-strong: rgb(255 255 255 / 0.3);
+
+  /* Sizes and layers shared by the pieces of the screen */
+  --top-bar-height: 52px;
+  --layer-panel: 10;
+  --layer-menu: 20;
+  --layer-overlay: 30;
 }
 
 *,
@@ -59,13 +87,15 @@ body,
   height: 100%;
 }
 
+/* The stage fills the window and the page never scrolls. */
 body {
   margin: 0;
+  overflow: hidden;
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.4;
   color: var(--text);
-  background: radial-gradient(1200px 600px at 50% -10%, var(--bg-glow), var(--bg) 70%) fixed;
+  background: var(--stage-bg);
   -webkit-font-smoothing: antialiased;
 }
 

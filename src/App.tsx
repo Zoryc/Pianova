@@ -1,78 +1,93 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { JSX, MouseEvent as ReactMouseEvent } from 'react'
-import { APP_NAME } from './app/appInfo'
+import type { CSSProperties, JSX, MouseEvent as ReactMouseEvent } from 'react'
 import { bus, engine } from './app/pianoApp'
-import type { AudioStatus } from './audio/audioEngine'
+import { inkOn, paletteFor } from './core/colour'
+import { pianoRange, slotToMidi } from './core/layout'
+import type { PianoRange } from './core/layout'
 import type { Midi } from './core/types'
 import { keyLabel, useLayoutMap } from './input/keyLabels'
 import type { LayoutMap } from './input/keyLabels'
 import { isTextEntryTarget } from './input/keyboardInput'
 import { settingsStore, useSettings } from './state/settings'
 import type { Settings } from './state/settings'
-import { AdvancedPanel } from './ui/AdvancedPanel'
-import { KeyEditor } from './ui/KeyEditor'
-import { ModeTabs } from './ui/ModeTabs'
-import { NoteTrails } from './ui/NoteTrails'
-import { NowPlaying } from './ui/NowPlaying'
-import { Piano } from './ui/Piano'
+import { DropOverlay } from './ui/DropOverlay'
+import { PlayerLine, SongProgressLine } from './ui/PlayerLine'
+import { SettingsPanel } from './ui/SettingsPanel'
+import { SongsPanel } from './ui/SongsPanel'
+import { Stage } from './ui/Stage'
 import { StartOverlay } from './ui/StartOverlay'
-import { Toolbar } from './ui/Toolbar'
-import {
-  useActiveNotes,
-  useAudioStatus,
-  useKeyboardPiano,
-  useNoStuckNotes,
-  useSoundSettings,
-} from './ui/hooks'
-import { isFunctionKey, labelModeWhileEditing, slotNoteName } from './ui/keyEditorModel'
+import { TopBar } from './ui/TopBar'
+import type { PanelName } from './ui/TopBar'
+import { useAudioStatus, useKeyboardPiano, useNoStuckNotes, useSoundSettings } from './ui/hooks'
+import { isFunctionKey } from './ui/keyEditorModel'
+import { useAutoHide } from './ui/useAutoHide'
 import { useKeyEditor } from './ui/useKeyEditor'
+import { useSongSession } from './ui/useSongs'
 
-/** What the footer says about the sound. Nothing while all is well. */
-const SOUND_STATUS_TEXT: Readonly<Record<AudioStatus, string | null>> = {
-  idle: null,
-  loading: 'Loading piano sound…',
-  ready: null,
-  fallback: 'Using basic sound (piano sound could not be loaded).',
-  error: 'Sound could not start. Click anywhere to try again.',
-}
-
-/** The licence of the piano recordings, which asks for the credit shown in the footer. */
-const PIANO_SOUND_LICENCE_URL = 'https://creativecommons.org/licenses/by/3.0/'
+/** No key letters on the falling notes: what the sky gets while that setting is off. */
+const NO_HINTS: ReadonlyMap<Midi, string> = new Map()
 
 /**
- * The whole screen, top to bottom: the name and the mode tabs, the toolbar
- * (with the Advanced panel under it when open), the notes being played, the
- * stage with the light trails and the piano, and a one-line footer.
+ * The whole screen: the stage (the sky and the piano) fills the window, and
+ * everything else floats over it. The menu at the top (the top bar, with the
+ * player line under it while a song is loaded) hides when the mouse is still.
+ * The Settings and Songs panels open from it, one at a time. Until the first
+ * click or key press, the start overlay covers it all.
  *
- * How these share the height of the window, so that the piano stays on
- * screen, is explained at the top of src/styles/app.css.
+ * How these share the window is explained at the top of src/styles/app.css.
  */
 export function App(): JSX.Element {
   const settings = useSettings()
   const layoutMap = useLayoutMap()
-  const activeNotes = useActiveNotes()
   const audioStatus = useAudioStatus()
   const keyEditor = useKeyEditor(layoutMap)
   const { editing, selectedSlot } = keyEditor
   /** False until the first click or key press, which is what lets the browser play sound. */
   const [started, setStarted] = useState(false)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-  const modeTabId = useId()
-  const modePanelId = useId()
-  const advancedPanelId = useId()
-  const stageRef = useRef<HTMLDivElement>(null)
-  const customizeButtonRef = useRef<HTMLButtonElement>(null)
+  const [openPanel, setOpenPanel] = useState<PanelName | null>(null)
+  /** The piano on screen, as the stage last reported it. A full piano until it has. */
+  const [range, setRange] = useState<PianoRange>(() => pianoRange(88, settings.baseOctave))
+  const song = useSongSession(range)
+  const menu = useAutoHide({
+    enabled: settings.autoHideMenu,
+    pinned: !started || openPanel !== null || (song.loaded && !song.playing),
+  })
 
-  const { bindings, customLabels } = settings
+  const modeTabId = useId()
+  const stageId = useId()
+  const songsPanelId = useId()
+  const settingsPanelId = useId()
+  const songsButton = useRef<HTMLButtonElement>(null)
+  const settingsButton = useRef<HTMLButtonElement>(null)
+  /** True when the last click was Enter on a focused control, not the mouse. */
+  const clickedWithKeyboard = useRef(false)
+
+  const { bindings, customLabels, keyboardType, baseOctave, showKeyHints } = settings
   const keyLabels = useMemo(
-    () => labelsBySlot(bindings, customLabels, layoutMap),
-    [bindings, customLabels, layoutMap],
+    () => labelsBySlot(bindings, customLabels, layoutMap, keyboardType),
+    [bindings, customLabels, layoutMap, keyboardType],
   )
-  const labelMode = editing ? labelModeWhileEditing(settings.labelMode) : settings.labelMode
+  const hints = useMemo(
+    () => (showKeyHints ? labelsByNote(keyLabels, baseOctave) : NO_HINTS),
+    [showKeyHints, keyLabels, baseOctave],
+  )
+  const { accent, customColour, glow } = settings
+  const light = useMemo(
+    () => lightVariables(accent, customColour, glow),
+    [accent, customColour, glow],
+  )
 
   function start(): void {
     setStarted(true)
     wakeAudio()
+  }
+
+  function togglePanel(panel: PanelName): void {
+    setOpenPanel(openPanel === panel ? null : panel)
+  }
+
+  function closePanel(): void {
+    setOpenPanel(null)
   }
 
   /** Sees every key press before the piano does. Returns true when the press is used up here. */
@@ -88,104 +103,108 @@ export function App(): JSX.Element {
       return !isFunctionKey(event.code)
     }
     wakeAudio()
+    if (event.code === 'Escape') return pressEscape(event)
     return keyEditor.handleKey(event)
+  }
+
+  /**
+   * Escape takes back one thing at a time: first the piano key that is
+   * waiting for a computer key, then the open panel.
+   */
+  function pressEscape(event: KeyboardEvent): boolean {
+    if (selectedSlot !== null) return keyEditor.handleKey(event)
+    if (openPanel === null) return false
+    // Escape still held from cancelling a selection must not also close the panel.
+    if (!event.repeat) closePanel()
+    return true
   }
 
   function handleClick(event: ReactMouseEvent): void {
     wakeAudio()
+    clickedWithKeyboard.current = isKeyboardClick(event)
     giveKeyboardBackToPiano(event)
   }
 
   useSoundSettings(settings)
-  useNoStuckNotes(settings.baseOctave)
+  useNoStuckNotes(baseOctave, range)
   useKeyboardPiano(interceptKey)
 
-  // The piano's keys can hold the keyboard focus only while customizing, where
-  // they are reached with Tab. When customizing ends (Escape) while one of
-  // them has it, the focus goes to the "Customize keys" button instead of
+  // The piano's keys can hold the keyboard focus only while the computer keys
+  // are being chosen, where they are reached with Tab. When that ends while
+  // one of them has it, the focus goes to the "Settings" button instead of
   // being lost: someone working with the keyboard alone keeps their place.
   useEffect(() => {
-    if (!editing && holdsFocus(stageRef.current)) customizeButtonRef.current?.focus()
-  }, [editing])
+    if (!editing && holdsFocus(document.getElementById(stageId))) settingsButton.current?.focus()
+  }, [editing, stageId])
+
+  // The same when the player line goes away under the focus: "Close", pressed with Enter.
+  useEffect(() => {
+    if (!song.loaded && clickedWithKeyboard.current && focusIsNowhere()) {
+      songsButton.current?.focus()
+    }
+  }, [song.loaded])
 
   return (
-    <>
-      <div className="app" inert={!started} onClick={handleClick}>
-        <header className="app-header">
-          <h1 className="app-title">{APP_NAME}</h1>
-          <ModeTabs tabId={modeTabId} panelId={modePanelId} />
-        </header>
+    <div
+      className={menu.visible ? 'app' : 'app cursor-hidden'}
+      style={light}
+      onClick={handleClick}
+    >
+      <div className="app__screen" inert={!started}>
+        <TopBar
+          settings={settings}
+          openPanel={openPanel}
+          songsPanelId={songsPanelId}
+          settingsPanelId={settingsPanelId}
+          onToggleSongs={() => togglePanel('songs')}
+          onToggleSettings={() => togglePanel('settings')}
+          menu={menu}
+          modeTabId={modeTabId}
+          modePanelId={stageId}
+          songsButtonRef={songsButton}
+          settingsButtonRef={settingsButton}
+        >
+          <PlayerLine />
+        </TopBar>
 
-        <main className="app-main">
-          <div className="mode-panel" id={modePanelId} role="tabpanel" aria-labelledby={modeTabId}>
-            <Toolbar
+        <div className="app__panels">
+          {openPanel === 'songs' && <SongsPanel id={songsPanelId} onClose={closePanel} />}
+          {openPanel === 'settings' && (
+            <SettingsPanel
+              id={settingsPanelId}
               settings={settings}
-              editing={editing}
-              advancedOpen={advancedOpen}
-              advancedPanelId={advancedPanelId}
-              customizeButtonRef={customizeButtonRef}
-              onToggleEditing={editing ? keyEditor.close : keyEditor.open}
-              onToggleAdvanced={() => setAdvancedOpen(!advancedOpen)}
+              keyEditor={keyEditor}
+              layoutMap={layoutMap}
+              onClose={closePanel}
             />
-            {advancedOpen && <AdvancedPanel id={advancedPanelId} settings={settings} />}
+          )}
+        </div>
 
-            <NowPlaying
-              notes={activeNotes}
-              noteNaming={settings.noteNaming}
-              transpose={settings.transpose}
-              showHint={!editing}
-            />
+        <Stage
+          id={stageId}
+          labelledBy={modeTabId}
+          bus={bus}
+          settings={settings}
+          keyLabels={keyLabels}
+          hints={hints}
+          falling={song.falling}
+          audioStatus={audioStatus}
+          showHint={started && !editing}
+          editMode={editing}
+          selectedSlot={selectedSlot}
+          onSelectSlot={keyEditor.select}
+          onNoteDown={playPointerNote}
+          onNoteUp={releasePointerNote}
+          onRangeChange={setRange}
+          onSkyClick={closePanel}
+        />
 
-            {editing && (
-              <KeyEditor
-                selectedNote={selectedSlot === null ? null : slotNoteName(settings, selectedSlot)}
-                message={keyEditor.message}
-                onReset={keyEditor.resetKeys}
-                onDone={keyEditor.close}
-                returnFocusTo={customizeButtonRef}
-              />
-            )}
-
-            <div ref={stageRef} className={editing ? 'stage stage--editing' : 'stage'}>
-              {settings.showTrails && (
-                <div className="stage__trails">
-                  <NoteTrails bus={bus} baseOctave={settings.baseOctave} />
-                </div>
-              )}
-              <Piano
-                baseOctave={settings.baseOctave}
-                activeNotes={activeNotes}
-                labelMode={labelMode}
-                noteNaming={settings.noteNaming}
-                keyLabels={keyLabels}
-                onNoteDown={playPointerNote}
-                onNoteUp={releasePointerNote}
-                editMode={editing}
-                selectedSlot={selectedSlot}
-                onSelectSlot={keyEditor.select}
-              />
-            </div>
-          </div>
-        </main>
-
-        <footer className="app-footer">
-          <span>Space turns sustain on and off.</span>
-          {/* Always present, so that screen readers announce the status when it changes. */}
-          <span className="app-footer__status" role="status" data-status={audioStatus}>
-            {SOUND_STATUS_TEXT[audioStatus]}
-          </span>
-          <span className="app-footer__credit">
-            Piano sound: Salamander Grand Piano by Alexander Holm (
-            <a href={PIANO_SOUND_LICENCE_URL} target="_blank" rel="noreferrer">
-              CC BY 3.0
-            </a>
-            )
-          </span>
-        </footer>
+        <SongProgressLine />
       </div>
 
       {!started && <StartOverlay onStart={start} />}
-    </>
+      <DropOverlay onFilesDropped={() => setOpenPanel('songs')} />
+    </div>
   )
 }
 
@@ -211,16 +230,20 @@ function browserHasSeenNoGesture(): boolean {
   return navigator.userActivation?.hasBeenActive === false
 }
 
+/** `detail` is 0 when the "click" was Enter on a focused control. */
+function isKeyboardClick(event: ReactMouseEvent): boolean {
+  return event.detail === 0
+}
+
 /**
  * A button, slider or link that was clicked would keep the keyboard: a focus
  * ring appears on it at the next key press, and Enter presses it again. So
- * after a click with the mouse or a finger it lets go, and the player can go
- * straight back to playing.
+ * after a click with the mouse it lets go, and the player can go straight
+ * back to playing.
  */
 function giveKeyboardBackToPiano(event: ReactMouseEvent): void {
-  // `detail` is 0 when the "click" was Enter on a focused control: someone
-  // working with the keyboard alone keeps their place on the page.
-  if (event.detail === 0) return
+  // Someone working with the keyboard alone keeps their place on the page.
+  if (isKeyboardClick(event)) return
   const focused = document.activeElement
   if (focused instanceof HTMLElement && focused.matches('button, input[type="range"], a')) {
     focused.blur()
@@ -232,21 +255,57 @@ function holdsFocus(container: HTMLElement | null): boolean {
   return container !== null && container.contains(document.activeElement)
 }
 
+/** True when no control has the keyboard focus: the one that had it has left the page. */
+function focusIsNowhere(): boolean {
+  return document.activeElement === null || document.activeElement === document.body
+}
+
+/**
+ * The colour of the light and how strongly it glows, as the variables every
+ * stylesheet reads. They are set on the app's root element, so the menu and
+ * the panels take the player's colour too.
+ */
+function lightVariables(
+  accent: Settings['accent'],
+  customColour: string,
+  glow: number,
+): CSSProperties {
+  const palette = paletteFor(accent, customColour)
+  return {
+    '--light': palette.light,
+    '--light-bright': palette.bright,
+    '--light-deep': palette.deep,
+    '--light-ink': inkOn(palette.light),
+    '--glow': glow,
+  } as CSSProperties
+}
+
 /** Piano key -> the label of the computer key that plays it (the keycaps drawn on the piano). */
 function labelsBySlot(
   bindings: Settings['bindings'],
   customLabels: Settings['customLabels'],
   layoutMap: LayoutMap | null,
+  keyboardType: Settings['keyboardType'],
 ): ReadonlyMap<number, string> {
   const labels = new Map<number, string>()
   for (const [code, slot] of Object.entries(bindings)) {
-    labels.set(slot, keyLabel(code, layoutMap, customLabels))
+    labels.set(slot, keyLabel(code, layoutMap, customLabels, keyboardType))
   }
   return labels
 }
 
-// Notes played with the mouse or a finger. Like the keyboard's, they go to
-// the bus, played as hard as the "Touch" setting says at that moment.
+/** Note -> the label of the computer key that plays it (the letters written on falling notes). */
+function labelsByNote(
+  keyLabels: ReadonlyMap<number, string>,
+  baseOctave: number,
+): ReadonlyMap<Midi, string> {
+  const labels = new Map<Midi, string>()
+  for (const [slot, label] of keyLabels) labels.set(slotToMidi(slot, baseOctave), label)
+  return labels
+}
+
+// Notes played with the mouse. Like the keyboard's, they go to the bus,
+// played as hard as the "Touch" setting says at that moment.
 
 function playPointerNote(midi: Midi): void {
   bus.noteOn(midi, 'pointer', { velocity: settingsStore.get().velocity })

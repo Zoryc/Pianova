@@ -139,7 +139,9 @@ function assignKey(
 ): KeyChange {
   const { bindings, replacedCode, vacatedSlot } = assignBinding(settings.bindings, press.code, slot)
   const customLabels = withLabel(settings.customLabels, press.code, labelFromEventKey(press.key))
-  const quoted = (code: string): string => `"${keyLabel(code, layoutMap, customLabels)}"`
+  // The same label the piano draws on the key, so the sentence names what the player sees.
+  const quoted = (code: string): string =>
+    `"${keyLabel(code, layoutMap, customLabels, settings.keyboardType)}"`
 
   const sentences = [`${quoted(press.code)} now plays ${slotNoteName(settings, slot)}.`]
   if (replacedCode !== null) sentences.push(`${quoted(replacedCode)} no longer plays a note.`)

@@ -29,8 +29,8 @@ const audio = vi.hoisted(() => {
         listeners.delete(listener)
       }
     },
-    noteOn(midi: number): void {
-      calls.push(`on:${midi}`)
+    noteOn(midi: number, velocity: number): void {
+      calls.push(`on:${midi} at ${velocity}`)
     },
     noteOff(): void {},
     setSustain(on: boolean): void {
@@ -71,13 +71,22 @@ const STORAGE_KEY = 'pianoapp.settings.v1'
 
 type TestingLibrary = typeof import('@testing-library/react')
 
+/** The tabs of the Settings panel. */
+type SettingsTab = 'Sound' | 'Keys' | 'Piano' | 'Look' | 'About'
+
 /** One page load: fresh modules, the app drawn, and the tools to use it. */
 interface Visit {
   screen: TestingLibrary['screen']
   fireEvent: TestingLibrary['fireEvent']
+  within: TestingLibrary['within']
   key(type: 'keydown' | 'keyup', code: string, init?: KeyboardEventInit): void
   tap(code: string, init?: KeyboardEventInit): void
+  /** A click with the mouse on the button of that name. */
   click(name: string | RegExp): void
+  /** Opens Settings, if it is not open, and shows one of its tabs. */
+  showSettingsTab(tab: SettingsTab): void
+  /** The Settings panel, which must be open. */
+  settingsPanel(): HTMLElement
   settings(): import('./state/settings').Settings
   /** Closes the page. */
   leave(): void
@@ -93,7 +102,7 @@ async function visit(): Promise<Visit> {
   const library = await import('@testing-library/react')
   const { App } = await import('./App')
   const { settingsStore } = await import('./state/settings')
-  const { act, cleanup, fireEvent, render, screen } = library
+  const { act, cleanup, fireEvent, render, screen, within } = library
 
   render(createElement(App))
 
@@ -107,6 +116,7 @@ async function visit(): Promise<Visit> {
   const page: Visit = {
     screen,
     fireEvent,
+    within,
     key,
     tap(code, init) {
       key('keydown', code, init)
@@ -115,6 +125,11 @@ async function visit(): Promise<Visit> {
     click(name) {
       fireEvent.click(screen.getByRole('button', { name }), { detail: 1 })
     },
+    showSettingsTab(tab) {
+      if (!screen.queryByRole('dialog', { name: 'Settings' })) page.click('Settings')
+      fireEvent.click(screen.getByRole('tab', { name: tab }), { detail: 1 })
+    },
+    settingsPanel: () => screen.getByRole('dialog', { name: 'Settings' }),
     settings: () => settingsStore.get(),
     leave() {
       act(() => {
@@ -162,14 +177,11 @@ describe('from one visit to the next', () => {
       target: { value: '50' },
     })
     first.tap('Space') // sustain on
-    first.click(/Higher/)
-    first.fireEvent.change(first.screen.getByRole('combobox', { name: 'Labels' }), {
-      target: { value: 'keys' },
-    })
-    first.click(/Advanced/)
+
+    // Settings, tab by tab.
+    first.showSettingsTab('Sound')
     first.click('Transpose up')
     first.click('Transpose up')
-    first.click('Do Ré Mi')
     first.click('Long')
     first.fireEvent.change(first.screen.getByRole('slider', { name: 'Room echo' }), {
       target: { value: '40' },
@@ -177,11 +189,26 @@ describe('from one visit to the next', () => {
     first.fireEvent.change(first.screen.getByRole('slider', { name: 'Touch' }), {
       target: { value: '30' },
     })
-    // Customize keys: the lowest piano key gets the Z key.
-    first.click('Customize keys')
+
+    first.showSettingsTab('Piano')
+    first.fireEvent.change(first.screen.getByRole('combobox', { name: 'Labels on the keys' }), {
+      target: { value: 'keys' },
+    })
+    first.click('Do Ré Mi')
+    first.click('61')
+    first.click('Glass')
+
+    first.showSettingsTab('Look')
+    first.fireEvent.click(first.screen.getByRole('radio', { name: 'Blue' }), { detail: 1 })
+    first.fireEvent.click(first.screen.getByRole('switch', { name: 'Light bars' }), { detail: 1 })
+
+    // The Keys tab: the computer keys move one octave higher, and the lowest
+    // piano key they can play gets the Z key.
+    first.showSettingsTab('Keys')
+    first.click(/Higher/)
     first.fireEvent.click(first.screen.getByRole('button', { name: 'Do4' }), { detail: 1 })
     first.tap('KeyZ', { key: 'z' })
-    first.click('Done')
+    first.click('Close Settings')
     const left = first.settings()
     first.leave()
 
@@ -197,6 +224,10 @@ describe('from one visit to the next', () => {
       release: 'long',
       reverb: 0.4,
       velocity: 0.3,
+      pianoSize: 61,
+      keyStyle: 'glass',
+      accent: 'blue',
+      showTrails: false,
     })
     expect(second.settings().bindings.KeyZ).toBe(0)
 
@@ -206,29 +237,69 @@ describe('from one visit to the next', () => {
     )
     expect(audio.calls).not.toContain('start')
 
-    // And the screen shows them.
+    // And the screen shows them: the menu, the stage and the piano first.
     second.tap('Enter')
     const { screen } = second
     expect(screen.getByRole('slider', { name: 'Volume' })).toHaveProperty('value', '50')
     expect(screen.getByRole('switch', { name: 'Sustain' }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('Do4 – Do7')).toBeTruthy()
-    expect(screen.getByRole('combobox', { name: 'Labels' })).toHaveProperty('value', 'keys')
     expect(screen.getByText('Transposed +2')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Do4, key Z' })).toBeTruthy()
-    // Closed again: the Advanced panel is not something the app remembers.
-    expect(screen.queryByText('Advanced settings')).toBeNull()
+    const piano = screen.getByRole('group', { name: 'Piano' })
+    expect(piano.querySelectorAll('.piano-key')).toHaveLength(61)
+    expect(piano.querySelectorAll('.piano-key__note')).toHaveLength(0)
+    expect(piano.getAttribute('data-key-style')).toBe('glass')
+    const light = document.querySelector<HTMLElement>('.app')?.style.getPropertyValue('--light')
+    expect(light).toBe('#2f8bff')
+    // Closed again: an open panel is not something the app remembers.
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // Then Settings, which opens on its first tab: the tab last used is not remembered either.
+    second.click('Settings')
+    const inSettings = second.within(second.settingsPanel())
+    const isChosen = (name: string): string | null =>
+      inSettings.getByRole('button', { name }).getAttribute('aria-pressed')
+    const isOn = (name: string): string | null =>
+      inSettings.getByRole('switch', { name }).getAttribute('aria-checked')
+    const firstTab = inSettings.getByRole('tab', { name: 'Sound' })
+    expect(firstTab.getAttribute('aria-selected')).toBe('true')
+    expect(inSettings.getByRole('slider', { name: 'Volume' })).toHaveProperty('value', '50')
+    expect(isOn('Sustain')).toBe('true')
+    expect(inSettings.getByRole('slider', { name: 'Touch' })).toHaveProperty('value', '30')
+    expect(inSettings.getByRole('slider', { name: 'Room echo' })).toHaveProperty('value', '40')
+    expect(isChosen('Long')).toBe('true')
+    expect(inSettings.getByText('+2')).toBeTruthy()
+
+    second.showSettingsTab('Keys')
+    expect(inSettings.getByText('Do4 – Do7')).toBeTruthy()
+
+    second.showSettingsTab('Piano')
+    expect(inSettings.getByRole('combobox', { name: 'Labels on the keys' })).toHaveProperty(
+      'value',
+      'keys',
+    )
+    expect(isChosen('Do Ré Mi')).toBe('true')
+    expect(isChosen('61')).toBe('true')
+    expect(isChosen('Glass')).toBe('true')
+
+    second.showSettingsTab('Look')
+    const blue = inSettings.getByRole('radio', { name: 'Blue' })
+    expect(blue.getAttribute('aria-checked')).toBe('true')
+    expect(isOn('Light bars')).toBe('false')
+    second.click('Close Settings')
 
     // The key the player chose plays, as hard as the saved Touch says.
     second.tap('KeyZ', { key: 'z' })
-    expect(audio.calls).toContain('on:60')
+    expect(audio.calls).toContain('on:60 at 0.3')
   })
 
   it('keys put back to the default stay at the default', async () => {
     const first = await visit()
     first.tap('Enter')
-    first.click('Customize keys')
+    first.showSettingsTab('Keys')
     first.fireEvent.click(first.screen.getByRole('button', { name: 'C3' }), { detail: 1 })
     first.tap('KeyZ', { key: 'z' })
+    expect(first.settings().bindings.KeyZ).toBe(0)
+    expect(first.settings().customLabels).toEqual({ KeyZ: 'Z' })
     first.click('Reset to default keys')
     first.click('Yes')
     first.leave()
@@ -290,8 +361,8 @@ describe('a browser that refuses to store anything', () => {
     const page = await visit()
     page.tap('Enter')
     page.tap('Space')
+    page.showSettingsTab('Keys')
     page.click(/Higher/)
-    page.click('Customize keys')
     page.fireEvent.click(page.screen.getByRole('button', { name: 'C4' }), { detail: 1 })
     page.tap('KeyZ', { key: 'z' })
 

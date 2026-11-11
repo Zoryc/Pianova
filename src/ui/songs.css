@@ -1,0 +1,425 @@
+/*
+ * Songs: the Songs panel, the player line with its options, the progress line
+ * along the top of the window, and the drop overlay.
+ *
+ * Buttons, sliders, switches, fields, scroll bars and the floating panel get
+ * their look from chrome.css. This file lays them out, and draws the few
+ * things only songs have. Every colour is a token from theme.css.
+ */
+
+/* ---------- Songs panel ---------- */
+
+.songs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.songs__import {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.songs__import-hint {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Room for one line is kept, so the lists do not move when a message appears. */
+.songs__messages {
+  min-height: 1.4em;
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.songs__message {
+  margin: 0;
+  /* A file name can be one long word. */
+  overflow-wrap: anywhere;
+}
+
+.songs__message[data-problem='true'] {
+  color: var(--danger);
+}
+
+.songs__group {
+  min-width: 0;
+}
+
+.songs__heading {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.songs__empty {
+  margin: 0;
+  padding: 8px 0;
+  border-top: 1px solid var(--control-line);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.song-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.song-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 4px 0;
+  border-top: 1px solid var(--control-line);
+}
+
+/* Takes the room the buttons leave, and is cut with "…" when it is longer. */
+.song-row__title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-row__length {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.song-row__actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+/* The name of a song while it is being changed: a text field where the title was. */
+.song-row__name {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--control-line-strong);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- Player line ---------- */
+
+/*
+ * A strip of glass as wide as its parent allows, centred. The app puts it
+ * under the top bar. Its options open below it without moving anything.
+ */
+.player-line {
+  position: relative;
+  width: min(1120px, 100% - 32px);
+  margin: 0 auto;
+  user-select: none;
+}
+
+.player-line__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-glass);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.player-line__icon {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+/*
+ * The title and the position share the width the other controls leave, two
+ * parts to three. Both give some of it up when the window gets narrower.
+ */
+.player-line__title {
+  flex: 2 1 0;
+  min-width: 64px;
+  max-width: 320px;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Time played, the slider, the length of the song. The slider takes what is left. */
+.player-line__position {
+  display: flex;
+  flex: 3 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 200px;
+}
+
+.player-line__position .slider {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+/* Wide enough for "1:02:15" not to push the slider about each second. */
+.player-line__time {
+  flex: none;
+  min-width: 4ch;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.player-line__speed {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-line__speed .slider {
+  width: 88px;
+}
+
+/*
+ * A window too narrow for a slider of a useful length in the row: the
+ * position gets a row of its own, under the other controls.
+ */
+@media (max-width: 959px) {
+  .player-line__position {
+    flex-basis: 100%;
+    order: 1;
+  }
+}
+
+/* ---------- Song options ---------- */
+
+/*
+ * Hangs under the right end of the player line, where its button is. The
+ * parts of the song are on the left and the two switches on the right; in a
+ * narrow window the switches go under the parts. It stays low, so that it
+ * does not reach the piano, and scrolls inside if it must.
+ */
+.song-options {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 24px;
+  width: max-content;
+  max-width: 100%;
+  max-height: min(340px, 44vh);
+  padding: 16px;
+  overflow: hidden auto;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  background: var(--panel-glass);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(12px);
+}
+
+.song-options > .field,
+.song-options__switches {
+  flex: none;
+  width: 320px;
+  max-width: 100%;
+}
+
+.song-options__switches {
+  display: grid;
+  gap: 12px;
+}
+
+/* The name of a switch and the switch share a row, with the explanation under them. */
+.song-options__switches .field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 12px;
+}
+
+.song-options__switches .field__hint {
+  grid-column: 1 / -1;
+}
+
+/*
+ * A song can have many parts: the list scrolls by itself after four of them.
+ * It has one column, exactly as wide as the list, so that a long name is cut
+ * instead of making the list scroll sideways. The space around the parts is
+ * for the focus ring, which the scrolling would cut off.
+ */
+.song-parts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  width: 100%;
+  max-height: 158px;
+  margin: 0;
+  padding: 4px;
+  overflow: hidden auto;
+  list-style: none;
+}
+
+.song-part {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  transition: background-color 120ms ease-out;
+}
+
+.song-part:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+/* The one part left checked cannot be unchecked. It stays as readable as the others. */
+.song-part:disabled {
+  cursor: default;
+}
+
+.song-part__box {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--control-line-strong);
+  border-radius: 4px;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+
+.song-part[aria-checked='true'] .song-part__box {
+  border-color: var(--light);
+  background: var(--light);
+}
+
+/* The tick: two sides of a small box, turned. */
+.song-part[aria-checked='true'] .song-part__box::after {
+  width: 9px;
+  height: 5px;
+  border: solid var(--light-ink);
+  border-width: 0 0 2px 2px;
+  content: '';
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.song-part__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-options__off-piano {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ---------- Progress line ---------- */
+
+/*
+ * Two pixels along the very top edge of the window, above the menu, filled
+ * from the left as far as the song has got (--song-progress, 0..1, set by
+ * the component).
+ */
+.song-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: calc(var(--layer-menu) + 1);
+  width: 100%;
+  height: 2px;
+  background: var(--light);
+  box-shadow: 0 0 calc(12px * var(--glow)) var(--light);
+  transform: scaleX(var(--song-progress, 0));
+  transform-origin: left;
+  /* The player reports where it is ten times a second: this smooths the steps between. */
+  transition: transform 120ms linear;
+  pointer-events: none;
+}
+
+/* ---------- Drop overlay ---------- */
+
+/* Covers the window while files are dragged over it. It never catches the mouse. */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-overlay);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--scrim);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+/* A dashed frame just inside the edges of the window: "anywhere in here". */
+.drop-overlay::before {
+  position: absolute;
+  inset: 16px;
+  border: 2px dashed var(--light);
+  border-radius: var(--radius-lg);
+  content: '';
+}
+
+.drop-overlay__text {
+  margin: 0;
+  padding: 20px 36px;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-glass);
+  box-shadow: var(--shadow-float);
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ---------- Windows contrast themes ---------- */
+
+/*
+ * These themes repaint everything in a few system colours. What says "this
+ * part is checked" and "the song has got this far" is painted in the theme's
+ * own "selected" colours, as chrome.css does for its switches.
+ */
+@media (forced-colors: active) {
+  .song-part[aria-checked='true'] .song-part__box,
+  .song-progress {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .song-part[aria-checked='true'] .song-part__box::after {
+    border-color: HighlightText;
+  }
+}

@@ -1,4 +1,5 @@
 import type { JSX } from 'react'
+import './chrome.css'
 
 interface ModeTabsProps {
   /** The id to give the Free Play tab, so the page below can say which tab it belongs to. */
@@ -11,9 +12,10 @@ interface ModeTabsProps {
 const COMING_MODES = ['Practice', 'Real-time'] as const
 
 /**
- * The app's only navigation: one tab per mode. Free Play is the only mode so
- * far, so it is always the selected tab; the others are shown greyed out with
- * a "Soon" badge, and cannot be reached with the Tab key.
+ * The app's only navigation: one tab per mode, in the top bar. Free Play is
+ * the only mode so far, so it is always the selected tab; the others are
+ * shown greyed out with a "Soon" badge, and cannot be reached with the Tab
+ * key. (In a narrow window the stylesheet leaves those out.)
  */
 export function ModeTabs({ tabId, panelId }: ModeTabsProps): JSX.Element {
   return (

@@ -29,6 +29,110 @@ export const DEFAULT_BINDINGS: Bindings = Object.freeze({
   Quote: 29, // F
 })
 
+/**
+ * Two rows per octave, laid out like the piano itself: a row of letters plays
+ * the white keys and the keys just above it, in the gaps, play the black keys.
+ */
+const TWO_OCTAVES_BINDINGS: Bindings = Object.freeze({
+  // Low octave: bottom row, with the black keys on the home row.
+  KeyZ: 0, // C
+  KeyS: 1, // C♯
+  KeyX: 2, // D
+  KeyD: 3, // D♯
+  KeyC: 4, // E
+  KeyV: 5, // F
+  KeyG: 6, // F♯
+  KeyB: 7, // G
+  KeyH: 8, // G♯
+  KeyN: 9, // A
+  KeyJ: 10, // A♯
+  KeyM: 11, // B
+  // High octave: top row of letters, with the black keys on the digits.
+  KeyQ: 12, // C (middle C)
+  Digit2: 13, // C♯
+  KeyW: 14, // D
+  Digit3: 15, // D♯
+  KeyE: 16, // E
+  KeyR: 17, // F
+  Digit5: 18, // F♯
+  KeyT: 19, // G
+  Digit6: 20, // G♯
+  KeyY: 21, // A
+  Digit7: 22, // A♯
+  KeyU: 23, // B
+  // The same two rows carry on a little way into the next octave.
+  KeyI: 24, // C
+  Digit9: 25, // C♯
+  KeyO: 26, // D
+  Digit0: 27, // D♯
+  KeyP: 28, // E
+  BracketLeft: 29, // F
+  Equal: 30, // F♯
+  BracketRight: 31, // G
+})
+
+/** One row of letters per octave, white keys only, and one more key for the top C. */
+const WHITE_KEYS_BINDINGS: Bindings = Object.freeze({
+  // First octave: bottom row.
+  KeyZ: 0, // C
+  KeyX: 2, // D
+  KeyC: 4, // E
+  KeyV: 5, // F
+  KeyB: 7, // G
+  KeyN: 9, // A
+  KeyM: 11, // B
+  // Second octave: home row.
+  KeyA: 12, // C (middle C, as in the default keys)
+  KeyS: 14, // D
+  KeyD: 16, // E
+  KeyF: 17, // F
+  KeyG: 19, // G
+  KeyH: 21, // A
+  KeyJ: 23, // B
+  // Third octave: top row.
+  KeyQ: 24, // C
+  KeyW: 26, // D
+  KeyE: 28, // E
+  KeyR: 29, // F
+  KeyT: 31, // G
+  KeyY: 33, // A
+  KeyU: 35, // B
+  KeyI: 36, // C, the last key of the piano
+})
+
+export type KeyPresetId = 'home-row' | 'two-octaves' | 'white-keys'
+
+/** A ready-made set of keys the player can choose with one click. */
+export interface KeyPreset {
+  id: KeyPresetId
+  /** "Home row", "Two octaves", "White keys only" */
+  name: string
+  description: string
+  bindings: Bindings
+}
+
+/** In the order shown to the player. `DEFAULT_BINDINGS` is the 'home-row' preset's bindings. */
+export const KEY_PRESETS: readonly KeyPreset[] = Object.freeze([
+  Object.freeze({
+    id: 'home-row',
+    name: 'Home row',
+    description: 'The middle row plays the white keys, the row above plays the black keys.',
+    bindings: DEFAULT_BINDINGS,
+  }),
+  Object.freeze({
+    id: 'two-octaves',
+    name: 'Two octaves',
+    description: 'Two rows for a low octave, two rows for a high octave.',
+    bindings: TWO_OCTAVES_BINDINGS,
+  }),
+  Object.freeze({
+    id: 'white-keys',
+    name: 'White keys only',
+    description: 'Three rows, three octaves, no black keys. Good for simple tunes.',
+    bindings: WHITE_KEYS_BINDINGS,
+  }),
+])
+
 const LETTERS = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']
 const DIGITS = [...'0123456789']
 
@@ -136,6 +240,20 @@ export function sanitizeBindings(raw: unknown): Bindings | null {
     kept.push([code, slot])
   }
   return toBindings(kept)
+}
+
+/** The preset whose keys are exactly these, or null ("Custom"). */
+export function matchingPreset(bindings: Bindings): KeyPresetId | null {
+  return KEY_PRESETS.find((preset) => sameBindings(preset.bindings, bindings))?.id ?? null
+}
+
+/** Same keys playing the same notes, in whatever order they are stored. */
+function sameBindings(first: Bindings, second: Bindings): boolean {
+  const entries = Object.entries(first)
+  return (
+    entries.length === Object.keys(second).length &&
+    entries.every(([code, slot]) => slotForCode(second, code) === slot)
+  )
 }
 
 function slotForCode(bindings: Bindings, code: string): number | null {

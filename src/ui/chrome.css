@@ -1,0 +1,882 @@
+/*
+ * The chrome: everything on screen that is not the piano or the light. The
+ * small controls every panel uses (buttons, switches, sliders, tabs…), the
+ * top bar, the floating panel and the start overlay.
+ *
+ * This is the one place that decides how those look. A panel adds layout of
+ * its own in its own stylesheet, and nothing else.
+ *
+ * Dark, see-through and quiet, so that it never competes with the light.
+ * What is active or switched on takes the colour of the light: --light, with
+ * --light-ink for anything written on it. (Never --light for text itself: a
+ * dark colour of the player's own would not be readable.) Every colour comes
+ * from theme.css.
+ *
+ * Spacing is in multiples of 4px. Every control is at least 36px high and
+ * answers hover, press and keyboard focus within 80 to 160 ms.
+ *
+ * The focus ring is drawn by theme.css, as a shadow around whatever has the
+ * focus. So a control never gets a shadow of its own here (it would replace
+ * the ring), and nothing here takes the ring away. Only the start overlay,
+ * which covers the screen, moves it onto its line of text.
+ */
+
+/* ---------- Icons ---------- */
+
+/* Line drawings in the colour of the text around them. */
+.icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- Buttons ---------- */
+
+/*
+ * Each kind of button only sets the --button-* variables; this rule turns
+ * them into the actual look, so kinds and states combine without clashing.
+ */
+.button {
+  --button-fill: var(--control);
+  --button-fill-hover: var(--control-hover);
+  --button-fill-pressed: var(--control-pressed);
+  --button-line: var(--control-line);
+  --button-ink: var(--text);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--button-line);
+  border-radius: 999px;
+  background: var(--button-fill);
+  color: var(--button-ink);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    filter 160ms ease-out,
+    transform 80ms ease-out;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--button-fill-hover);
+}
+
+.button:active:not(:disabled) {
+  background: var(--button-fill-pressed);
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The main action: filled with the light. */
+.button--primary {
+  --button-fill: var(--light);
+  --button-fill-hover: color-mix(in srgb, var(--light-bright) 24%, var(--light));
+  --button-fill-pressed: color-mix(in srgb, var(--light-deep) 24%, var(--light));
+  --button-line: transparent;
+  --button-ink: var(--light-ink);
+}
+
+/* It glows a little under the mouse, as much as the light on the stage does. */
+.button--primary:hover:not(:disabled) {
+  --button-glow: color-mix(in srgb, var(--light) 70%, transparent);
+
+  filter: drop-shadow(0 0 calc(var(--glow) * 8px) var(--button-glow));
+}
+
+/* A button that stays in the background until it is needed. */
+.button--quiet {
+  --button-fill: transparent;
+  --button-line: transparent;
+  --button-ink: var(--text-muted);
+}
+
+.button--quiet:hover:not(:disabled),
+.button--quiet[aria-expanded='true'] {
+  --button-ink: var(--text);
+}
+
+/* The button of a panel that is open. */
+.button--quiet[aria-expanded='true'] {
+  --button-fill: var(--control-hover);
+  --button-fill-hover: var(--control-pressed);
+  --button-line: var(--control-line);
+}
+
+/* The "Yes" of a question that deletes or resets something. */
+.button--danger {
+  --button-fill-hover: color-mix(in srgb, var(--danger) 18%, transparent);
+  --button-fill-pressed: color-mix(in srgb, var(--danger) 28%, transparent);
+  --button-line: color-mix(in srgb, var(--danger) 60%, transparent);
+  --button-ink: var(--danger);
+}
+
+/* A single character: − or +. */
+.button--round {
+  width: 36px;
+  padding: 0;
+  font-size: 18px;
+}
+
+/* A single icon. */
+.button--icon {
+  width: 36px;
+  padding: 0;
+}
+
+.button__chevron {
+  font-size: 12px;
+  transition: transform 160ms ease-out;
+}
+
+.button[aria-expanded='true'] .button__chevron {
+  transform: rotate(180deg);
+}
+
+/* ---------- A control with its label ---------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field__label {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.field__control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.field__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ---------- Slider ---------- */
+
+/*
+ * A thin line with a round thumb. The line is lit, in the colour of the
+ * light, from its start up to the thumb.
+ */
+.slider {
+  --slider-line: 4px;
+  --slider-thumb: 16px;
+
+  width: 128px;
+  height: 36px;
+  margin: 0;
+  /* Cuts the line, which the thumb draws far past both ends, to the slider's own length. */
+  overflow: hidden;
+  border-radius: 999px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  transition: box-shadow 120ms ease-out;
+}
+
+/* Chrome and Edge. */
+.slider::-webkit-slider-thumb {
+  width: var(--slider-thumb);
+  height: var(--slider-thumb);
+  border-radius: 50%;
+  appearance: none;
+  background: var(--text);
+  /*
+   * Chrome has no part for "the line up to the thumb", so the thumb draws the
+   * whole line itself, as a border picture that sticks out sideways: lit on
+   * its left, plain on its right, as thick as --slider-line.
+   */
+  border-image: linear-gradient(to right, var(--light) 50%, var(--control-pressed) 0) 0 1 /
+    calc(50% - var(--slider-line) / 2) 100vw / 0 100vw;
+  transition: box-shadow 120ms ease-out;
+}
+
+/* Firefox, which has the parts. */
+.slider::-moz-range-track {
+  height: var(--slider-line);
+  border-radius: 999px;
+  background: var(--control-pressed);
+}
+
+.slider::-moz-range-progress {
+  height: var(--slider-line);
+  border-radius: 999px;
+  background: var(--light);
+}
+
+.slider::-moz-range-thumb {
+  width: var(--slider-thumb);
+  height: var(--slider-thumb);
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  transition: box-shadow 120ms ease-out;
+}
+
+/* Under the mouse the thumb gets a soft ring; while it is dragged, a wider one. */
+.slider:hover::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--control-hover);
+}
+
+.slider:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--control-hover);
+}
+
+.slider:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 8px var(--control-pressed);
+}
+
+.slider:active::-moz-range-thumb {
+  box-shadow: 0 0 0 8px var(--control-pressed);
+}
+
+.slider__value {
+  min-width: 4ch;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- On/off switch ---------- */
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px 0 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  background: var(--control);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.switch:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.switch:active {
+  background: var(--control-pressed);
+  transform: translateY(1px);
+}
+
+.switch__track {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--control-pressed);
+  transition:
+    background-color 120ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+.switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition:
+    transform 120ms ease-out,
+    background-color 120ms ease-out;
+}
+
+/* Wide enough for "Off", so the switch keeps its width when it changes. */
+.switch__state {
+  min-width: 3ch;
+  text-align: left;
+}
+
+/* On: only the small track lights up, so a column of switches stays calm. */
+.switch[aria-checked='true'] {
+  border-color: color-mix(in srgb, var(--light) 45%, var(--control-line));
+  color: var(--text);
+}
+
+.switch[aria-checked='true'] .switch__track {
+  background: var(--light);
+  box-shadow: 0 0 calc(var(--glow) * 12px) color-mix(in srgb, var(--light) 60%, transparent);
+}
+
+.switch[aria-checked='true'] .switch__thumb {
+  background: var(--light-ink);
+  transform: translateX(16px);
+}
+
+/* ---------- One choice out of a few ---------- */
+
+.segmented {
+  display: inline-flex;
+  /* In a place too narrow for one row the options go on to a second one. */
+  flex-wrap: wrap;
+  border: 1px solid var(--control-line);
+  border-radius: 18px;
+  background: var(--control);
+  user-select: none;
+}
+
+.segmented__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    transform 80ms ease-out;
+}
+
+.segmented__option:hover {
+  background: var(--control);
+  color: var(--text);
+}
+
+.segmented__option:active {
+  transform: translateY(1px);
+}
+
+.segmented__option[aria-pressed='true'],
+.segmented__option[aria-checked='true'] {
+  background: var(--light);
+  color: var(--light-ink);
+}
+
+/* ---------- A number with − and + ---------- */
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.stepper__value {
+  min-width: 3ch;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* ---------- Drop-down ---------- */
+
+/* Not see-through: the list the browser opens under it takes the same background. */
+.select {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  background-color: var(--panel-raised);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.select:hover {
+  border-color: var(--control-line-strong);
+}
+
+/* ---------- A question asked in place: "Really reset?" Yes / No ---------- */
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm__question {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------- The name of a computer key, drawn like the key itself ---------- */
+
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--control-line);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--control);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ---------- Tabs ---------- */
+
+/*
+ * Plain words in a row; the chosen one is underlined with the light. Used by
+ * the modes in the top bar (.mode-tabs) and free for any other row of tabs
+ * (.tabs with .tab buttons inside).
+ */
+.tabs,
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  user-select: none;
+}
+
+.tab,
+.mode-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+/* The line of light under the chosen tab. It grows out of the middle. */
+.tab::after,
+.mode-tab::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 4px;
+  left: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--light);
+  box-shadow: 0 0 calc(var(--glow) * 12px) var(--light);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms ease-out;
+}
+
+.tab:hover,
+.mode-tab:hover {
+  background: var(--control);
+  color: var(--text);
+}
+
+.tab[aria-selected='true'],
+.mode-tab[aria-selected='true'] {
+  color: var(--text);
+}
+
+.tab[aria-selected='true']::after,
+.mode-tab[aria-selected='true']::after {
+  opacity: 1;
+  transform: none;
+}
+
+/* A tab that cannot be chosen yet. */
+.tab[aria-disabled='true'],
+.mode-tab[aria-disabled='true'] {
+  background: transparent;
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.mode-tab__badge {
+  padding: 0 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* ---------- The menu: the top bar and what hangs under it ---------- */
+
+/*
+ * The menu is the top bar with the player line under it. It hides when the
+ * mouse is still (see useAutoHide.ts): it slides up a little and fades, and
+ * once that is over it is truly gone, so that Tab does not stop in it. It
+ * keeps its place while hidden: where it sits, over the sky or above it, is
+ * decided by the app (src/styles/app.css).
+ */
+.menu {
+  position: relative;
+  z-index: var(--layer-menu);
+  flex: none;
+  /* Black at the top edge, fading out downward, so that it reads as part of the stage. */
+  background: var(--bar-fade);
+  transition:
+    opacity 160ms ease-out,
+    transform 160ms ease-out,
+    visibility 0s;
+}
+
+.menu--hidden {
+  opacity: 0;
+  transform: translateY(-12px);
+  visibility: hidden;
+  /* Gone only when the slide is over; back at once (the rule above has no delay). */
+  transition-delay: 0s, 0s, 160ms;
+}
+
+/* The mouse cursor hides with the menu. For the app's root element. */
+.cursor-hidden,
+.cursor-hidden * {
+  cursor: none !important;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--top-bar-height);
+  padding: 0 12px 0 20px;
+  user-select: none;
+}
+
+.top-bar__name {
+  margin: 0 8px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Pushes everything after it to the right-hand end. */
+.top-bar__space {
+  flex: 1;
+}
+
+.top-bar__volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+  color: var(--text-muted);
+}
+
+.top-bar__volume .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.top-bar__volume .slider {
+  width: 112px;
+}
+
+.top-bar__sustain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+/*
+ * A window too narrow for the whole bar. First the modes that are still to
+ * come go (they only announce something), then the volume, which is also in
+ * Settings. What is left fits a window 640px wide.
+ */
+@media (max-width: 1179px) {
+  .top-bar .mode-tab[aria-disabled='true'] {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .top-bar__volume {
+    display: none;
+  }
+}
+
+/* ---------- Floating panel ---------- */
+
+/*
+ * The panel fills the box of the element it is put in: 94% of that box's
+ * width, 760px at most, and never higher than it. What does not fit scrolls
+ * inside. That box may let clicks through to the sky; the panel itself takes
+ * them.
+ */
+.floating-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 94%);
+  max-height: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-glass);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+  animation: floating-panel-in 160ms ease-out;
+}
+
+@keyframes floating-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/*
+ * The panel holds the focus itself after it was opened with the mouse, only
+ * so that Tab carries on inside it. It keeps its own shadow then. (Windows
+ * contrast themes still outline it.)
+ */
+.floating-panel:focus-visible {
+  box-shadow: var(--shadow-float);
+}
+
+.floating-panel__header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 8px 8px 8px 20px;
+  border-bottom: 1px solid var(--control-line);
+  user-select: none;
+}
+
+.floating-panel__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.floating-panel__extra {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.floating-panel__close {
+  margin-left: auto;
+}
+
+.floating-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 20px 20px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- Scroll bars ---------- */
+
+/*
+ * Whatever scrolls inside the chrome (a panel, the song options, a long list
+ * of parts) gets a slim rounded thumb and nothing else: no arrows, no track.
+ * Chrome and Edge draw it from the parts below, and stop reading those as
+ * soon as the standard properties are set; so the standard properties are
+ * kept for the browsers that do not have the parts.
+ */
+.floating-panel__body::-webkit-scrollbar,
+.song-options::-webkit-scrollbar,
+.song-parts::-webkit-scrollbar {
+  width: 12px;
+}
+
+/* The see-through border leaves a thumb four pixels wide in the middle of the bar. */
+.floating-panel__body::-webkit-scrollbar-thumb,
+.song-options::-webkit-scrollbar-thumb,
+.song-parts::-webkit-scrollbar-thumb {
+  border: 4px solid transparent;
+  border-radius: 999px;
+  background: var(--control-line-strong) padding-box;
+}
+
+.floating-panel__body::-webkit-scrollbar-thumb:hover,
+.song-options::-webkit-scrollbar-thumb:hover,
+.song-parts::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-faint);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .floating-panel__body,
+  .song-options,
+  .song-parts {
+    scrollbar-width: thin;
+    scrollbar-color: var(--control-line-strong) transparent;
+  }
+}
+
+/* ---------- Start overlay ---------- */
+
+/*
+ * A button that covers the whole window until the first click or key press.
+ * The stage shows through it, dimmed. A button does not stretch by itself,
+ * so its width and height are set here.
+ */
+.start-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-overlay);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  border: 0;
+  background: var(--scrim);
+  backdrop-filter: none;
+  color: var(--text);
+  text-align: center;
+}
+
+.start-overlay__name {
+  font-size: clamp(32px, 6vw, 64px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* A short piece of the light line. It reaches out under the mouse. */
+.start-overlay__line {
+  width: 64px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--light-bright);
+  box-shadow:
+    0 0 calc(var(--glow) * 8px) var(--light),
+    0 0 calc(var(--glow) * 24px) var(--light);
+  transition: width 160ms ease-out;
+}
+
+.start-overlay:hover .start-overlay__line {
+  width: 128px;
+}
+
+.start-overlay__action {
+  padding: 4px 16px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 18px;
+  transition:
+    color 160ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.start-overlay:hover .start-overlay__action {
+  color: var(--text);
+}
+
+/*
+ * The overlay covers the screen, so a ring around it would only outline the
+ * window. The ring goes around its line of text instead.
+ */
+.start-overlay:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.start-overlay:focus-visible .start-overlay__action {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- Windows contrast themes ---------- */
+
+/*
+ * These themes repaint every control in a few system colours and drop every
+ * shadow, so what is chosen or switched on would look like everything else.
+ * The parts that say so are painted in the theme's own "selected" colours.
+ */
+@media (forced-colors: active) {
+  .button--primary,
+  .segmented__option[aria-pressed='true'],
+  .segmented__option[aria-checked='true'],
+  .switch[aria-checked='true'] .switch__track {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .switch[aria-checked='true'] .switch__thumb {
+    forced-color-adjust: none;
+    background: HighlightText;
+  }
+
+  .tab[aria-selected='true']::after,
+  .mode-tab[aria-selected='true']::after {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  /* The slider's line is a picture, which these themes leave alone: it takes their colours here. */
+  .slider::-webkit-slider-thumb {
+    forced-color-adjust: none;
+    background: ButtonText;
+    border-image-source: linear-gradient(to right, Highlight 50%, GrayText 0);
+  }
+}

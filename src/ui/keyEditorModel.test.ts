@@ -182,6 +182,20 @@ describe('pressKey with a piano key selected', () => {
     expect(result.state.message).toBe('"A" now plays C4. "Q" no longer plays a note.')
   })
 
+  it('names keys as the keyboard type the player chose prints them, as the piano does', () => {
+    // The player said "AZERTY" while typing on something else: the piano draws
+    // French letters on its keys, and the sentence has to name the same ones.
+    const settings = settingsWith({ keyboardType: 'azerty' })
+    const usLayout = new Map([
+      ['KeyA', 'a'],
+      ['KeyQ', 'q'],
+    ])
+    const result = pressKey(selectSlot(C4), press('KeyQ', 'q'), settings, usLayout)
+    expect(result.state.message).toBe('"A" now plays C4. "Q" no longer plays a note.')
+    // What the key really typed is still remembered, for when the type goes back to Auto.
+    expect(result.changes?.customLabels).toEqual({ KeyQ: 'Q' })
+  })
+
   it('remembers the character the key typed, for browsers with no layout information', () => {
     const result = pressWithDefaults(selectSlot(C6), press('Semicolon', 'm'))
     expect(result.changes?.customLabels).toEqual({ Semicolon: 'M' })

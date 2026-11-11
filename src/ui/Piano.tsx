@@ -7,15 +7,24 @@ import type {
   PointerEvent as ReactPointerEvent,
   SyntheticEvent,
 } from 'react'
-import { KEY_RECTS } from '../core/keyGeometry'
-import type { KeyRect } from '../core/keyGeometry'
-import { isValidSlot, slotToMidi } from '../core/layout'
+import { inkOn, paletteForNote } from '../core/colour'
+import type { LightPalette } from '../core/colour'
+import { SLOT_COUNT, isValidSlot, midiToSlot, slotToMidi } from '../core/layout'
+import type { PianoRange } from '../core/layout'
 import { noteName, pitchClass, pitchName } from '../core/notes'
-import type { LabelMode, Midi, NoteNaming } from '../core/types'
-import { BLACK_KEY_HEIGHT, createPointerNotes, slotAtPoint, slotsAlongLine } from './pianoHitTest'
+import { BLACK_KEY_WIDTH_RATIO, keyRectOf, keyRects, whiteKeyCount } from '../core/pianoGeometry'
+import type { KeyRect } from '../core/pianoGeometry'
+import type { AccentChoice, KeyStyle, LabelMode, Midi, NoteNaming } from '../core/types'
+import { BLACK_KEY_HEIGHT, createPointerNotes, noteAtPoint, notesAlongLine } from './pianoHitTest'
 import './piano.css'
 
 export interface PianoProps {
+  /** The notes the piano shows, lowest to highest. */
+  range: PianoRange
+  /**
+   * Where the keyboard zone starts. The zone is the 37 keys that computer
+   * keys can play, from the C of this octave up.
+   */
   baseOctave: number
   /** Notes to draw as pressed. */
   activeNotes: ReadonlySet<Midi>
@@ -24,10 +33,15 @@ export interface PianoProps {
   noteNaming: NoteNaming
   /** slot -> label of the computer key that plays it. Missing = no key. */
   keyLabels: ReadonlyMap<number, string>
+  /** How the keys are drawn. piano.css has one block of variables per style. */
+  keyStyle: KeyStyle
+  /** The colour of the light, for the keys being played (`paletteForNote`). */
+  accent: AccentChoice
+  customColour: string
   /** Pointer pressed / released a key. Not called in edit mode. */
   onNoteDown(midi: Midi): void
   onNoteUp(midi: Midi): void
-  /** Edit mode: clicking a key selects it instead of playing it. */
+  /** Edit mode: clicking a key of the keyboard zone selects it instead of playing it. */
   editMode?: boolean
   selectedSlot?: number | null
   onSelectSlot?(slot: number): void
@@ -40,26 +54,17 @@ const PRIMARY_BUTTON = 0
 /** The same button in the `buttons` bit mask. */
 const PRIMARY_BUTTON_MASK = 1
 
-function percent(fraction: number): string {
-  return `${fraction * 100}%`
-}
-
-/** Where each key sits across the piano; index = slot. Never changes, so it is built once. */
-const KEY_STYLES: readonly CSSProperties[] = KEY_RECTS.map((rect) => ({
-  left: percent(rect.left),
-  width: percent(rect.width),
-}))
-
-/** Tells piano.css how tall the black keys are, from the same number the hit test uses. */
-const PIANO_STYLE = { '--piano-black-key-height': percent(BLACK_KEY_HEIGHT) } as CSSProperties
-
 export function Piano(props: PianoProps): JSX.Element {
   const {
+    range,
     baseOctave,
     activeNotes,
     labelMode,
     noteNaming,
     keyLabels,
+    keyStyle,
+    accent,
+    customColour,
     editMode = false,
     selectedSlot = null,
     onSelectSlot,
@@ -82,9 +87,13 @@ export function Piano(props: PianoProps): JSX.Element {
   // read while that pointer is pressed, to find the keys it has passed since.
   const [lastPoints] = useState(() => new Map<number, PianoPoint>())
 
-  // Nothing may keep sounding when the piano moves lower or higher, when edit
-  // mode is switched, or when the piano goes away.
-  useEffect(() => () => pointerNotes.releaseAll(), [pointerNotes, baseOctave, editMode])
+  // Nothing may keep sounding when the piano shows other notes, when the
+  // keyboard zone moves lower or higher, when edit mode is switched, or when
+  // the piano goes away.
+  useEffect(
+    () => () => pointerNotes.releaseAll(),
+    [pointerNotes, range.first, range.last, baseOctave, editMode],
+  )
 
   // A mouse button released while another window has focus never reaches the page.
   useEffect(() => {
@@ -92,10 +101,6 @@ export function Piano(props: PianoProps): JSX.Element {
     window.addEventListener('blur', releaseAll)
     return () => window.removeEventListener('blur', releaseAll)
   }, [pointerNotes])
-
-  function midiOfSlot(slot: number | null): Midi | null {
-    return slot === null ? null : slotToMidi(slot, baseOctave)
-  }
 
   /** The pointer was lifted or lost: its note stops. */
   function releasePointer(pointerId: number): void {
@@ -110,7 +115,7 @@ export function Piano(props: PianoProps): JSX.Element {
     capturePointer(event.currentTarget, event.pointerId)
     const point = pointOnPiano(event, event.currentTarget.getBoundingClientRect())
     lastPoints.set(event.pointerId, point)
-    pointerNotes.down(event.pointerId, midiOfSlot(slotAtPoint(point.x, point.y)))
+    pointerNotes.down(event.pointerId, noteAtPoint(point.x, point.y, range))
   }
 
   function handlePointerMove(event: PianoPointerEvent): void {
@@ -127,8 +132,8 @@ export function Piano(props: PianoProps): JSX.Element {
       const to = pointOnPiano(position, box)
       const from = lastPoints.get(pointerId) ?? to
       lastPoints.set(pointerId, to)
-      for (const slot of slotsAlongLine(from.x, from.y, to.x, to.y)) {
-        pointerNotes.move(pointerId, midiOfSlot(slot))
+      for (const note of notesAlongLine(from.x, from.y, to.x, to.y, range)) {
+        pointerNotes.move(pointerId, note)
       }
     }
   }
@@ -170,10 +175,13 @@ export function Piano(props: PianoProps): JSX.Element {
     onSelectSlot?.(slot)
   }
 
+  const zoneMark = zoneMarkStyle(range, baseOctave)
+
   return (
     <div
       className={editMode ? 'piano piano--editing' : 'piano'}
-      style={PIANO_STYLE}
+      data-key-style={keyStyle}
+      style={pianoStyle(range)}
       role="group"
       aria-label="Piano"
       onPointerDown={handlePointerDown}
@@ -187,29 +195,32 @@ export function Piano(props: PianoProps): JSX.Element {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
     >
-      {KEY_RECTS.map((rect) => {
-        const midi = slotToMidi(rect.slot, baseOctave)
+      {keyRects(range).map((rect) => {
+        const slot = midiToSlot(rect.midi, baseOctave)
         return (
           <PianoKey
-            key={rect.slot}
+            key={rect.midi}
             rect={rect}
-            midi={midi}
-            lit={activeNotes.has(midi)}
-            selected={editMode && selectedSlot === rect.slot}
+            slot={slot}
+            lit={activeNotes.has(rect.midi)}
+            selected={editMode && slot !== null && slot === selectedSlot}
             editMode={editMode}
-            keyLabel={keyLabels.get(rect.slot)}
+            keyLabel={slot === null ? undefined : keyLabels.get(slot)}
             labelMode={labelMode}
             noteNaming={noteNaming}
+            palette={paletteForNote(rect.midi, accent, customColour)}
           />
         )
       })}
+      {zoneMark && <span className="piano__zone" style={zoneMark} aria-hidden="true" />}
     </div>
   )
 }
 
 interface PianoKeyProps {
   rect: KeyRect
-  midi: Midi
+  /** The key's place in the keyboard zone, or null when it lies outside the zone. */
+  slot: number | null
   lit: boolean
   selected: boolean
   editMode: boolean
@@ -217,34 +228,95 @@ interface PianoKeyProps {
   keyLabel: string | undefined
   labelMode: LabelMode
   noteNaming: NoteNaming
+  /** The light this key gives off when it is played. */
+  palette: LightPalette
 }
 
 /** One key. Memoized: when a note starts or stops, only the keys that change are drawn again. */
 const PianoKey = memo(function PianoKey(props: PianoKeyProps): JSX.Element {
-  const { rect, midi, lit, selected, editMode, keyLabel, labelMode, noteNaming } = props
+  const { rect, slot, lit, selected, editMode, keyLabel, labelMode, noteNaming, palette } = props
+  const { midi } = rect
   const cap = showsKeyLabels(labelMode) ? keyLabel : undefined
   const note = showsNoteNames(labelMode) ? shortNoteName(midi, noteNaming) : undefined
+  // While customizing, only the keys of the keyboard zone can be chosen.
+  const selectable = editMode && slot !== null
+  const outOfReach = editMode && slot === null
 
   return (
     <button
       type="button"
       className={keyClassName(rect.black, lit, selected)}
-      style={KEY_STYLES[rect.slot]}
-      data-slot={rect.slot}
-      // Keys are tab stops only while customizing: 37 stops would get in the way of playing.
-      tabIndex={editMode ? 0 : -1}
+      style={styleOfKey(rect, palette)}
+      data-midi={midi}
+      data-slot={slot ?? undefined}
+      // Keys are tab stops only while customizing: dozens of stops would get in the way of playing.
+      tabIndex={selectable ? 0 : -1}
       aria-label={describeKey(midi, keyLabel, noteNaming)}
       aria-pressed={editMode ? selected : lit}
+      aria-disabled={outOfReach || undefined}
     >
       {(cap || note) && (
         <span className="piano-key__labels">
-          {cap && <span className={capClassName(cap)}>{cap}</span>}
-          {note && <span className={noteClassName(midi)}>{note}</span>}
+          {cap && (
+            <span className={capClassName(cap)} style={fitStyle(cap)}>
+              {cap}
+            </span>
+          )}
+          {note && (
+            <span className={noteClassName(midi)} style={fitStyle(note)}>
+              {note}
+            </span>
+          )}
         </span>
       )}
     </button>
   )
 })
+
+function percent(fraction: number): string {
+  return `${fraction * 100}%`
+}
+
+/**
+ * What piano.css needs to know about the piano being drawn: how many white
+ * keys share its width (the size of everything follows from the width of a
+ * key), and how big the black keys are, from the same numbers the hit test
+ * and the shared geometry use.
+ */
+function pianoStyle(range: PianoRange): CSSProperties {
+  return {
+    '--piano-white-keys': whiteKeyCount(range),
+    '--piano-black-key-height': percent(BLACK_KEY_HEIGHT),
+    '--piano-black-key-width': BLACK_KEY_WIDTH_RATIO,
+  } as CSSProperties
+}
+
+/**
+ * Where a key sits across the piano, and the colours of its light. Every key
+ * carries its colours, not only the ones being played: a key that was just
+ * released is still fading out, and with the rainbow each key has its own.
+ */
+function styleOfKey(rect: KeyRect, palette: LightPalette): CSSProperties {
+  return {
+    left: percent(rect.left),
+    width: percent(rect.width),
+    '--key-light': palette.light,
+    '--key-light-bright': palette.bright,
+    '--key-light-ink': inkOn(palette.light),
+  } as CSSProperties
+}
+
+/**
+ * Where the keyboard zone lies across the piano, for the line that marks it.
+ * Null when the zone is the whole piano: then there is nothing to point out.
+ */
+function zoneMarkStyle(range: PianoRange, baseOctave: number): CSSProperties | null {
+  const first = keyRectOf(slotToMidi(0, baseOctave), range)
+  const last = keyRectOf(slotToMidi(SLOT_COUNT - 1, baseOctave), range)
+  if (!first || !last) return null
+  if (first.midi === range.first && last.midi === range.last) return null
+  return { left: percent(first.left), width: percent(last.left + last.width - first.left) }
+}
 
 function showsKeyLabels(mode: LabelMode): boolean {
   return mode === 'keys' || mode === 'both'
@@ -276,13 +348,24 @@ function keyClassName(black: boolean, lit: boolean, selected: boolean): string {
   return names.join(' ')
 }
 
-/** Labels longer than one character ("Num 1") are written smaller so they fit on the keycap. */
+/** Labels longer than one character ("Num 1") are written smaller, like the small print of a keycap. */
 function capClassName(label: string): string {
   return label.length > 1 ? 'piano-key__cap piano-key__cap--long' : 'piano-key__cap'
 }
 
 function noteClassName(midi: Midi): string {
   return isC(midi) ? 'piano-key__note piano-key__note--c' : 'piano-key__note'
+}
+
+/**
+ * Tells piano.css how many characters a label has to fit across its key, so
+ * that it can shrink the text on a narrow key. A label of several words
+ * ("Num 1") is written on several lines, so its longest word is what counts.
+ * A single character needs nothing: that is what the stylesheet assumes.
+ */
+function fitStyle(label: string): CSSProperties | undefined {
+  const widest = Math.max(...label.split(' ').map((word) => [...word].length))
+  return widest > 1 ? ({ '--label-chars': widest } as CSSProperties) : undefined
 }
 
 /** A place on the piano box, as fractions of its width and height from its top-left corner. */
@@ -310,7 +393,10 @@ function reportedPositions(move: PointerEvent): readonly PointerEvent[] {
   return positions.length > 0 ? positions : [move]
 }
 
-/** The slot of the key element an event happened on (or inside), if any. */
+/**
+ * The slot of the key element an event happened on (or inside), if any. Keys
+ * outside the keyboard zone have no slot.
+ */
 function slotOfKeyElement(target: EventTarget): number | null {
   if (!(target instanceof Element)) return null
   const slot = Number(target.closest<HTMLElement>('.piano-key')?.dataset.slot)

@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ACCENT_COLOURS } from '../core/colour'
 import {
   DEFAULT_BASE_OCTAVE,
   MAX_BASE_OCTAVE,
@@ -9,7 +10,6 @@ import {
 } from '../core/layout'
 import { DEFAULT_BINDINGS, assignBinding, isBindableCode } from '../input/keymap'
 import {
-  ADVANCED_KEYS,
   DEFAULT_SETTINGS,
   MAX_TRANSPOSE,
   MIN_VELOCITY,
@@ -20,6 +20,16 @@ import {
   useSettings,
 } from './settings'
 import type { Settings, StorageLike } from './settings'
+
+/** A handful of settings, for the tests that put only some of them back. */
+const SOUND_KEYS: readonly (keyof Settings)[] = [
+  'velocity',
+  'transpose',
+  'noteNaming',
+  'reverb',
+  'release',
+  'showTrails',
+]
 
 const SETTING_KEYS = [
   'bindings',
@@ -34,7 +44,74 @@ const SETTING_KEYS = [
   'reverb',
   'release',
   'showTrails',
+  'pianoSize',
+  'keyStyle',
+  'keyboardType',
+  'accent',
+  'customColour',
+  'glow',
+  'background',
+  'barStyle',
+  'sparks',
+  'showKeyHints',
+  'showNoteNames',
+  'autoHideMenu',
 ]
+
+/** The settings as they were saved before the piano sizes, the key styles and the look existed. */
+const SAVED_BEFORE_THE_NEW_SCREEN = {
+  bindings: { KeyQ: 3, KeyW: 5 },
+  customLabels: { KeyQ: 'A' },
+  baseOctave: 4,
+  volume: 0.5,
+  sustain: true,
+  labelMode: 'keys',
+  velocity: 0.4,
+  transpose: -2,
+  noteNaming: 'solfege',
+  reverb: 0.3,
+  release: 'short',
+  showTrails: false,
+}
+
+/** What the settings added with the new screen are when nothing says otherwise: the Ember theme. */
+const NEW_SCREEN_DEFAULTS = {
+  pianoSize: 'auto',
+  keyStyle: 'classic',
+  keyboardType: 'auto',
+  accent: 'red',
+  customColour: '#ff2a2a',
+  glow: 0.6,
+  background: 'black',
+  barStyle: 'solid',
+  sparks: 'some',
+  showKeyHints: true,
+  showNoteNames: true,
+  autoHideMenu: true,
+}
+
+/** Every value each choice may take. */
+const CHOICES = {
+  labelMode: ['keys', 'notes', 'both', 'none'],
+  noteNaming: ['letters', 'solfege'],
+  release: ['short', 'normal', 'long'],
+  pianoSize: ['auto', 88, 61, 49, 37],
+  keyStyle: ['classic', 'midnight', 'glass'],
+  keyboardType: ['auto', 'qwerty', 'azerty', 'qwertz'],
+  accent: ['red', 'amber', 'blue', 'green', 'purple', 'white', 'custom', 'rainbow'],
+  background: ['black', 'night', 'stars', 'aurora'],
+  barStyle: ['solid', 'neon'],
+  sparks: ['off', 'some', 'lots'],
+} as const
+const CHOICE_KEYS = Object.keys(CHOICES) as (keyof typeof CHOICES)[]
+
+const ON_OFF_KEYS = [
+  'sustain',
+  'showTrails',
+  'showKeyHints',
+  'showNoteNames',
+  'autoHideMenu',
+] as const
 
 /** A localStorage stand-in that records how it is used. */
 function createFakeStorage(saved?: string) {
@@ -76,7 +153,7 @@ function expectValidSettings(settings: Settings): void {
   expect(Number.isInteger(settings.baseOctave)).toBe(true)
   expect(settings.baseOctave).toBeGreaterThanOrEqual(MIN_BASE_OCTAVE)
   expect(settings.baseOctave).toBeLessThanOrEqual(MAX_BASE_OCTAVE)
-  for (const amount of [settings.volume, settings.reverb]) {
+  for (const amount of [settings.volume, settings.reverb, settings.glow]) {
     expect(amount).toBeGreaterThanOrEqual(0)
     expect(amount).toBeLessThanOrEqual(1)
   }
@@ -86,11 +163,9 @@ function expectValidSettings(settings: Settings): void {
   expect(Math.abs(settings.transpose)).toBeLessThanOrEqual(MAX_TRANSPOSE)
   expect(Object.is(settings.transpose, -0)).toBe(false)
 
-  expect(typeof settings.sustain).toBe('boolean')
-  expect(typeof settings.showTrails).toBe('boolean')
-  expect(['keys', 'notes', 'both', 'none']).toContain(settings.labelMode)
-  expect(['letters', 'solfege']).toContain(settings.noteNaming)
-  expect(['short', 'normal', 'long']).toContain(settings.release)
+  for (const key of ON_OFF_KEYS) expect(typeof settings[key]).toBe('boolean')
+  for (const key of CHOICE_KEYS) expect(CHOICES[key]).toContain(settings[key])
+  expect(settings.customColour).toMatch(/^#[0-9a-fA-F]{6}$/)
 }
 
 /** Small seeded generator, so the random test is the same on every run. */
@@ -119,27 +194,34 @@ describe('defaults', () => {
       reverb: 0.15,
       release: 'normal',
       showTrails: true,
+      pianoSize: 'auto',
+      keyStyle: 'classic',
+      keyboardType: 'auto',
+      accent: 'red',
+      customColour: '#ff2a2a',
+      glow: 0.6,
+      background: 'black',
+      barStyle: 'solid',
+      sparks: 'some',
+      showKeyHints: true,
+      showNoteNames: true,
+      autoHideMenu: true,
     })
     expect(Object.keys(DEFAULT_SETTINGS)).toEqual(SETTING_KEYS)
     expectValidSettings(DEFAULT_SETTINGS)
+  })
+
+  it("start the player's own colour on the red of the default look", () => {
+    expect(DEFAULT_SETTINGS.customColour).toBe(ACCENT_COLOURS.red)
   })
 
   it('cannot be changed by accident', () => {
     expect(Object.isFrozen(DEFAULT_SETTINGS)).toBe(true)
     expect(Object.isFrozen(DEFAULT_SETTINGS.bindings)).toBe(true)
     expect(Object.isFrozen(DEFAULT_SETTINGS.customLabels)).toBe(true)
-    expect(Object.isFrozen(ADVANCED_KEYS)).toBe(true)
   })
 
-  it('lists the settings of the Advanced panel', () => {
-    expect(ADVANCED_KEYS).toEqual([
-      'velocity',
-      'transpose',
-      'noteNaming',
-      'reverb',
-      'release',
-      'showTrails',
-    ])
+  it('keeps its limits and the name it is saved under', () => {
     expect(MIN_VELOCITY).toBe(0.1)
     expect(MAX_TRANSPOSE).toBe(12)
     expect(STORAGE_KEY).toBe('pianoapp.settings.v1')
@@ -173,6 +255,18 @@ describe('sanitizeSettings', () => {
       reverb: 0.6,
       release: 'long',
       showTrails: false,
+      pianoSize: 61,
+      keyStyle: 'glass',
+      keyboardType: 'azerty',
+      accent: 'custom',
+      customColour: '#12ab9f',
+      glow: 0.25,
+      background: 'aurora',
+      barStyle: 'neon',
+      sparks: 'lots',
+      showKeyHints: false,
+      showNoteNames: false,
+      autoHideMenu: false,
     }
     expect(sanitizeSettings(valid)).toEqual(valid)
     expect(sanitizeSettings(JSON.parse(JSON.stringify(valid)))).toEqual(valid)
@@ -180,25 +274,46 @@ describe('sanitizeSettings', () => {
   })
 
   it('accepts every value of each choice', () => {
-    for (const labelMode of ['keys', 'notes', 'both', 'none']) {
-      expect(sanitizeSettings({ labelMode }).labelMode).toBe(labelMode)
-    }
-    for (const noteNaming of ['letters', 'solfege']) {
-      expect(sanitizeSettings({ noteNaming }).noteNaming).toBe(noteNaming)
-    }
-    for (const release of ['short', 'normal', 'long']) {
-      expect(sanitizeSettings({ release }).release).toBe(release)
+    for (const key of CHOICE_KEYS) {
+      for (const choice of CHOICES[key]) {
+        expect(sanitizeSettings({ [key]: choice })[key]).toBe(choice)
+      }
     }
   })
 
   it('falls back to the default for unknown choices', () => {
     const objectNames = ['constructor', 'toString', '__proto__', 'hasOwnProperty']
     const notText = [3, null, true, ['keys'], { keys: true }]
-    for (const choice of ['', 'KEYS', 'all', ...objectNames, ...notText]) {
-      const cleaned = sanitizeSettings({ labelMode: choice, noteNaming: choice, release: choice })
-      expect(cleaned.labelMode).toBe('both')
-      expect(cleaned.noteNaming).toBe('letters')
-      expect(cleaned.release).toBe('normal')
+    const nearMisses = ['KEYS', 'Red', 'AUTO', 'auto ', 'all', 'pink', '88', 'qwerty-us']
+    for (const choice of ['', ...nearMisses, ...objectNames, ...notText]) {
+      const raw = Object.fromEntries(CHOICE_KEYS.map((key) => [key, choice]))
+      const cleaned = sanitizeSettings(raw)
+      for (const key of CHOICE_KEYS) expect(cleaned[key]).toBe(DEFAULT_SETTINGS[key])
+    }
+  })
+
+  it('accepts only the piano sizes that exist', () => {
+    for (const pianoSize of ['auto', 88, 61, 49, 37]) {
+      expect(sanitizeSettings({ pianoSize }).pianoSize).toBe(pianoSize)
+    }
+    const notSizes = [0, 36, 38, 76, 87, 88.5, -88, 1e9, Number.NaN, '61', 'big', [88], { size: 88 }]
+    for (const pianoSize of [...notSizes, null, undefined, true]) {
+      expect(sanitizeSettings({ pianoSize }).pianoSize).toBe('auto')
+    }
+  })
+
+  it("keeps the player's own colour when it is a #rrggbb colour, exactly as it was given", () => {
+    for (const customColour of ['#000000', '#ffffff', '#12ab9f', '#12AB9F', '#Ff2a2A']) {
+      expect(sanitizeSettings({ customColour }).customColour).toBe(customColour)
+    }
+  })
+
+  it("falls back to the default colour when the player's own colour is anything else", () => {
+    const notColours = ['', '#fff', '#12ab9', '#12ab9f0', '12ab9f', '#12ab9g', ' #12ab9f', '#12ab9f\n']
+    const otherNotations = ['red', 'rgb(1, 2, 3)', 'url(https://example.com/x.png)', 'var(--light)']
+    const notText = [0x12ab9f, null, undefined, true, ['#12ab9f'], { colour: '#12ab9f' }]
+    for (const customColour of [...notColours, ...otherNotations, ...notText]) {
+      expect(sanitizeSettings({ customColour }).customColour).toBe('#ff2a2a')
     }
   })
 
@@ -212,12 +327,14 @@ describe('sanitizeSettings', () => {
         velocity: value,
         transpose: value,
         reverb: value,
+        glow: value,
       })
       expect(cleaned.baseOctave).toBe(DEFAULT_BASE_OCTAVE)
       expect(cleaned.volume).toBe(0.8)
       expect(cleaned.velocity).toBe(0.8)
       expect(cleaned.transpose).toBe(0)
       expect(cleaned.reverb).toBe(0.15)
+      expect(cleaned.glow).toBe(0.6)
     }
   })
 
@@ -227,6 +344,14 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ volume: 0, reverb: 0 })).toMatchObject({ volume: 0, reverb: 0 })
     expect(sanitizeSettings({ volume: 1, reverb: 1 })).toMatchObject({ volume: 1, reverb: 1 })
     expect(sanitizeSettings({ volume: 0.4, reverb: 0.1 })).toMatchObject({ volume: 0.4, reverb: 0.1 })
+  })
+
+  it('clamps the glow to 0..1', () => {
+    expect(sanitizeSettings({ glow: -0.5 }).glow).toBe(0)
+    expect(sanitizeSettings({ glow: 0 }).glow).toBe(0)
+    expect(sanitizeSettings({ glow: 0.37 }).glow).toBe(0.37)
+    expect(sanitizeSettings({ glow: 1 }).glow).toBe(1)
+    expect(sanitizeSettings({ glow: 60 }).glow).toBe(1)
   })
 
   it('clamps touch to MIN_VELOCITY..1', () => {
@@ -270,6 +395,15 @@ describe('sanitizeSettings', () => {
       const cleaned = sanitizeSettings({ sustain: value, showTrails: value })
       expect(cleaned.sustain).toBe(false)
       expect(cleaned.showTrails).toBe(true)
+    }
+  })
+
+  it('reads every on/off setting the same way', () => {
+    for (const key of ON_OFF_KEYS) {
+      for (const on of [true, false]) expect(sanitizeSettings({ [key]: on })[key]).toBe(on)
+      for (const value of ['true', 'false', 'on', 1, 0, null, undefined, [], {}]) {
+        expect(sanitizeSettings({ [key]: value })[key]).toBe(DEFAULT_SETTINGS[key])
+      }
     }
   })
 
@@ -349,7 +483,15 @@ describe('sanitizeSettings', () => {
       reverb: 0.15,
       release: 'normal',
       showTrails: true,
+      ...NEW_SCREEN_DEFAULTS,
     })
+  })
+
+  it('keeps everything saved before the new screen and gives the new settings their defaults', () => {
+    const expected = { ...SAVED_BEFORE_THE_NEW_SCREEN, ...NEW_SCREEN_DEFAULTS }
+    expect(sanitizeSettings(SAVED_BEFORE_THE_NEW_SCREEN)).toEqual(expected)
+    expect(sanitizeSettings(JSON.parse(JSON.stringify(SAVED_BEFORE_THE_NEW_SCREEN)))).toEqual(expected)
+    expect(Object.keys(NEW_SCREEN_DEFAULTS)).toEqual(SETTING_KEYS.slice(-12))
   })
 
   it('fixes each field on its own: one bad value does not throw away the good ones', () => {
@@ -410,6 +552,9 @@ describe('sanitizeSettings', () => {
       JSON.parse('[{"volume":0.1}]'),
       JSON.parse('{"0":{"volume":0.1},"length":1}'),
       { labelMode: { toString: () => 'keys' }, release: ['long'], noteNaming: { 0: 'solfege' } },
+      { accent: { toString: () => 'blue' }, pianoSize: [88], keyStyle: ['glass'], sparks: { 0: 'off' } },
+      { customColour: { toString: () => '#12ab9f' }, glow: [0.2], background: [['stars']] },
+      JSON.parse('{"glow":1e999,"pianoSize":8.8e1,"customColour":["#12ab9f"],"autoHideMenu":"no"}'),
     ]
     for (const raw of garbage) expectValidSettings(sanitizeSettings(raw))
     expect(sanitizeSettings(garbage[4])).toMatchObject({
@@ -420,6 +565,9 @@ describe('sanitizeSettings', () => {
       baseOctave: MIN_BASE_OCTAVE,
     })
     expect(sanitizeSettings(garbage[7])).toEqual(DEFAULT_SETTINGS)
+    expect(sanitizeSettings(garbage[8])).toEqual(DEFAULT_SETTINGS)
+    expect(sanitizeSettings(garbage[9])).toEqual(DEFAULT_SETTINGS)
+    expect(sanitizeSettings(garbage[10])).toEqual({ ...DEFAULT_SETTINGS, pianoSize: 88 })
   })
 
   it('always returns valid settings for random garbage', () => {
@@ -446,6 +594,19 @@ describe('sanitizeSettings', () => {
       'keys',
       'solfege',
       'long',
+      'auto',
+      'rainbow',
+      'custom',
+      'glass',
+      'azerty',
+      'stars',
+      'neon',
+      'lots',
+      88,
+      61,
+      '#12ab9f',
+      '#12AB9F',
+      '#12ab9',
       'constructor',
       '__proto__',
       [],
@@ -505,6 +666,22 @@ describe('createSettingsStore', () => {
       sustain: true,
       transpose: 12,
       bindings: { KeyQ: 0 },
+    })
+  })
+
+  it('loads settings saved before the new screen, with the defaults for what is new', () => {
+    const storage = createFakeStorage(JSON.stringify(SAVED_BEFORE_THE_NEW_SCREEN))
+    const store = createSettingsStore(storage)
+
+    expect(store.get()).toEqual({ ...SAVED_BEFORE_THE_NEW_SCREEN, ...NEW_SCREEN_DEFAULTS })
+    expectValidSettings(store.get())
+    expect(storage.setItem).not.toHaveBeenCalled()
+
+    store.set({ accent: 'blue' })
+    expect(savedSettings(storage)).toEqual({
+      ...SAVED_BEFORE_THE_NEW_SCREEN,
+      ...NEW_SCREEN_DEFAULTS,
+      accent: 'blue',
     })
   })
 
@@ -643,6 +820,7 @@ describe('createSettingsStore', () => {
       velocity: 0,
       transpose: 2.6,
       baseOctave: 99,
+      glow: -2,
       bindings: { KeyA: 3, KeyB: 3, Enter: 4 },
       customLabels: { KeyA: 'Q', Enter: 'X', KeyB: 'much too long' },
     })
@@ -652,10 +830,53 @@ describe('createSettingsStore', () => {
       velocity: MIN_VELOCITY,
       transpose: 3,
       baseOctave: MAX_BASE_OCTAVE,
+      glow: 0,
       bindings: { KeyA: 3 },
       customLabels: { KeyA: 'Q' },
     })
     expectValidSettings(store.get())
+  })
+
+  it('remembers the piano, the look and the menu choices like every other setting', () => {
+    const storage = createFakeStorage()
+    const store = createSettingsStore(storage)
+    const listener = vi.fn()
+    store.subscribe(listener)
+    const look: Partial<Settings> = {
+      pianoSize: 49,
+      keyStyle: 'midnight',
+      keyboardType: 'qwertz',
+      accent: 'custom',
+      customColour: '#12ab9f',
+      glow: 0.9,
+      background: 'stars',
+      barStyle: 'neon',
+      sparks: 'off',
+      showKeyHints: false,
+      showNoteNames: false,
+      autoHideMenu: false,
+    }
+
+    store.set(look)
+
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, ...look })
+    expect(Object.isFrozen(store.get())).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(savedSettings(storage)).toEqual(store.get())
+    expect(createSettingsStore(storage).get()).toEqual(store.get())
+
+    store.set({ ...look })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('puts a new setting back to its default when given an unusable value', () => {
+    const store = createSettingsStore(createFakeStorage())
+    store.set({ pianoSize: 61, accent: 'green', customColour: '#12ab9f', sparks: 'lots', glow: 1 })
+
+    const unusable = { pianoSize: 62, accent: 'pink', customColour: 'green', sparks: 3, glow: '1' }
+    store.set(unusable as unknown as Partial<Settings>)
+
+    expect(store.get()).toEqual(DEFAULT_SETTINGS)
   })
 
   it('puts a setting back to its default when given an unusable value', () => {
@@ -693,7 +914,7 @@ describe('createSettingsStore', () => {
       () => store.set({ bindings: assignBinding(store.get().bindings, 'Digit1', 5).bindings }),
       () => store.set({ customLabels: { Digit1: '&' } }),
       () => store.set({ sustain: true, noteNaming: 'solfege', release: 'short' }),
-      () => store.resetKeys(ADVANCED_KEYS),
+      () => store.resetKeys(SOUND_KEYS),
       () => store.set({ baseOctave: 5, transpose: -7 }),
       () => store.reset(),
       () => store.set({ reverb: 1 }),
@@ -727,6 +948,7 @@ describe('createSettingsStore', () => {
       const store = createSettingsStore(storage)
       store.set({ volume: 0.1, sustain: true, bindings: {}, customLabels: { KeyA: 'Q' } })
       store.set({ transpose: 5, showTrails: false })
+      store.set({ pianoSize: 37, accent: 'rainbow', keyStyle: 'glass', autoHideMenu: false })
       const listener = vi.fn()
       store.subscribe(listener)
 
@@ -770,13 +992,16 @@ describe('createSettingsStore', () => {
         reverb: 0.9,
         release: 'long',
         showTrails: false,
+        pianoSize: 61,
+        accent: 'purple',
+        glow: 0.2,
       }
       store.set(custom)
       const listener = vi.fn()
       store.subscribe(listener)
       const before = store.get()
 
-      store.resetKeys(ADVANCED_KEYS)
+      store.resetKeys(SOUND_KEYS)
 
       expect(store.get()).toEqual({
         ...DEFAULT_SETTINGS,
@@ -786,6 +1011,9 @@ describe('createSettingsStore', () => {
         volume: 0.3,
         sustain: true,
         labelMode: 'keys',
+        pianoSize: 61,
+        accent: 'purple',
+        glow: 0.2,
       })
       expect(store.get().bindings).toBe(before.bindings)
       expect(listener).toHaveBeenCalledTimes(1)
@@ -801,6 +1029,21 @@ describe('createSettingsStore', () => {
       expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, volume: 0.3, transpose: 4 })
     })
 
+    it('can put the look back without touching the piano or the sound', () => {
+      const store = createSettingsStore(createFakeStorage())
+      store.set({ accent: 'custom', customColour: '#12ab9f', glow: 1, background: 'night' })
+      store.set({ barStyle: 'neon', sparks: 'lots', keyStyle: 'glass', pianoSize: 49, volume: 0.3 })
+
+      store.resetKeys(['accent', 'customColour', 'glow', 'background', 'barStyle', 'sparks'])
+
+      expect(store.get()).toEqual({
+        ...DEFAULT_SETTINGS,
+        keyStyle: 'glass',
+        pianoSize: 49,
+        volume: 0.3,
+      })
+    })
+
     it('does nothing when there is nothing to put back', () => {
       const storage = createFakeStorage()
       const store = createSettingsStore(storage)
@@ -810,7 +1053,7 @@ describe('createSettingsStore', () => {
       const before = store.get()
       storage.setItem.mockClear()
 
-      store.resetKeys(ADVANCED_KEYS)
+      store.resetKeys(SOUND_KEYS)
       store.resetKeys([])
       store.resetKeys(['nope', 'constructor', '__proto__'] as unknown as (keyof Settings)[])
 

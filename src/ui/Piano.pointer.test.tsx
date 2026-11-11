@@ -6,19 +6,32 @@
  * cancelled touch, a lost capture, a release that never comes).
  *
  * The simulated browser has no layout, so the piano box is given a fixed
- * place on screen: 2200 x 200 pixels, which makes every white key 100 wide.
+ * place on screen: 2200 x 200 pixels, which makes every white key of a piano
+ * of 37 keys 100 wide. Most tests use that piano; the ones about larger
+ * pianos say so.
  */
 import { StrictMode } from 'react'
 import { act, cleanup, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { renderToString } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KEY_RECTS } from '../core/keyGeometry'
-import { MAX_BASE_OCTAVE, MIN_BASE_OCTAVE, SLOT_COUNT, slotToMidi } from '../core/layout'
-import { noteName, pitchName } from '../core/notes'
-import type { LabelMode, Midi, NoteNaming } from '../core/types'
+import { ACCENT_COLOURS, inkOn, paletteFor, paletteForNote } from '../core/colour'
+import {
+  DEFAULT_BASE_OCTAVE,
+  MAX_BASE_OCTAVE,
+  MIN_BASE_OCTAVE,
+  PIANO_SIZES,
+  SLOT_COUNT,
+  midiToSlot,
+  pianoRange,
+  slotToMidi,
+} from '../core/layout'
+import type { PianoRange, PianoSize } from '../core/layout'
+import { isBlackKey, noteName, pitchName } from '../core/notes'
+import { BLACK_KEY_WIDTH_RATIO, keyRectOf, keyRects, whiteKeyCount } from '../core/pianoGeometry'
+import type { AccentChoice, KeyStyle, LabelMode, Midi, NoteNaming } from '../core/types'
 import { Piano } from './Piano'
 import type { PianoProps } from './Piano'
-import { barRect, startBar } from './noteTrailsModel'
 import { BLACK_KEY_HEIGHT } from './pianoHitTest'
 
 const BOX = { left: 100, top: 40, width: 2200, height: 200 }
@@ -28,6 +41,14 @@ const LOWER_ROW = (1 + BLACK_KEY_HEIGHT) / 2
 
 const LABEL_MODES: readonly LabelMode[] = ['both', 'keys', 'notes', 'none']
 const NAMINGS: readonly NoteNaming[] = ['letters', 'solfege']
+const KEY_STYLES: readonly KeyStyle[] = ['classic', 'midnight', 'glass']
+
+/**
+ * Where the keys of a piano of 37 keys are. That piano is exactly the
+ * keyboard zone, so its keys are in the same places wherever the zone is:
+ * the key of slot n is the n-th of these.
+ */
+const ZONE_RECTS = keyRects(pianoRange(37, DEFAULT_BASE_OCTAVE))
 
 interface Point {
   clientX: number
@@ -36,7 +57,7 @@ interface Point {
 
 /** The point across the piano where a key has its middle, at a given share of the piano's height. */
 function inColumn(slot: number, heightShare: number): Point {
-  const rect = KEY_RECTS[slot]
+  const rect = ZONE_RECTS[slot]
   if (!rect) throw new Error(`no key for slot ${slot}`)
   return {
     clientX: BOX.left + (rect.left + rect.width / 2) * BOX.width,
@@ -46,7 +67,17 @@ function inColumn(slot: number, heightShare: number): Point {
 
 /** A point on the visible part of a key: black keys high up, white keys below the black ones. */
 function onSlot(slot: number): Point {
-  return inColumn(slot, KEY_RECTS[slot]?.black ? UPPER_ROW : LOWER_ROW)
+  return inColumn(slot, ZONE_RECTS[slot]?.black ? UPPER_ROW : LOWER_ROW)
+}
+
+/** The same for a note on a piano of any size. */
+function onNote(midi: Midi, range: PianoRange): Point {
+  const rect = keyRectOf(midi, range)
+  if (!rect) throw new Error(`the piano has no key for note ${midi}`)
+  return {
+    clientX: BOX.left + (rect.left + rect.width / 2) * BOX.width,
+    clientY: BOX.top + (rect.black ? UPPER_ROW : LOWER_ROW) * BOX.height,
+  }
 }
 
 /** A height on screen that is just under the piano. */
@@ -109,20 +140,44 @@ interface Harness {
   /** "down 60" / "up 60", in the order the piano reported them. */
   log: string[]
   selected: number[]
+  /** The notes the piano shows right now. */
+  range(): PianoRange
+  /** The key of a slot of the keyboard zone. */
   key(slot: number): HTMLElement
+  /** The key of a note, anywhere on the piano. */
+  note(midi: Midi): HTMLElement
   update(changes: Partial<PianoProps>): void
+  /** Gives the piano another number of keys, as the piano size setting does. */
+  resize(size: PianoSize): void
   unmount(): void
 }
 
-function draw(overrides: Partial<PianoProps> = {}, strict = false): Harness {
+interface DrawOptions extends Partial<PianoProps> {
+  /** How many keys the piano has (37 when left out). */
+  size?: PianoSize
+}
+
+/**
+ * Draws the piano. As in the app, the notes it shows follow from its size and
+ * from where the keyboard zone is, unless a test hands it a `range` itself.
+ */
+function draw(options: DrawOptions = {}, strict = false): Harness {
+  const { size: firstSize = 37, ...overrides } = options
   const log: string[] = []
   const selected: number[] = []
+  let size = firstSize
+  /** The notes a test asked for itself, which then stay until the piano is resized. */
+  let ownRange = overrides.range ?? null
   let props: PianoProps = {
-    baseOctave: 3,
+    range: pianoRange(size, overrides.baseOctave ?? DEFAULT_BASE_OCTAVE),
+    baseOctave: DEFAULT_BASE_OCTAVE,
     activeNotes: new Set<Midi>(),
     labelMode: 'both',
     noteNaming: 'letters',
     keyLabels: new Map<number, string>(),
+    keyStyle: 'classic',
+    accent: 'red',
+    customColour: ACCENT_COLOURS.red,
     onNoteDown: (midi) => log.push(`down ${midi}`),
     onNoteUp: (midi) => log.push(`up ${midi}`),
     onSelectSlot: (slot) => selected.push(slot),
@@ -152,18 +207,33 @@ function draw(overrides: Partial<PianoProps> = {}, strict = false): Harness {
       toJSON: () => ({}),
     }) as DOMRect
 
+  function redraw(changes: Partial<PianoProps>): void {
+    if (changes.range) ownRange = changes.range
+    const range = ownRange ?? pianoRange(size, changes.baseOctave ?? props.baseOctave)
+    props = { ...props, ...changes, range }
+    view.rerender(element())
+  }
+
   return {
     piano,
     log,
     selected,
+    range: () => props.range,
     key(slot) {
       const key = piano.querySelector<HTMLElement>(`.piano-key[data-slot="${slot}"]`)
       if (!key) throw new Error(`no key element for slot ${slot}`)
       return key
     },
-    update(changes) {
-      props = { ...props, ...changes }
-      view.rerender(element())
+    note(midi) {
+      const key = piano.querySelector<HTMLElement>(`.piano-key[data-midi="${midi}"]`)
+      if (!key) throw new Error(`no key element for note ${midi}`)
+      return key
+    },
+    update: redraw,
+    resize(newSize) {
+      size = newSize
+      ownRange = null
+      redraw({})
     },
     unmount: () => view.unmount(),
   }
@@ -276,6 +346,7 @@ function expectBalanced(log: readonly string[]): void {
   expect([...down], `left sounding: ${log.join(', ')}`).toEqual([])
 }
 
+// Keys of the keyboard zone, by slot, named for the notes they play while the zone is where it starts out.
 const C4 = 12
 const C_SHARP_4 = 13
 const D4 = 14
@@ -284,6 +355,11 @@ const F4 = 17
 const G4 = 19
 const A4 = 21
 const C5 = 24
+
+/** What the piano reports when these notes are played one after the other, each released before the next. */
+function inTurn(notes: readonly number[]): string[] {
+  return notes.flatMap((midi) => [`down ${midi}`, `up ${midi}`])
+}
 
 // ===========================================================================
 
@@ -311,9 +387,44 @@ describe('playing with a pointer', () => {
     }
   })
 
+  it.each(PIANO_SIZES)('finds every key of a piano of %i keys, wherever the keyboard zone is', (size) => {
+    for (let baseOctave = MIN_BASE_OCTAVE; baseOctave <= MAX_BASE_OCTAVE; baseOctave++) {
+      const h = draw({ size, baseOctave })
+      const mouse = new Pointer(h)
+      const notes = keyRects(h.range()).map((rect) => rect.midi)
+      expect(notes).toHaveLength(size)
+      for (const midi of notes) mouse.down(onNote(midi, h.range())).up()
+      expect(h.log).toEqual(inTurn(notes))
+      h.unmount()
+    }
+  })
+
+  it('plays the full piano from its lowest A to its highest C', () => {
+    const h = draw({ size: 88 })
+    const mouse = new Pointer(h)
+    // The far left and the far right of the box, in the upper and in the lower part.
+    for (const heightShare of [UPPER_ROW, LOWER_ROW]) {
+      const clientY = BOX.top + heightShare * BOX.height
+      mouse.down({ clientX: BOX.left + 1, clientY }).up()
+      mouse.down({ clientX: BOX.left + BOX.width - 1, clientY }).up()
+    }
+    expect(h.log).toEqual(inTurn([21, 108, 21, 108]))
+  })
+
+  it('plays the keys outside the keyboard zone like the others', () => {
+    const h = draw({ size: 61, keyLabels: new Map([[0, 'Z']]) })
+    const range = h.range()
+    expect(midiToSlot(range.first, DEFAULT_BASE_OCTAVE)).toBeNull()
+    expect(midiToSlot(range.last, DEFAULT_BASE_OCTAVE)).toBeNull()
+    const mouse = new Pointer(h)
+    mouse.down(onNote(range.first, range)).up()
+    mouse.down(onNote(range.last, range)).up()
+    expect(h.log).toEqual(inTurn([range.first, range.last]))
+  })
+
   it('plays the white key when the pointer is below a black key, and the black key above', () => {
     const h = draw()
-    const cSharp = KEY_RECTS[C_SHARP_4]
+    const cSharp = ZONE_RECTS[C_SHARP_4]
     if (!cSharp) throw new Error('geometry is missing C sharp')
     // The left half of C sharp lies over C, the right half over D.
     const leftHalf = BOX.left + (cSharp.left + cSharp.width * 0.25) * BOX.width
@@ -439,6 +550,9 @@ describe('playing with a pointer', () => {
     h.update({ activeNotes: new Set([60]) })
     h.update({ activeNotes: new Set([60, 64]), labelMode: 'notes', noteNaming: 'solfege' })
     h.update({ keyLabels: new Map([[C4, 'Q']]) })
+    // A new look is not a new piano.
+    h.update({ keyStyle: 'glass', accent: 'rainbow' })
+    h.update({ accent: 'custom', customColour: '#00c2a8' })
     expect(h.log).toEqual(['down 60'])
     mouse.up()
     expect(h.log).toEqual(['down 60', 'up 60'])
@@ -462,11 +576,6 @@ describe('a quick glissando', () => {
    * played, in order (coalesced pointer events are used when the browser has
    * them)".
    */
-
-  /** What the piano reports when these notes are played one after the other, each released before the next. */
-  function inTurn(notes: readonly number[]): string[] {
-    return notes.flatMap((midi) => [`down ${midi}`, `up ${midi}`])
-  }
 
   /** One move of the pressed mouse that ends on the last of `slots`, having been on each of them since its previous move. */
   function moveThrough(h: Harness, slots: readonly number[]): void {
@@ -523,6 +632,24 @@ describe('a quick glissando', () => {
     moveThrough(h, [E4, G4])
     mouse.up()
     expect(h.log).toEqual(inTurn([60, 62, 64, 65, 67]))
+  })
+
+  it('misses no key of the full piano in one sweep from end to end', () => {
+    const h = draw({ size: 88 })
+    const range = h.range()
+    const notes = keyRects(range).map((rect) => rect.midi)
+    const mouse = new Pointer(h)
+    const y = BOX.top + UPPER_ROW * BOX.height
+    // Pressed on the lowest key; the next position the browser reports is on the highest.
+    mouse.down({ clientX: BOX.left + 1, clientY: y }).move({ clientX: BOX.left + BOX.width - 1, clientY: y })
+    mouse.up()
+    expect(h.log).toEqual(inTurn(notes))
+    // The same along the lower part of the piano, where only the white keys are.
+    h.log.length = 0
+    const low = BOX.top + LOWER_ROW * BOX.height
+    mouse.down({ clientX: BOX.left + BOX.width - 1, clientY: low }).move({ clientX: BOX.left + 1, clientY: low })
+    mouse.up()
+    expect(h.log).toEqual(inTurn(notes.filter((midi) => !isBlackKey(midi)).toReversed()))
   })
 
   it('follows each finger along its own line', () => {
@@ -738,7 +865,7 @@ describe('several pointers', () => {
     for (let step = 0; step < 2000; step++) {
       const pointer = pointers[random(pointers.length)] as Pointer
       const place = places[random(places.length)] as number | Point
-      switch (random(16)) {
+      switch (random(17)) {
         case 0:
         case 1:
         case 2:
@@ -776,6 +903,9 @@ describe('several pointers', () => {
           editMode = !editMode
           h.update({ editMode })
           break
+        case 15:
+          h.resize(PIANO_SIZES[random(PIANO_SIZES.length)] as PianoSize)
+          break
         default:
           pointer.down(place, 2)
       }
@@ -806,6 +936,50 @@ describe('no stuck notes when the piano changes under a held key', () => {
     finger.up()
     finger.down(C4).up()
     expect(h.log).toEqual(['down 60', 'up 60', 'down 72', 'up 72'])
+  })
+
+  it('stops the note when the piano gets another number of keys', () => {
+    const h = draw({ size: 88 })
+    const held = onNote(60, h.range())
+    const mouse = new Pointer(h).down(held)
+    h.resize(61)
+    expect(h.log).toEqual(['down 60', 'up 60'])
+    // The button is still down: it plays nothing more until it is pressed again.
+    mouse.move({ clientX: held.clientX + 300, clientY: held.clientY })
+    expect(h.log).toEqual(['down 60', 'up 60'])
+    mouse.up()
+    // The same spot is another key on the smaller piano.
+    const there = keyRects(h.range()).find((rect) => {
+      const x = (held.clientX - BOX.left) / BOX.width
+      return !rect.black && x >= rect.left && x < rect.left + rect.width
+    })
+    mouse.down(held).up()
+    expect(there?.midi).not.toBe(60)
+    expect(h.log.slice(2)).toEqual(inTurn([there?.midi ?? -1]))
+  })
+
+  it('stops the note when the keyboard zone moves under a piano that stays as it is', () => {
+    const h = draw({ size: 88, baseOctave: 3 })
+    const before = h.range()
+    const mouse = new Pointer(h).down(onNote(60, before))
+    h.update({ baseOctave: 4 })
+    // The full piano shows the same notes wherever the zone is.
+    expect(h.range()).toEqual(before)
+    expect(h.log).toEqual(['down 60', 'up 60'])
+    mouse.up()
+    mouse.down(onNote(60, before)).up()
+    expect(h.log).toEqual(['down 60', 'up 60', 'down 60', 'up 60'])
+  })
+
+  it('keeps the note when the piano is handed the same notes again as a new object', () => {
+    const h = draw({ size: 88 })
+    const { first, last } = h.range()
+    const mouse = new Pointer(h).down(onNote(60, h.range()))
+    h.update({ range: { first, last } })
+    h.update({ range: { first, last } })
+    expect(h.log).toEqual(['down 60'])
+    mouse.up()
+    expect(h.log).toEqual(['down 60', 'up 60'])
   })
 
   it('stops the note when "Customize keys" starts, and plays nothing while it is on', () => {
@@ -855,6 +1029,8 @@ describe('what the browser must not do while playing', () => {
   it('keeps the keys out of the Tab order while playing', () => {
     const h = draw()
     expect(h.piano.querySelectorAll('.piano-key[tabindex="-1"]')).toHaveLength(SLOT_COUNT)
+    h.resize(88)
+    expect(h.piano.querySelectorAll('.piano-key[tabindex="-1"]')).toHaveLength(88)
   })
 })
 
@@ -1022,6 +1198,91 @@ describe('Customize keys (edit mode)', () => {
   })
 })
 
+describe('Customize keys on a piano with more keys than the keyboard zone', () => {
+  it('selects only keys of the keyboard zone', async () => {
+    const h = draw({ size: 88, editMode: true })
+    const user = userEvent.setup()
+    // C3 and C6 are the ends of the zone; B2 and C♯6 lie just outside it.
+    await user.click(h.note(47))
+    await user.click(h.note(48))
+    await user.click(h.note(84))
+    await user.click(h.note(85))
+    await user.click(h.note(21))
+    expect(h.selected).toEqual([0, SLOT_COUNT - 1])
+    expect(h.log).toEqual([])
+  })
+
+  it('follows the zone when it moves', async () => {
+    const h = draw({ size: 88, editMode: true, baseOctave: 4 })
+    const user = userEvent.setup()
+    await user.click(h.note(48))
+    await user.click(h.note(59))
+    await user.click(h.note(60))
+    await user.click(h.note(96))
+    await user.click(h.note(97))
+    expect(h.selected).toEqual([0, SLOT_COUNT - 1])
+  })
+
+  it('lets Tab reach the keys of the zone, lowest first, and no others', async () => {
+    const h = draw({ size: 61, editMode: true })
+    const user = userEvent.setup()
+    const visited: (string | undefined)[] = []
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      await user.tab()
+      const focused = document.activeElement as HTMLElement
+      expect(h.piano.contains(focused)).toBe(true)
+      visited.push(focused.dataset.slot)
+    }
+    expect(visited).toEqual(Array.from({ length: SLOT_COUNT }, (_, slot) => String(slot)))
+    // One more Tab leaves the piano: no key outside the zone takes the focus.
+    await user.tab()
+    expect(h.piano.contains(document.activeElement)).toBe(false)
+  })
+
+  it('tells a screen reader which keys are out of reach, only while customizing', () => {
+    const h = draw({ size: 49, editMode: true })
+    for (const rect of keyRects(h.range())) {
+      const inZone = midiToSlot(rect.midi, DEFAULT_BASE_OCTAVE) !== null
+      const key = h.note(rect.midi)
+      expect(key.getAttribute('aria-disabled')).toBe(inZone ? null : 'true')
+      expect(key.getAttribute('tabindex')).toBe(inZone ? '0' : '-1')
+    }
+    expect(h.piano.querySelectorAll('[aria-disabled="true"]')).toHaveLength(49 - SLOT_COUNT)
+    h.update({ editMode: false })
+    expect(h.piano.querySelector('[aria-disabled]')).toBeNull()
+  })
+
+  it('selects nothing with Enter on a key outside the zone, and leaves that key press to the app', async () => {
+    const h = draw({ size: 88, editMode: true })
+    const user = userEvent.setup()
+    const seenByApp: string[] = []
+    const listener = (event: KeyboardEvent): void => {
+      seenByApp.push(event.code)
+    }
+    window.addEventListener('keydown', listener)
+    try {
+      // Tab does not stop on such a key, but other tools can still put the focus there.
+      h.note(30).focus()
+      expect(document.activeElement).toBe(h.note(30))
+      await user.keyboard('[Enter]')
+    } finally {
+      window.removeEventListener('keydown', listener)
+    }
+    expect(seenByApp).toEqual(['Enter'])
+    expect(h.selected).toEqual([])
+  })
+
+  it('highlights the selected slot on the key that carries it, wherever the zone is', () => {
+    const h = draw({ size: 88, editMode: true, selectedSlot: 0 })
+    expect(h.note(48).classList.contains('is-selected')).toBe(true)
+    expect(h.note(48).getAttribute('aria-pressed')).toBe('true')
+    h.update({ baseOctave: 2 })
+    expect(h.note(48).classList.contains('is-selected')).toBe(false)
+    expect(h.note(36).classList.contains('is-selected')).toBe(true)
+    expect(h.piano.querySelectorAll('.is-selected')).toHaveLength(1)
+  })
+})
+
 // ===========================================================================
 
 describe('what a screen reader is told', () => {
@@ -1033,6 +1294,32 @@ describe('what a screen reader is told', () => {
     expect(keys).toHaveLength(SLOT_COUNT)
     expect(h.piano.querySelectorAll('.piano-key--white')).toHaveLength(22)
     expect(h.piano.querySelectorAll('.piano-key--black')).toHaveLength(15)
+  })
+
+  it.each([
+    [88, 52, 36],
+    [61, 36, 25],
+    [49, 29, 20],
+    [37, 22, 15],
+  ] as const)('draws a piano of %i keys as %i white and %i black buttons', (size, white, black) => {
+    const h = draw({ size })
+    expect(h.piano.querySelectorAll('button.piano-key')).toHaveLength(size)
+    expect(h.piano.querySelectorAll('.piano-key--white')).toHaveLength(white)
+    expect(h.piano.querySelectorAll('.piano-key--black')).toHaveLength(black)
+  })
+
+  it('names the keys outside the keyboard zone by their note alone', () => {
+    const keyLabels = new Map<number, string>([
+      [0, 'Z'],
+      [SLOT_COUNT - 1, 'I'],
+    ])
+    const h = draw({ size: 88, keyLabels })
+    expect(h.note(21).getAttribute('aria-label')).toBe('A0')
+    expect(h.note(47).getAttribute('aria-label')).toBe('B2')
+    expect(h.note(48).getAttribute('aria-label')).toBe('C3, key Z')
+    expect(h.note(84).getAttribute('aria-label')).toBe('C6, key I')
+    expect(h.note(85).getAttribute('aria-label')).toBe('C♯6')
+    expect(h.note(108).getAttribute('aria-label')).toBe('C8')
   })
 
   it('names every key by its note and its computer key, in every mode and at every position', () => {
@@ -1081,6 +1368,14 @@ describe('what a screen reader is told', () => {
     h.update({ activeNotes: new Set() })
     expect(h.piano.querySelector('[aria-pressed="true"]')).toBeNull()
     expect(h.piano.querySelectorAll('[aria-pressed="false"]')).toHaveLength(SLOT_COUNT)
+  })
+
+  it('says pressed for sounding keys outside the keyboard zone too', () => {
+    const h = draw({ size: 88, activeNotes: new Set([21, 60, 108]) })
+    const pressed = [...h.piano.querySelectorAll<HTMLElement>('.piano-key[aria-pressed="true"]')]
+    expect(pressed.map((key) => key.dataset.midi)).toEqual(['21', '60', '108'])
+    expect(pressed.every((key) => key.classList.contains('is-lit'))).toBe(true)
+    expect(h.piano.querySelectorAll('.is-lit')).toHaveLength(3)
   })
 
   it('lights the same notes after the piano moves, on the keys that now carry them', () => {
@@ -1161,6 +1456,64 @@ describe('labels on the keys', () => {
     const h = draw({ labelMode: 'notes' })
     const landmarks = [...h.piano.querySelectorAll('.piano-key__note--c')].map((note) => note.textContent)
     expect(landmarks).toEqual(['C3', 'C4', 'C5', 'C6'])
+    h.resize(88)
+    const onFullPiano = [...h.piano.querySelectorAll('.piano-key__note--c')].map((note) => note.textContent)
+    expect(onFullPiano).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8'])
+  })
+
+  it('writes keycaps only inside the keyboard zone, and note names on every key', () => {
+    const h = draw({ size: 88, labelMode: 'both', keyLabels })
+    for (const rect of keyRects(h.range())) {
+      const slot = midiToSlot(rect.midi, DEFAULT_BASE_OCTAVE)
+      const key = h.note(rect.midi)
+      expect(key.dataset.slot).toBe(slot === null ? undefined : String(slot))
+      expect(capOf(key)).toBe(slot === null ? null : (keyLabels.get(slot) ?? null))
+      expect(noteOf(key)).toBe(rect.midi % 12 === 0 ? noteName(rect.midi) : pitchName(rect.midi))
+    }
+    expect(noteOf(h.note(21))).toBe('A')
+    expect(noteOf(h.note(108))).toBe('C8')
+  })
+
+  it('moves the keycaps with the keyboard zone', () => {
+    const h = draw({ size: 88, labelMode: 'keys', keyLabels })
+    expect(capOf(h.note(60))).toBe('A')
+    h.update({ baseOctave: 2 })
+    expect(capOf(h.note(60))).toBeNull()
+    expect(capOf(h.note(48))).toBe('A')
+  })
+
+  it('tells the stylesheet how many characters each label has to fit across its key', () => {
+    const h = draw({ labelMode: 'both', noteNaming: 'solfege', keyLabels })
+    const chars = (key: HTMLElement, label: 'cap' | 'note'): string => {
+      const element = key.querySelector<HTMLElement>(`.piano-key__${label}`)
+      if (!element) throw new Error(`the key has no ${label}`)
+      return element.style.getPropertyValue('--label-chars')
+    }
+    // "Num 1" is written on two lines, so its longest word is what has to fit.
+    expect(chars(h.key(0), 'cap')).toBe('3')
+    expect(chars(h.key(1), 'cap')).toBe('3')
+    // One character needs no shrinking, even a wide one.
+    expect(chars(h.key(C4), 'cap')).toBe('')
+    expect(chars(h.key(29), 'cap')).toBe('')
+    // Do3, Ré, Sol♯.
+    expect(chars(h.key(0), 'note')).toBe('3')
+    expect(chars(h.key(2), 'note')).toBe('2')
+    expect(chars(h.key(8), 'note')).toBe('4')
+    h.update({ noteNaming: 'letters' })
+    // C3, D (one letter, nothing to say), G♯.
+    expect(chars(h.key(0), 'note')).toBe('2')
+    expect(chars(h.key(2), 'note')).toBe('')
+    expect(chars(h.key(8), 'note')).toBe('2')
+  })
+
+  it('marks keycaps of more than one character as small print', () => {
+    const h = draw({ labelMode: 'keys', keyLabels })
+    const isLong = (slot: number): boolean | undefined =>
+      h.key(slot).querySelector('.piano-key__cap')?.classList.contains('piano-key__cap--long')
+    expect(isLong(0)).toBe(true)
+    expect(isLong(1)).toBe(true)
+    expect(isLong(C4)).toBe(false)
+    expect(isLong(28)).toBe(false)
   })
 })
 
@@ -1170,39 +1523,471 @@ describe('where the keys are drawn', () => {
     return Number.parseFloat(value) / 100
   }
 
-  it('places every key from the shared geometry, as percentages of the piano width', () => {
-    const h = draw()
-    for (const rect of KEY_RECTS) {
-      const key = h.key(rect.slot)
-      // The simulated browser keeps six digits of a percentage, as real ones do when they print it.
-      expect(share(key.style.left)).toBeCloseTo(rect.left, 6)
-      expect(share(key.style.width)).toBeCloseTo(rect.width, 6)
-      expect(key.classList.contains('piano-key--black')).toBe(rect.black)
-    }
-    // The black keys are drawn as far down as the pointer finds them.
-    expect(share(h.piano.style.getPropertyValue('--piano-black-key-height'))).toBeCloseTo(BLACK_KEY_HEIGHT, 6)
-  })
-
-  it('lines every light trail up with the key it rises from, at every piano position', () => {
-    const width = 1254
-    for (let baseOctave = MIN_BASE_OCTAVE; baseOctave <= MAX_BASE_OCTAVE; baseOctave++) {
-      const h = draw({ baseOctave })
-      for (let slot = 0; slot < SLOT_COUNT; slot++) {
-        const key = h.key(slot)
-        const keyLeft = share(key.style.left) * width
-        const keyWidth = share(key.style.width) * width
-        const bars = startBar([], slotToMidi(slot, baseOctave), baseOctave)
-        expect(bars).toHaveLength(1)
-        const bar = bars[0]
-        if (!bar) throw new Error('no bar')
-        const trail = barRect(bar, width, 160)
-        // Centred on the key and never wider than it.
-        expect(Math.abs(trail.x + trail.width / 2 - (keyLeft + keyWidth / 2))).toBeLessThan(0.01)
-        expect(trail.x).toBeGreaterThanOrEqual(keyLeft)
-        expect(trail.x + trail.width).toBeLessThanOrEqual(keyLeft + keyWidth)
-        expect(bar.black).toBe(key.classList.contains('piano-key--black'))
+  // The light above the piano (rising bars, falling notes, sparks) is placed
+  // with the same `keyRects`, so a key drawn from them sits right under its light.
+  it.each(PIANO_SIZES)(
+    'places every key of a piano of %i keys from the shared geometry, as percentages of the piano width',
+    (size) => {
+      for (let baseOctave = MIN_BASE_OCTAVE; baseOctave <= MAX_BASE_OCTAVE; baseOctave++) {
+        const h = draw({ size, baseOctave })
+        const rects = keyRects(h.range())
+        expect(h.piano.querySelectorAll('.piano-key')).toHaveLength(rects.length)
+        for (const rect of rects) {
+          const key = h.note(rect.midi)
+          // The simulated browser keeps six digits of a percentage, as real ones do when they print it.
+          expect(share(key.style.left)).toBeCloseTo(rect.left, 6)
+          expect(share(key.style.width)).toBeCloseTo(rect.width, 6)
+          expect(key.classList.contains('piano-key--black')).toBe(rect.black)
+        }
+        h.unmount()
       }
+    },
+  )
+
+  it('draws the keys in the order of their notes, lowest first', () => {
+    for (const size of PIANO_SIZES) {
+      const h = draw({ size })
+      const drawn = [...h.piano.querySelectorAll<HTMLElement>('.piano-key')].map((key) => Number(key.dataset.midi))
+      expect(drawn).toEqual(keyRects(h.range()).map((rect) => rect.midi))
       h.unmount()
     }
+  })
+
+  it('redraws the keys of the new notes when the piano changes size', () => {
+    const h = draw({ size: 88 })
+    expect(h.note(21)).toBeDefined()
+    h.resize(49)
+    const { first, last } = h.range()
+    const drawn = [...h.piano.querySelectorAll<HTMLElement>('.piano-key')].map((key) => Number(key.dataset.midi))
+    expect(drawn).toEqual(Array.from({ length: 49 }, (_, index) => first + index))
+    expect(drawn.at(-1)).toBe(last)
+    expect(share(h.note(first).style.left)).toBe(0)
+  })
+
+  it('tells the stylesheet the sizes it draws with', () => {
+    for (const size of PIANO_SIZES) {
+      const h = draw({ size })
+      const { style } = h.piano
+      // The black keys are drawn as far down as the pointer finds them, and as wide as the shared geometry makes them.
+      expect(share(style.getPropertyValue('--piano-black-key-height'))).toBeCloseTo(BLACK_KEY_HEIGHT, 6)
+      expect(Number(style.getPropertyValue('--piano-black-key-width'))).toBe(BLACK_KEY_WIDTH_RATIO)
+      // Every other size follows from the width of one white key.
+      expect(Number(style.getPropertyValue('--piano-white-keys'))).toBe(whiteKeyCount(h.range()))
+      h.unmount()
+    }
+  })
+
+  it('can be drawn as text, with no page to measure or listen to', () => {
+    // The app is drawn this way to check that it loads without a browser.
+    const html = renderToString(
+      <Piano
+        range={pianoRange(88, DEFAULT_BASE_OCTAVE)}
+        baseOctave={DEFAULT_BASE_OCTAVE}
+        activeNotes={new Set([60])}
+        labelMode="both"
+        noteNaming="letters"
+        keyLabels={new Map([[C4, 'A']])}
+        keyStyle="glass"
+        accent="rainbow"
+        customColour={ACCENT_COLOURS.red}
+        onNoteDown={() => {}}
+        onNoteUp={() => {}}
+      />,
+    )
+    expect(html.match(/class="piano-key /g)).toHaveLength(88)
+    expect(html).toContain('data-key-style="glass"')
+    expect(html).toContain('class="piano__zone"')
+    expect(html).toContain(`--key-light:${paletteForNote(60, 'rainbow', '').light}`)
+  })
+})
+
+describe('the line that marks the keyboard zone', () => {
+  function share(value: string): number {
+    expect(value.endsWith('%')).toBe(true)
+    return Number.parseFloat(value) / 100
+  }
+
+  function zoneLine(h: Harness): HTMLElement | null {
+    return h.piano.querySelector<HTMLElement>('.piano__zone')
+  }
+
+  it('is not drawn on a piano that is exactly the zone', () => {
+    for (let baseOctave = MIN_BASE_OCTAVE; baseOctave <= MAX_BASE_OCTAVE; baseOctave++) {
+      const h = draw({ size: 37, baseOctave })
+      expect(zoneLine(h)).toBeNull()
+      h.unmount()
+    }
+  })
+
+  it.each([88, 61, 49] as const)(
+    'runs from the first to the last key of the zone on a piano of %i keys, wherever the zone is',
+    (size) => {
+      for (let baseOctave = MIN_BASE_OCTAVE; baseOctave <= MAX_BASE_OCTAVE; baseOctave++) {
+        const h = draw({ size, baseOctave })
+        const line = zoneLine(h)
+        const first = keyRectOf(slotToMidi(0, baseOctave), h.range())
+        const last = keyRectOf(slotToMidi(SLOT_COUNT - 1, baseOctave), h.range())
+        if (!line || !first || !last) throw new Error('the zone is not on the piano')
+        expect(share(line.style.left)).toBeCloseTo(first.left, 6)
+        // (Two printed percentages added up: one digit less to go by.)
+        expect(share(line.style.left) + share(line.style.width)).toBeCloseTo(last.left + last.width, 5)
+        // It is decoration: the keys themselves say what they are.
+        expect(line.getAttribute('aria-hidden')).toBe('true')
+        expect(line.textContent).toBe('')
+        h.unmount()
+      }
+    },
+  )
+
+  it('follows the zone when it moves, and goes when the piano shrinks to the zone', () => {
+    const h = draw({ size: 88, baseOctave: 3 })
+    const before = zoneLine(h)?.style.left
+    h.update({ baseOctave: 4 })
+    const after = zoneLine(h)?.style.left
+    expect(before).toBeDefined()
+    expect(after).toBeDefined()
+    expect(after).not.toBe(before)
+    h.resize(37)
+    expect(zoneLine(h)).toBeNull()
+    h.resize(49)
+    expect(zoneLine(h)).not.toBeNull()
+  })
+
+  it('is not a key: it plays nothing and selects nothing', async () => {
+    const h = draw({ size: 88, editMode: true })
+    const line = zoneLine(h)
+    if (!line) throw new Error('the zone line was not drawn')
+    const user = userEvent.setup()
+    await user.click(line)
+    expect(h.selected).toEqual([])
+    expect(h.piano.querySelectorAll('.piano-key')).toHaveLength(88)
+    expect(line.matches('.piano-key, button')).toBe(false)
+  })
+})
+
+describe('the look of the keys', () => {
+  const ACCENTS: readonly AccentChoice[] = ['red', 'amber', 'blue', 'green', 'purple', 'white', 'custom', 'rainbow']
+  const OWN_COLOUR = '#00c2a8'
+
+  /** The colours a key carries for the stylesheet. */
+  function lightOf(key: HTMLElement): { light: string; bright: string; ink: string } {
+    return {
+      light: key.style.getPropertyValue('--key-light'),
+      bright: key.style.getPropertyValue('--key-light-bright'),
+      ink: key.style.getPropertyValue('--key-light-ink'),
+    }
+  }
+
+  it('names the key style for the stylesheet', () => {
+    for (const keyStyle of KEY_STYLES) {
+      const h = draw({ keyStyle })
+      expect(h.piano.dataset.keyStyle).toBe(keyStyle)
+      h.unmount()
+    }
+    const h = draw()
+    h.update({ keyStyle: 'midnight' })
+    expect(h.piano.dataset.keyStyle).toBe('midnight')
+  })
+
+  it('draws the same keys, labels and states in every key style', () => {
+    const keyLabels = new Map<number, string>([[C4, 'A']])
+    const drawn = KEY_STYLES.map((keyStyle) => {
+      const h = draw({ keyStyle, keyLabels, activeNotes: new Set([60]), editMode: true, selectedSlot: D4 })
+      const html = h.piano.innerHTML
+      h.unmount()
+      return html
+    })
+    expect(drawn[1]).toBe(drawn[0])
+    expect(drawn[2]).toBe(drawn[0])
+  })
+
+  it('lights a played key in the colour of the light', () => {
+    const h = draw({ accent: 'blue', activeNotes: new Set([60, 61]) })
+    const palette = paletteFor('blue', OWN_COLOUR)
+    expect(palette.light).toBe(ACCENT_COLOURS.blue)
+    for (const key of [h.key(C4), h.key(C_SHARP_4)]) {
+      expect(key.classList.contains('is-lit')).toBe(true)
+      expect(lightOf(key)).toEqual({ light: palette.light, bright: palette.bright, ink: inkOn(palette.light) })
+    }
+  })
+
+  it.each(ACCENTS)('gives every key the palette of its note with the %s light', (accent) => {
+    const h = draw({ size: 88, accent, customColour: OWN_COLOUR, activeNotes: new Set([21, 60, 61, 108]) })
+    for (const rect of keyRects(h.range())) {
+      const palette = paletteForNote(rect.midi, accent, OWN_COLOUR)
+      expect(lightOf(h.note(rect.midi))).toEqual({
+        light: palette.light,
+        bright: palette.bright,
+        ink: inkOn(palette.light),
+      })
+    }
+  })
+
+  it('gives every note its own colour with the rainbow, the same in every octave', () => {
+    const h = draw({ size: 88, accent: 'rainbow', activeNotes: new Set([60, 68]) })
+    // C is red; G♯ is the deep blue on which only white can be read.
+    expect(lightOf(h.note(60))).toMatchObject({ light: '#ff3333', ink: '#000000' })
+    expect(lightOf(h.note(68))).toMatchObject({ light: '#3333ff', ink: '#ffffff' })
+    const notes = keyRects(h.range()).map((rect) => rect.midi)
+    expect(new Set(notes.map((midi) => lightOf(h.note(midi)).light)).size).toBe(12)
+    for (const midi of notes.filter((note) => note + 12 <= h.range().last)) {
+      expect(lightOf(h.note(midi + 12))).toEqual(lightOf(h.note(midi)))
+    }
+  })
+
+  it("follows the player's own colour as it changes", () => {
+    const h = draw({ accent: 'custom', customColour: OWN_COLOUR, activeNotes: new Set([60]) })
+    expect(lightOf(h.key(C4)).light).toBe(OWN_COLOUR)
+    h.update({ customColour: '#ffd000' })
+    expect(lightOf(h.key(C4)).light).toBe('#ffd000')
+    // Something that is not a colour falls back on the default light instead of breaking the keys.
+    h.update({ customColour: 'not a colour' })
+    expect(lightOf(h.key(C4)).light).toBe(ACCENT_COLOURS.red)
+  })
+
+  it('leaves its colour on a key that was just released, for the afterglow', () => {
+    const h = draw({ accent: 'rainbow', activeNotes: new Set([64]) })
+    const whileLit = lightOf(h.key(E4))
+    h.update({ activeNotes: new Set() })
+    expect(h.key(E4).classList.contains('is-lit')).toBe(false)
+    expect(lightOf(h.key(E4))).toEqual(whileLit)
+    expect(whileLit.light).toBe(paletteForNote(64, 'rainbow', '').light)
+  })
+})
+
+// ===========================================================================
+
+/*
+ * A code review of piano.css written down as checks: the numbers and the
+ * rules that the look depends on, read from the stylesheet itself. There is
+ * no layout engine here, so how it all looks can only be seen in a browser.
+ */
+
+interface NodeFiles {
+  readFileSync(path: string, encoding: 'utf8'): string
+}
+
+interface NodeUrls {
+  fileURLToPath(url: string): string
+}
+
+// The test runner empties stylesheets that are imported, so the file is read
+// from disk, next to this one. (Node's own modules are loaded this way because
+// the project has no Node type definitions.)
+const nodeFilesModule = 'node:fs'
+const nodeUrlsModule = 'node:url'
+const { readFileSync } = (await import(/* @vite-ignore */ nodeFilesModule)) as NodeFiles
+const { fileURLToPath } = (await import(/* @vite-ignore */ nodeUrlsModule)) as NodeUrls
+const pianoCssPath = fileURLToPath(import.meta.url.replace(/[^/]*$/, 'piano.css'))
+
+/** The stylesheet without its comments. */
+const pianoCss = readFileSync(pianoCssPath, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+interface StyleRule {
+  /** Each selector of the rule, with single spaces. */
+  selectors: string[]
+  declarations: string
+}
+
+/** Every rule of the stylesheet, including those inside @media. */
+function styleRules(): StyleRule[] {
+  return [...pianoCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
+    selectors: (match[1] ?? '').split(/,(?![^(]*\))/).map((part) => part.trim().replace(/\s+/g, ' ')),
+    declarations: match[2] ?? '',
+  }))
+}
+
+/** The declarations of every rule whose selector is exactly `selector`, one after the other. */
+function styleRule(selector: string): string {
+  const declarations = styleRules()
+    .filter(({ selectors }) => selectors.includes(selector))
+    .map((found) => found.declarations)
+  if (declarations.length === 0) throw new Error(`The stylesheet has no rule for "${selector}"`)
+  return declarations.join(';')
+}
+
+/** The value of one property in a rule, with single spaces, or null when the rule does not set it. */
+function declared(selector: string, property: string): string | null {
+  const found = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`).exec(styleRule(selector))
+  return found?.[1]?.trim().replace(/\s+/g, ' ') ?? null
+}
+
+function styleValue(selector: string, property: string): string {
+  const found = declared(selector, property)
+  if (found === null) throw new Error(`"${selector}" does not set ${property}`)
+  return found
+}
+
+describe('what the stylesheet promises', () => {
+  it('writes out no colour of its own: every one comes from the theme or from the key', () => {
+    expect(pianoCss).not.toMatch(/#[0-9a-f]{3,8}\b/i)
+    expect(pianoCss).not.toMatch(/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/i)
+    // No colour by name either, except see-through.
+    const values = styleRules().flatMap(({ declarations }) =>
+      declarations.split(';').map((declaration) => declaration.slice(declaration.indexOf(':') + 1)),
+    )
+    const named = /(?<![-\w])(?:black|white|red|green|blue|gr[ae]y|silver|ivory|gold|orange|yellow|purple|pink)(?![-\w(])/i
+    expect(values.filter((value) => named.test(value))).toEqual([])
+  })
+
+  it('has one block of variables for each key style, and nothing but variables in them', () => {
+    const names = [
+      '--piano-white-fill',
+      '--piano-white-edge',
+      '--piano-white-cap-fill',
+      '--piano-white-cap-ink',
+      '--piano-white-note-ink',
+      '--piano-white-landmark-ink',
+      '--piano-black-fill',
+      '--piano-black-edge',
+      '--piano-black-cap-fill',
+      '--piano-black-cap-ink',
+      '--piano-black-note-ink',
+    ]
+    for (const keyStyle of KEY_STYLES) {
+      // Classic is the piano's own block, so a style the stylesheet does not know still draws a piano.
+      const selector = keyStyle === 'classic' ? '.piano' : `.piano[data-key-style='${keyStyle}']`
+      for (const name of names) {
+        expect(declared(selector, name), `${keyStyle} sets ${name}`).not.toBeNull()
+      }
+      if (keyStyle === 'classic') continue
+      const properties = styleRule(selector)
+        .split(';')
+        .map((declaration) => declaration.trim())
+        .filter((declaration) => declaration !== '')
+      expect(properties.filter((declaration) => !declaration.startsWith('--'))).toEqual([])
+    }
+    // No rule draws a key differently for one style: the variables are all there is.
+    const perStyle = styleRules().flatMap(({ selectors }) => selectors.filter((selector) => selector.includes('data-key-style')))
+    expect(perStyle.sort()).toEqual([".piano[data-key-style='glass']", ".piano[data-key-style='midnight']"])
+  })
+
+  it('sizes the piano itself: as wide as its parent, keys 5.5 times as long as wide, between 110px and 34% of the window', () => {
+    expect(styleValue('.piano', 'width')).toBe('100%')
+    expect(styleValue('.piano', 'aspect-ratio')).toBe('var(--piano-white-keys) / 5.5')
+    expect(styleValue('.piano', 'min-height')).toBe('110px')
+    expect(styleValue('.piano', 'max-height')).toBe('34dvh')
+    expect(styleValue('.piano', '--piano-key-width')).toBe('calc(100cqw / var(--piano-white-keys))')
+    expect(styleValue('.piano', 'container-type')).toBe('inline-size')
+  })
+
+  it('draws no box around the piano and never shifts the keys sideways', () => {
+    const unwanted = ['border', 'border-radius', 'padding', 'margin', 'background', 'box-shadow', 'outline', 'overflow']
+    for (const property of unwanted) {
+      expect(declared('.piano', property), property).toBeNull()
+    }
+  })
+
+  it('draws the black keys as far down as the pointer finds them', () => {
+    expect(styleValue('.piano-key--black', 'height')).toBe('var(--piano-black-key-height)')
+    expect(styleValue('.piano-key--white', 'height')).toBe('100%')
+  })
+
+  it('tilts a played key around its far end: quickly down, a little softer back up', () => {
+    expect(styleValue('.piano-key', 'transform-origin')).toBe('top')
+    expect(styleValue('.piano-key.is-lit', 'transform')).toMatch(/^perspective\(\d+px\) rotateX\(-\d+deg\)$/)
+    expect(styleValue('.piano-key', 'transition')).toContain('transform 140ms')
+    expect(styleValue('.piano-key.is-lit', 'transition-duration')).toMatch(/^50ms,/)
+  })
+
+  it('lets the light of a released key fade out over a quarter of a second, with the key still in front', () => {
+    for (const layer of ['.piano-key::before', '.piano-key::after']) {
+      expect(styleValue(layer, 'transition')).toBe('opacity 250ms ease-out')
+      expect(styleValue(layer, 'opacity')).toBe('0')
+    }
+    expect(styleValue('.piano-key.is-lit::before', 'opacity')).toBe('1')
+    expect(styleValue('.piano-key.is-lit::after', 'transition-duration')).toBe('50ms')
+    expect(styleValue('.piano-key', 'transition')).toContain('z-index 0s linear 250ms')
+    expect(styleValue('.piano-key.is-lit', 'transition-delay')).toBe('0s')
+  })
+
+  it('stacks a played key in front of its neighbours, and white keys under the black ones', () => {
+    const layers = [
+      styleValue('.piano-key--white', 'z-index'),
+      styleValue('.piano-key--white.is-lit', 'z-index'),
+      styleValue('.piano-key--black', 'z-index'),
+      styleValue('.piano-key--black.is-lit', 'z-index'),
+    ].map(Number)
+    expect(layers).toEqual([...layers].sort((a, b) => a - b))
+    expect(new Set(layers).size).toBe(4)
+    expect(Number(styleValue('.piano__zone', 'z-index'))).toBeGreaterThan(Math.max(...layers))
+  })
+
+  it('lights a key in its own colours', () => {
+    expect(styleValue('.piano-key--white::before', 'background')).toMatch(
+      /^linear-gradient\( to bottom, var\(--key-light-bright\), .*var\(--key-light\)/,
+    )
+    expect(styleValue('.piano-key--black::before', 'background')).toContain('var(--key-light-bright), var(--key-light)')
+    expect(styleValue('.piano-key--black.is-lit', '--piano-note-ink')).toBe('var(--key-light-ink)')
+  })
+
+  it('scales the glow of a played key with the glow setting, down to nothing at all', () => {
+    const glow = styleValue('.piano-key::after', 'box-shadow')
+    expect(glow).toContain('var(--key-light)')
+    const scaled = glow.match(/calc\(var\(--glow\) \* [\d.]+px\)/g) ?? []
+    expect(scaled.length).toBeGreaterThanOrEqual(2)
+    // Apart from the lengths that follow the setting, there is no size left in it.
+    expect(glow.replace(/calc\(var\(--glow\) \* [\d.]+px\)/g, '')).not.toMatch(/\d(?:px|em|rem|cq\w+)/)
+  })
+
+  it('lets the light of the line fall on the far end of the keys, as strongly as the glow setting says', () => {
+    for (const layer of ['.piano::before', '.piano::after']) {
+      expect(styleValue(layer, 'opacity')).toBe('var(--glow)')
+      expect(styleValue(layer, 'pointer-events')).toBe('none')
+    }
+    // Behind the keys: whatever the key style puts there. Over them: the wash, at their far end only.
+    expect(styleValue('.piano::before', 'background')).toBe('var(--piano-bed)')
+    expect(styleValue('.piano', '--piano-bed')).toBe('none')
+    expect(styleValue('.piano::after', 'background')).toMatch(/^linear-gradient\( to bottom, .*var\(--light\).*transparent \)$/)
+    expect(styleValue('.piano::after', 'bottom')).toBe('auto')
+    expect(Number(styleValue('.piano::after', 'z-index'))).toBeGreaterThan(
+      Number(styleValue('.piano-key--black.is-lit', 'z-index')),
+    )
+  })
+
+  it('marks the keyboard zone with a thin line in a dim tint of the light', () => {
+    expect(styleValue('.piano__zone', 'height')).toBe('2px')
+    expect(styleValue('.piano__zone', 'bottom')).toBe('0')
+    expect(styleValue('.piano__zone', 'background')).toMatch(/^color-mix\(in srgb, var\(--light\) \d+%, transparent\)$/)
+    expect(styleValue('.piano__zone', 'pointer-events')).toBe('none')
+  })
+
+  it('dims the keys outside the keyboard zone while customizing, and points at the others', () => {
+    expect(styleValue('.piano--editing .piano-key:not([data-slot])', 'filter')).toMatch(/^brightness\(0\.\d+\)$/)
+    expect(styleValue('.piano--editing .piano-key[data-slot]', 'cursor')).toBe('pointer')
+    expect(styleValue('.piano-key', 'cursor')).toBe('default')
+  })
+
+  it('names every white key only when keys are 30px wide, and black keys when they are wider still', () => {
+    expect(styleValue('.piano', '--piano-if-roomy')).toContain('var(--piano-key-width) - 29.99px')
+    expect(styleValue('.piano', '--piano-if-roomy-black')).toContain('var(--piano-key-width) - 35.99px')
+    expect(styleValue('.piano-key--white .piano-key__note', 'font-size')).toContain('var(--piano-if-roomy)')
+    expect(styleValue('.piano-key--black .piano-key__note', 'font-size')).toContain('var(--piano-if-roomy-black)')
+    // The C keys are named at any width.
+    expect(styleValue('.piano-key--white .piano-key__note--c', 'font-size')).toBe('var(--piano-note-fit)')
+  })
+
+  it('shrinks a label to the room its key has, and never lets it spill over', () => {
+    for (const label of ['.piano-key__cap', '.piano-key__note']) {
+      expect(styleRule(label)).toContain('var(--piano-label-room) / (var(--label-chars, 1) *')
+      expect(styleValue(label, 'max-width')).toBe('100%')
+    }
+    expect(styleValue('.piano-key__labels', 'overflow')).toBe('hidden')
+    expect(styleValue('.piano-key__cap', 'overflow')).toBe('hidden')
+    expect(styleValue('.piano-key__note', 'overflow-x')).toBe('clip')
+    expect(styleValue('.piano-key--white', '--piano-label-room')).toContain('var(--piano-key-width)')
+    expect(styleValue('.piano-key--black', '--piano-label-room')).toContain(
+      'var(--piano-key-width) * var(--piano-black-key-width)',
+    )
+  })
+
+  it("stops text selection and the browser's own gestures on the keys", () => {
+    expect(styleValue('.piano', 'user-select')).toBe('none')
+    expect(styleValue('.piano', 'touch-action')).toBe('none')
+    expect(styleValue('.piano-key', 'touch-action')).toBe('none')
+  })
+
+  it('keeps its own colours in a Windows contrast theme', () => {
+    expect(pianoCss).toMatch(/@media \(forced-colors: active\) \{\s*\.piano \{\s*forced-color-adjust: none;/)
   })
 })

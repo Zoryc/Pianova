@@ -1,0 +1,15 @@
+/*
+ * The sky: the canvas above the piano on which all the light is drawn.
+ * It fills the box its parent gives it and is see-through wherever there is
+ * no light, so the black stage behind it is its black. Everything on it is
+ * drawn by Sky.tsx; the colours come from src/core/colour.ts.
+ */
+.sky {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+  /* The typeface of the key letters written on falling notes: the same as the keycaps on the piano. */
+  font-family: var(--font-mono);
+}

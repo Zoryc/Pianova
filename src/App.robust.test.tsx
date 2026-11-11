@@ -3,12 +3,13 @@
  * "No stuck notes" audit of the whole app in a simulated browser.
  *
  * For every way a note can start (computer keyboard, pointer, and the bus API
- * that later phases will use) each test starts a note and then takes one of
- * the exits the spec lists (docs/ARCHITECTURE.md sections 5.5, 5.6, 5.7 and
- * 7): key or pointer release, window blur, tab hidden, pagehide, unmount,
- * entering "Customize keys", moving the piano lower / higher, resetting the
- * settings. Afterwards nothing may be held on the bus and nothing may still be
- * sounding in the engine.
+ * that the song player uses) each test starts a note and then takes one of
+ * the exits the specs list (docs/ARCHITECTURE.md sections 5.5 and 7,
+ * docs/INTERFACE.md sections 5.1, 5.5 and 7): key or pointer release, window
+ * blur, tab hidden, pagehide, unmount, choosing the computer keys (Settings,
+ * Keys tab), moving the computer keys lower / higher, resetting the settings.
+ * Afterwards nothing may be held on the bus, nothing may still be sounding in
+ * the engine and no piano key may still be lit.
  *
  * The sound engine is replaced by a stand-in that only remembers which notes
  * it was asked to play.
@@ -70,7 +71,7 @@ vi.mock('./audio/audioEngine', async (importOriginal) => {
 
 import { App } from './App'
 import { bus } from './app/pianoApp'
-import { KEY_RECTS } from './core/keyGeometry'
+import { keyRects } from './core/pianoGeometry'
 import { slotToMidi } from './core/layout'
 import { settingsStore } from './state/settings'
 
@@ -81,15 +82,33 @@ const C4 = 60
 const C5 = 72
 
 beforeAll(() => {
-  // jsdom has no canvas and no pointer capture. The light trails then draw
-  // nothing, and the piano falls back to its "pointer could not be captured" path.
+  // jsdom has no canvas and no pointer capture. The sky then draws nothing,
+  // and the piano falls back to its "pointer could not be captured" path.
   HTMLCanvasElement.prototype.getContext = (() => null) as HTMLCanvasElement['getContext']
   Element.prototype.setPointerCapture = () => {}
   Element.prototype.releasePointerCapture = () => {}
   Element.prototype.hasPointerCapture = () => false
 })
 
+/** The tabs of the Settings panel. */
+type SettingsTab = 'Sound' | 'Keys' | 'Piano' | 'Look' | 'About'
+
+/**
+ * Settings opens on the tab it was last on, also from one test to the next.
+ * True when a test left it on another tab than the first one.
+ */
+let settingsLeftItsFirstTab = false
+
 beforeEach(() => {
+  // Every test finds Settings on its first tab (Sound), where opening the
+  // panel changes nothing on the piano. Opened on Keys, it lets go of every note.
+  if (settingsLeftItsFirstTab) {
+    render(<App />)
+    keyDown('Enter')
+    keyUp('Enter')
+    openSettingsOn('Sound')
+    cleanup()
+  }
   window.localStorage.clear()
   act(() => settingsStore.reset())
   bus.allOff()
@@ -145,7 +164,7 @@ function piano(): HTMLElement {
 
 /** A point of the piano box that lies on the key for `slot`. */
 function pointOnSlot(slot: number): { clientX: number; clientY: number } {
-  const rect = KEY_RECTS[slot]
+  const rect = keyRects({ first: 48, last: 84 })[slot]
   if (!rect) throw new Error(`no key for slot ${slot}`)
   return {
     clientX: PIANO_BOX.left + (rect.left + rect.width / 2) * PIANO_BOX.width,
@@ -183,6 +202,42 @@ function startApp(): ReturnType<typeof render> {
 function click(name: string | RegExp): void {
   // `detail: 1` is what a real mouse click carries.
   fireEvent.click(screen.getByRole('button', { name }), { detail: 1 })
+}
+
+/** Enter on a focused control: the browser sends a click that no mouse button made (`detail` 0). */
+function pressEnterOn(control: HTMLElement): void {
+  control.focus()
+  fireEvent.click(control, { detail: 0 })
+}
+
+function settingsPanel(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Settings' })
+}
+
+/** A click with the mouse on one of the tabs of Settings, which must be open. */
+function chooseTab(tab: SettingsTab): void {
+  fireEvent.click(screen.getByRole('tab', { name: tab }), { detail: 1 })
+  settingsLeftItsFirstTab = tab !== 'Sound'
+}
+
+/** Opens Settings with the mouse, if it is not open, and shows one of its tabs. */
+function openSettingsOn(tab: SettingsTab): void {
+  if (!settingsPanel()) click('Settings')
+  chooseTab(tab)
+}
+
+/**
+ * True while the computer keys are being chosen (what used to be "Customize
+ * keys"): Settings is open on its Keys tab, and a click on a piano key
+ * selects it instead of playing it.
+ */
+function isChoosingKeys(): boolean {
+  return screen.getByRole('group', { name: 'Piano' }).classList.contains('piano--editing')
+}
+
+/** The drop-down for what is written on the piano keys, in the Piano tab of Settings. */
+function labelsDropDown(): HTMLElement {
+  return screen.getByRole('combobox', { name: 'Labels on the keys' })
 }
 
 function held(): number[] {
@@ -249,7 +304,11 @@ describe('a note started with the computer keyboard stops', () => {
   })
 
   it('when the key is released after focus moved to the Labels drop-down', () => {
-    screen.getByRole('combobox', { name: 'Labels' }).focus()
+    openSettingsOn('Piano')
+    // Settings is open on the tab with the drop-down, and the note is still held.
+    expectPlaying(C4)
+    labelsDropDown().focus()
+    expect(document.activeElement).toBe(labelsDropDown())
     keyUp('KeyA')
     expectSilence()
   })
@@ -282,26 +341,62 @@ describe('a note started with the computer keyboard stops', () => {
     expect(sounding()).toEqual([])
   })
 
-  it('when "Customize keys" is opened', () => {
-    click('Customize keys')
+  it('when the Keys tab of Settings is opened, where the computer keys are chosen', () => {
+    click('Settings')
+    // Settings alone lets the piano play on. Its Keys tab is what silences it.
+    expect(isChoosingKeys()).toBe(false)
+    expectPlaying(C4)
+    chooseTab('Keys')
+    expect(isChoosingKeys()).toBe(true)
     expectSilence()
     keyUp('KeyA')
     expectSilence()
   })
 
-  it('when a piano key is selected in "Customize keys"', () => {
+  it('when Settings opens straight on the Keys tab it was left on', () => {
+    openSettingsOn('Keys')
+    click('Close Settings')
+    expect(isChoosingKeys()).toBe(false)
     keyUp('KeyA')
-    click('Customize keys')
+    keyDown('KeyA')
+    expectPlaying(C4)
+
+    click('Settings')
+    expect(isChoosingKeys()).toBe(true)
+    expectSilence()
+    keyUp('KeyA')
+    expectSilence()
+  })
+
+  it('when a piano key is selected in the Keys tab', () => {
+    keyUp('KeyA')
+    openSettingsOn('Keys')
     // With nothing selected the keyboard still plays.
     keyDown('KeyS')
     expectPlaying(62)
     fireEvent.click(screen.getByRole('button', { name: 'C3' }), { detail: 1 })
+    expect(screen.getByRole('button', { name: 'C3' }).classList.contains('is-selected')).toBe(true)
     expectSilence()
     keyUp('KeyS')
     expectSilence()
   })
 
-  it('when the piano is moved higher, and the key then plays the new note', () => {
+  /*
+   * "Lower" and "Higher" are in the Keys tab. Opening it lets go of the note
+   * (see above), so the key is pressed again under the open tab, where the
+   * keyboard plays as long as no piano key is selected.
+   */
+  function holdKeyAUnderTheKeysTab(): void {
+    openSettingsOn('Keys')
+    expectSilence()
+    keyUp('KeyA')
+    keyDown('KeyA')
+    expectPlaying(C4)
+    expect(litKeys()).toEqual(['C4, key A'])
+  }
+
+  it('when the computer keys are moved higher, and the key then plays the new note', () => {
+    holdKeyAUnderTheKeysTab()
     click(/Higher/)
     expect(settingsStore.get().baseOctave).toBe(4)
     expectSilence()
@@ -316,7 +411,8 @@ describe('a note started with the computer keyboard stops', () => {
     expectSilence()
   })
 
-  it('when the piano is moved lower', () => {
+  it('when the computer keys are moved lower', () => {
+    holdKeyAUnderTheKeysTab()
     click(/Lower/)
     expect(settingsStore.get().baseOctave).toBe(2)
     expectSilence()
@@ -339,7 +435,7 @@ describe('a note started with the computer keyboard stops', () => {
   })
 
   it('on release, after the default keys were put back while it was held', () => {
-    click('Customize keys')
+    openSettingsOn('Keys')
     expectSilence()
     keyUp('KeyA')
     keyDown('KeyD')
@@ -434,19 +530,33 @@ describe('a note started with the pointer stops', () => {
     expect(sounding()).toEqual([])
   })
 
-  it('when "Customize keys" is opened with the keyboard while the pointer is down', () => {
-    // Enter on the focused button arrives as a click with detail 0.
-    fireEvent.click(screen.getByRole('button', { name: 'Customize keys' }), { detail: 0 })
+  it('when the Keys tab of Settings is opened with the keyboard while the pointer is down', () => {
+    pressEnterOn(screen.getByRole('button', { name: 'Settings' }))
+    // The keyboard is now on the first tab of Settings, and the note is still held.
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Sound' }))
+    expectPlaying(C4)
+    // The arrow keys go from tab to tab: Keys is the one after Sound.
+    keyDown('ArrowRight', { key: 'ArrowRight' })
+    keyUp('ArrowRight', { key: 'ArrowRight' })
+    settingsLeftItsFirstTab = true
+    expect(isChoosingKeys()).toBe(true)
     expectSilence()
-    // The pointer is still down: moving it must not play in edit mode.
+    // The pointer is still down: moving it must not play while the keys are being chosen.
     pointer('pointerMove', 14)
     expectSilence()
     pointer('pointerUp', 14)
     expectSilence()
   })
 
-  it('when the piano is moved higher (a second finger on a touch screen)', () => {
-    click(/Higher/)
+  /*
+   * "Lower" and "Higher" cannot be reached while the mouse holds a note: they
+   * are in the Keys tab, where the piano is silent. The computer keys still
+   * move under a held note when a song that needs them elsewhere is loaded,
+   * or when they are moved in another browser tab. Both write the same
+   * setting, as here.
+   */
+  it('when the computer keys are moved higher while the pointer is down', () => {
+    act(() => settingsStore.set({ baseOctave: 4 }))
     expectSilence()
     pointer('pointerMove', 14)
     expectSilence()
@@ -495,7 +605,7 @@ describe('several fingers and several inputs on one note', () => {
   })
 })
 
-describe('a note started through the bus (the way later phases will play notes) stops', () => {
+describe('a note started through the bus (the way the song player plays notes) stops', () => {
   beforeEach(() => {
     startApp()
     act(() => bus.noteOn(C4, 'playback'))
@@ -524,13 +634,25 @@ describe('a note started through the bus (the way later phases will play notes) 
     expect(sounding()).toEqual([])
   })
 
-  it('when "Customize keys" is opened', () => {
-    click('Customize keys')
+  it('when the Keys tab of Settings is opened, where the computer keys are chosen', () => {
+    click('Settings')
+    expectPlaying(C4)
+    chooseTab('Keys')
+    expect(isChoosingKeys()).toBe(true)
     expectSilence()
   })
 
-  it('when the piano is moved lower or higher', () => {
+  it('when the computer keys are moved lower or higher', () => {
+    // "Higher" is in the Keys tab, which silences the piano as it opens: the
+    // note starts again under it.
+    openSettingsOn('Keys')
+    expectSilence()
+    act(() => bus.noteOn(C4, 'playback'))
+    expectPlaying(C4)
+    expect(litKeys()).toEqual(['C4, key A'])
+
     click(/Higher/)
+    expect(settingsStore.get().baseOctave).toBe(4)
     expectSilence()
   })
 
@@ -546,7 +668,8 @@ describe('a note started through the bus (the way later phases will play notes) 
 describe('the Labels drop-down', () => {
   it('gives the keyboard back to the piano when a choice is made', () => {
     startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    openSettingsOn('Piano')
+    const labels = labelsDropDown()
     labels.focus()
     fireEvent.change(labels, { target: { value: 'keys' } })
     expect(settingsStore.get().labelMode).toBe('keys')
@@ -560,8 +683,8 @@ describe('the Labels drop-down', () => {
   /*
    * A drop-down that still has the keyboard keeps every key for itself: the
    * piano plays nothing, and a letter changes the Labels setting. So it also
-   * lets go when its list is closed without a new choice (spec 5.7: Escape,
-   * or choosing the option it already shows).
+   * lets go when its list is closed without a new choice (Escape, or choosing
+   * the option it already shows). Settings stays open: the piano plays under it.
    *
    * jsdom cannot open a list. Each test gives the drop-down the keyboard, as
    * opening the list does, and then sends what Chrome and Edge were seen to
@@ -570,12 +693,16 @@ describe('the Labels drop-down', () => {
    */
   function openLabelsList(): HTMLElement {
     startApp()
-    const labels = screen.getByRole('combobox', { name: 'Labels' })
+    openSettingsOn('Piano')
+    const labels = labelsDropDown()
     labels.focus()
+    expect(document.activeElement).toBe(labels)
     return labels
   }
 
   function expectPianoPlaysAgain(): void {
+    expect(document.activeElement).not.toBe(labelsDropDown())
+    expect(settingsPanel()).not.toBeNull()
     expect(settingsStore.get().labelMode).toBe('both')
     keyDown('KeyA', { key: 'a' })
     expectPlaying(C4)
@@ -632,13 +759,16 @@ describe('a key-up the operating system never delivers', () => {
   })
 })
 
-describe('keys held across a move of the piano', () => {
+describe('keys held across a move of the computer keys', () => {
   it('a key pressed and released after the move stops its note, even while an older key is still down', () => {
     startApp()
+    // "Lower" is in the Keys tab of Settings. The keyboard plays under it.
+    openSettingsOn('Keys')
     keyDown('KeyA')
     expectPlaying(C4)
-    // The piano moves one octave lower while A is held: A's note is let go (spec 5.7).
+    // The computer keys move one octave lower while A is held: A's note is let go (INTERFACE.md 7).
     click(/Lower/)
+    expect(settingsStore.get().baseOctave).toBe(2)
     expectSilence()
 
     // K (slot 24) now plays C4, the note A was playing before the move.
@@ -646,8 +776,8 @@ describe('keys held across a move of the piano', () => {
     keyDown('KeyK')
     expectPlaying(C4)
     keyUp('KeyK')
-    // Spec 5.5: "on key up release that note". Nothing else is holding C4:
-    // A's note ended when the piano moved.
+    // ARCHITECTURE.md 5.5: "on key up release that note". Nothing else is
+    // holding C4: A's note ended when the computer keys moved.
     expectSilence()
 
     keyUp('KeyA')

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { KeyboardType } from '../core/types'
 
 /** KeyboardEvent.code -> the character that key types on the user's current keyboard layout. */
 export type LayoutMap = ReadonlyMap<string, string>
@@ -35,6 +36,39 @@ const SYMBOL_LABELS: ReadonlyMap<string, string> = new Map([
 const PRINTABLE_CHARACTER = /^[\p{L}\p{N}\p{P}\p{S}]$/u
 
 /**
+ * The character keys of a keyboard by physical position: one line per row,
+ * from the row of digits down, each from left to right. The home row ends with
+ * the key beside Enter (above it on US keyboards) and the bottom row starts
+ * with the key beside the left Shift, which US keyboards do not have.
+ */
+const KEY_ROWS: readonly (readonly string[])[] = [
+  'Backquote Digit1 Digit2 Digit3 Digit4 Digit5 Digit6 Digit7 Digit8 Digit9 Digit0 Minus Equal',
+  'KeyQ KeyW KeyE KeyR KeyT KeyY KeyU KeyI KeyO KeyP BracketLeft BracketRight',
+  'KeyA KeyS KeyD KeyF KeyG KeyH KeyJ KeyK KeyL Semicolon Quote Backslash',
+  'IntlBackslash KeyZ KeyX KeyC KeyV KeyB KeyN KeyM Comma Period Slash',
+].map((row) => row.split(' '))
+
+/**
+ * What each keyboard type prints on those keys: keyboard type -> (code ->
+ * label). A keyboard is written the way it looks: one string per row of
+ * KEY_ROWS, one character per key, being what that key types on its own
+ * (without Shift). An accent key that waits for the next letter is written as
+ * its accent. 'auto' has no table: it asks the browser instead.
+ */
+const TYPED_LABELS: ReadonlyMap<KeyboardType, ReadonlyMap<string, string>> = new Map<
+  KeyboardType,
+  ReadonlyMap<string, string>
+>([
+  // The US keyboard, plus the key beside the left Shift as the UK prints it.
+  ['qwerty', keycapLabels(['`1234567890-=', 'qwertyuiop[]', "asdfghjkl;'\\", '\\zxcvbnm,./'])],
+  // The French keyboard, as Windows lays it out. Its digits need Shift, so
+  // the row of digits reads as accented letters and punctuation.
+  ['azerty', keycapLabels([`²&é"'(-è_çà)=`, 'azertyuiop^$', 'qsdfghjklmù*', '<wxcvbn,;:!'])],
+  // The German keyboard, as Windows lays it out.
+  ['qwertz', keycapLabels(['^1234567890ß´', 'qwertzuiopü+', 'asdfghjklöä#', '<yxcvbnm,.-'])],
+])
+
+/**
  * US-QWERTY label for a code: 'KeyA'→'A', 'Digit1'→'1', 'Semicolon'→';',
  * 'Quote'→"'", 'Numpad1'→'Num 1', 'NumpadAdd'→'Num +'. Unknown codes return
  * the code itself.
@@ -57,19 +91,35 @@ export function labelFromEventKey(key: string): string | null {
 }
 
 /**
- * Label to show for a physical key. Priority: layoutMap (current layout) →
- * customLabels (captured when the user bound the key) → defaultKeyLabel.
- * Letters are upper-cased.
+ * Label to show for a physical key. Priority: the keyboard type the player
+ * chose, for the keys that keyboard has ('auto' chooses none) → layoutMap
+ * (current layout) → customLabels (captured when the user bound the key) →
+ * defaultKeyLabel. Letters are upper-cased.
  */
 export function keyLabel(
   code: string,
   layoutMap: LayoutMap | null,
   customLabels?: Readonly<Record<string, string>>,
+  keyboardType: KeyboardType = 'auto',
 ): string {
   // The number pad is the same on every layout, and the character it types
   // ("1") would be mistaken for the digit row, so it always reads "Num 1".
   if (code.startsWith('Numpad')) return defaultKeyLabel(code)
-  return layoutLabel(code, layoutMap) ?? customLabel(code, customLabels) ?? defaultKeyLabel(code)
+  return (
+    typedLabel(code, keyboardType) ??
+    layoutLabel(code, layoutMap) ??
+    customLabel(code, customLabels) ??
+    defaultKeyLabel(code)
+  )
+}
+
+/**
+ * The letter printed on a physical key for a given keyboard type ('qwerty' is
+ * `defaultKeyLabel`). A key that keyboard does not have keeps its
+ * `defaultKeyLabel`, and so does the number pad, which is the same on all.
+ */
+export function typedKeyLabel(code: string, type: Exclude<KeyboardType, 'auto'>): string {
+  return typedLabel(code, type) ?? defaultKeyLabel(code)
 }
 
 /**
@@ -121,6 +171,24 @@ function isLayoutMap(value: unknown): value is LayoutMap {
   return (
     typeof value === 'object' && value !== null && typeof (value as LayoutMap).get === 'function'
   )
+}
+
+/** Turns the rows of characters of one keyboard into its labels, key by key. */
+function keycapLabels(typedRows: readonly string[]): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>()
+  KEY_ROWS.forEach((codes, row) => {
+    const characters = [...(typedRows[row] ?? '')]
+    codes.forEach((code, column) => {
+      const character = characters[column]
+      if (character !== undefined) labels.set(code, toKeycapCase(character))
+    })
+  })
+  return labels
+}
+
+/** Null when the keyboard type is 'auto' or has no such key. */
+function typedLabel(code: string, type: KeyboardType): string | null {
+  return TYPED_LABELS.get(type)?.get(code) ?? null
 }
 
 function layoutLabel(code: string, layoutMap: LayoutMap | null): string | null {

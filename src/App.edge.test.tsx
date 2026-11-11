@@ -219,9 +219,15 @@ async function startAppWithPiano(): Promise<User> {
   return user
 }
 
-/** What the footer says about the sound ('' while all is well). */
+/** The quiet line above the piano that says what the sound is doing ('' while all is well). */
+function soundStatus(): HTMLElement {
+  const status = document.querySelector<HTMLElement>('.stage__sky .stage__status')
+  if (!status) throw new Error('the stage has no line for the sound status')
+  return status
+}
+
 function soundStatusText(): string {
-  return document.querySelector('.app-footer__status')?.textContent ?? ''
+  return soundStatus().textContent ?? ''
 }
 
 function masterGain(): number {
@@ -275,11 +281,19 @@ describe('from the first key press to the first sound', () => {
     expect(fake.world.played).toEqual(['synth on C4', 'piano on D4', 'synth off C4', 'piano off D4'])
   })
 
-  it('says what the sound is doing in the footer, and nothing once the piano is ready', async () => {
-    await startApp()
+  it('says what the sound is doing above the piano, and nothing once the piano is ready', async () => {
+    const user = drawApp()
+    // The line is there from the start, empty: a screen reader announces what is written into it later.
+    const status = soundStatus()
+    expect(status.getAttribute('role')).toBe('status')
+    expect(status.textContent).toBe('')
+
+    await user.click(screen.getByText(START_TEXT))
+    await audioIs('loading')
     await vi.waitFor(() => expect(soundStatusText()).toBe('Loading piano sound…'))
     act(() => fake.world.samplers.at(-1)?.finishLoading())
     await vi.waitFor(() => expect(soundStatusText()).toBe(''))
+    expect(soundStatus()).toBe(status)
   })
 
   it('tells the player when audio could not start, and the next key press tries again', async () => {
@@ -294,6 +308,25 @@ describe('from the first key press to the first sound', () => {
 
     await user.keyboard('[KeyA]')
     await audioIs('loading')
+    await user.keyboard('[KeyA>]')
+    expect(fake.world.played).toEqual(['synth on C4'])
+  })
+
+  it('tries again at a click anywhere, as the message says, and takes the message away', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    fake.world.context.resume.mockRejectedValueOnce(new Error('blocked by the browser'))
+    const user = drawApp()
+    await user.click(screen.getByText(START_TEXT))
+    await audioIs('error')
+    await vi.waitFor(() =>
+      expect(soundStatusText()).toBe('Sound could not start. Click anywhere to try again.'),
+    )
+
+    // Anywhere: the empty sky, where there is nothing to press.
+    await user.click(document.querySelector('.stage__sky') as HTMLElement)
+    await audioIs('loading')
+    await vi.waitFor(() => expect(soundStatusText()).toBe('Loading piano sound…'))
+    expect(fake.world.context.resume).toHaveBeenCalledTimes(2)
     await user.keyboard('[KeyA>]')
     expect(fake.world.played).toEqual(['synth on C4'])
   })
@@ -362,7 +395,7 @@ describe('a first key press that the browser does not count as a user gesture', 
 
       activation.hasBeenActive = true
       fake.world.pageActivated = true
-      await user.click(screen.getByRole('button', { name: 'Advanced' }))
+      await user.click(screen.getByRole('button', { name: 'Settings' }))
       await audioIs('loading')
       expect(fake.world.context.resume).toHaveBeenCalledTimes(1)
     })
@@ -432,8 +465,11 @@ describe('sustain, from the Space key to the instrument', () => {
     expect(fake.world.played).toEqual(['piano on C4'])
   })
 
-  it('lets notes ring on when the piano moves higher, and stops them when sustain goes off', async () => {
+  it('lets notes ring on when the computer keys move higher, and stops them when sustain goes off', async () => {
     const user = await startAppWithPiano()
+    // "Higher" is in Settings, on the Keys tab, where the keyboard still plays.
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Keys' }))
     await user.keyboard('[Space]')
     await user.keyboard('[KeyA>]')
     await user.click(screen.getByRole('button', { name: /Higher/ }))

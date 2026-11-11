@@ -1,6 +1,18 @@
 import { useSyncExternalStore } from 'react'
-import { DEFAULT_BASE_OCTAVE, clampBaseOctave } from '../core/layout'
-import type { LabelMode, NoteNaming, ReleaseLength } from '../core/types'
+import { ACCENT_COLOURS, isHexColour } from '../core/colour'
+import { DEFAULT_BASE_OCTAVE, clampBaseOctave, isPianoSizeSetting } from '../core/layout'
+import type { PianoSizeSetting } from '../core/layout'
+import type {
+  AccentChoice,
+  BackgroundName,
+  BarStyle,
+  KeyStyle,
+  KeyboardType,
+  LabelMode,
+  NoteNaming,
+  ReleaseLength,
+  SparksLevel,
+} from '../core/types'
 import { DEFAULT_BINDINGS, isBindableCode, sanitizeBindings } from '../input/keymap'
 import type { Bindings } from '../input/keymap'
 
@@ -18,7 +30,7 @@ export interface Settings {
   sustain: boolean
   labelMode: LabelMode
 
-  // Advanced settings (the Advanced panel). Defaults suit a beginner.
+  // Fine-tuning (the Settings panel). Defaults suit a beginner.
 
   /** "Touch": how hard notes are played, MIN_VELOCITY..1 */
   velocity: number
@@ -30,22 +42,40 @@ export interface Settings {
   reverb: number
   /** How long a note rings after its key is released. */
   release: ReleaseLength
-  /** Light trails above the piano. */
+  /** Light bars: the bars that rise from the keys and the falling notes of a song. */
   showTrails: boolean
+
+  // The piano on screen.
+
+  /** How many keys the piano has, or 'auto': the biggest piano that fits the window. */
+  pianoSize: PianoSizeSetting
+  /** How the piano keys are drawn. */
+  keyStyle: KeyStyle
+  /** Which letters are printed on the player's keyboard ('auto' = ask the browser). */
+  keyboardType: KeyboardType
+
+  // The look: the light and the screen. The defaults are the Ember theme.
+
+  /** The colour of the light. */
+  accent: AccentChoice
+  /** '#rrggbb': the colour used when `accent` is 'custom'. */
+  customColour: string
+  /** How strongly the light glows, 0..1 */
+  glow: number
+  /** What is drawn behind the notes. */
+  background: BackgroundName
+  barStyle: BarStyle
+  sparks: SparksLevel
+  /** Key letters on the falling notes of a song. */
+  showKeyHints: boolean
+  /** The names of the notes being played, above the piano. */
+  showNoteNames: boolean
+  /** The top bar hides when the mouse is still. */
+  autoHideMenu: boolean
 }
 
 export const MIN_VELOCITY = 0.1
 export const MAX_TRANSPOSE = 12
-
-/** The keys of Settings that the Advanced panel controls (used by "Reset advanced settings"). */
-export const ADVANCED_KEYS: readonly (keyof Settings)[] = Object.freeze([
-  'velocity',
-  'transpose',
-  'noteNaming',
-  'reverb',
-  'release',
-  'showTrails',
-])
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   bindings: DEFAULT_BINDINGS,
@@ -60,6 +90,18 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   reverb: 0.15,
   release: 'normal',
   showTrails: true,
+  pianoSize: 'auto',
+  keyStyle: 'classic',
+  keyboardType: 'auto',
+  accent: 'red',
+  customColour: ACCENT_COLOURS.red,
+  glow: 0.6,
+  background: 'black',
+  barStyle: 'solid',
+  sparks: 'some',
+  showKeyHints: true,
+  showNoteNames: true,
+  autoHideMenu: true,
 })
 
 export const STORAGE_KEY = 'pianoapp.settings.v1'
@@ -86,6 +128,31 @@ const RELEASE_LENGTHS: Readonly<Record<ReleaseLength, true>> = {
   normal: true,
   long: true,
 }
+const KEY_STYLES: Readonly<Record<KeyStyle, true>> = { classic: true, midnight: true, glass: true }
+const KEYBOARD_TYPES: Readonly<Record<KeyboardType, true>> = {
+  auto: true,
+  qwerty: true,
+  azerty: true,
+  qwertz: true,
+}
+const ACCENTS: Readonly<Record<AccentChoice, true>> = {
+  red: true,
+  amber: true,
+  blue: true,
+  green: true,
+  purple: true,
+  white: true,
+  custom: true,
+  rainbow: true,
+}
+const BACKGROUNDS: Readonly<Record<BackgroundName, true>> = {
+  black: true,
+  night: true,
+  stars: true,
+  aurora: true,
+}
+const BAR_STYLES: Readonly<Record<BarStyle, true>> = { solid: true, neon: true }
+const SPARKS_LEVELS: Readonly<Record<SparksLevel, true>> = { off: true, some: true, lots: true }
 
 const MAX_LABEL_LENGTH = 6
 
@@ -115,6 +182,18 @@ export function sanitizeSettings(raw: unknown): Settings {
     reverb: numberInRange(read('reverb'), 0, 1, defaults.reverb),
     release: optionOr(read('release'), RELEASE_LENGTHS, defaults.release),
     showTrails: booleanOr(read('showTrails'), defaults.showTrails),
+    pianoSize: pianoSizeOr(read('pianoSize'), defaults.pianoSize),
+    keyStyle: optionOr(read('keyStyle'), KEY_STYLES, defaults.keyStyle),
+    keyboardType: optionOr(read('keyboardType'), KEYBOARD_TYPES, defaults.keyboardType),
+    accent: optionOr(read('accent'), ACCENTS, defaults.accent),
+    customColour: hexColourOr(read('customColour'), defaults.customColour),
+    glow: numberInRange(read('glow'), 0, 1, defaults.glow),
+    background: optionOr(read('background'), BACKGROUNDS, defaults.background),
+    barStyle: optionOr(read('barStyle'), BAR_STYLES, defaults.barStyle),
+    sparks: optionOr(read('sparks'), SPARKS_LEVELS, defaults.sparks),
+    showKeyHints: booleanOr(read('showKeyHints'), defaults.showKeyHints),
+    showNoteNames: booleanOr(read('showNoteNames'), defaults.showNoteNames),
+    autoHideMenu: booleanOr(read('autoHideMenu'), defaults.autoHideMenu),
   })
 }
 
@@ -347,4 +426,12 @@ function optionOr<Option extends string>(
   fallback: Option,
 ): Option {
   return typeof value === 'string' && Object.hasOwn(options, value) ? (value as Option) : fallback
+}
+
+function pianoSizeOr(value: unknown, fallback: PianoSizeSetting): PianoSizeSetting {
+  return isPianoSizeSetting(value) ? value : fallback
+}
+
+function hexColourOr(value: unknown, fallback: string): string {
+  return isHexColour(value) ? value : fallback
 }

@@ -4,7 +4,8 @@
  * can grow without limit as keys are customized again and again.
  */
 import { describe, expect, it } from 'vitest'
-import { SLOT_COUNT } from '../core/layout'
+import { isHexColour } from '../core/colour'
+import { SLOT_COUNT, isPianoSizeSetting } from '../core/layout'
 import { isBindableCode } from '../input/keymap'
 import { EDITOR_OPEN, pressKey, selectSlot } from '../ui/keyEditorModel'
 import {
@@ -92,6 +93,10 @@ function expectValid(settings: Settings): void {
   expect(Number.isInteger(settings.baseOctave)).toBe(true)
   expect(settings.baseOctave).toBeGreaterThanOrEqual(1)
   expect(settings.baseOctave).toBeLessThanOrEqual(5)
+  expect(settings.glow).toBeGreaterThanOrEqual(0)
+  expect(settings.glow).toBeLessThanOrEqual(1)
+  expect(isHexColour(settings.customColour)).toBe(true)
+  expect(isPianoSizeSetting(settings.pianoSize)).toBe(true)
 }
 
 describe('saved data that is huge', () => {
@@ -339,6 +344,8 @@ describe('settings saved by a different version of the app', () => {
     expectValid(settings)
     expect(settings).toMatchObject(older)
     expect(settings.reverb).toBe(DEFAULT_SETTINGS.reverb)
+    expect(settings.accent).toBe(DEFAULT_SETTINGS.accent)
+    expect(settings.pianoSize).toBe(DEFAULT_SETTINGS.pianoSize)
   })
 
   it('a newer save with fields and choices this version does not know is read as far as it is understood', () => {

@@ -42,23 +42,27 @@ const audio = vi.hoisted(() => {
   return { engine, listeners, state }
 })
 
-/** How many times the toolbar was drawn. It never changes when a note plays. */
-const drawn = vi.hoisted(() => ({ toolbar: 0 }))
+/**
+ * How many times the top bar was drawn. Nothing in it changes when a note
+ * plays, and the app shell draws it each time it draws itself: a note that
+ * makes this number grow has made the whole shell draw again.
+ */
+const drawn = vi.hoisted(() => ({ topBar: 0 }))
 
 vi.mock('./audio/audioEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('./audio/audioEngine')>()
   return { ...original, createAudioEngine: () => audio.engine }
 })
 
-vi.mock('./ui/Toolbar', async (importOriginal) => {
-  const original = await importOriginal<typeof import('./ui/Toolbar')>()
+vi.mock('./ui/TopBar', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./ui/TopBar')>()
   const { createElement } = await import('react')
-  type Props = Parameters<typeof original.Toolbar>[0]
+  type Props = Parameters<typeof original.TopBar>[0]
   return {
     ...original,
-    Toolbar(props: Props) {
-      drawn.toolbar += 1
-      return createElement(original.Toolbar, props)
+    TopBar(props: Props) {
+      drawn.topBar += 1
+      return createElement(original.TopBar, props)
     },
   }
 })
@@ -66,10 +70,22 @@ vi.mock('./ui/Toolbar', async (importOriginal) => {
 import { App } from './App'
 import { bus } from './app/pianoApp'
 import { STORAGE_KEY, settingsStore } from './state/settings'
+import { installFakeBrowser } from './ui/sky/skyTestKit'
+import type { FakeBrowser } from './ui/sky/skyTestKit'
+import { closeSong } from './ui/useSongs'
 
-beforeAll(() => {
+/**
+ * jsdom has no canvas: the sky then draws nothing, and follows nothing. Also
+ * undoes what the stand-in canvas of the last tests put in its place.
+ */
+function leaveTheSkyWithoutCanvas(): void {
   HTMLCanvasElement.prototype.getContext = (() => null) as HTMLCanvasElement['getContext']
-})
+  // The stand-in gave every canvas a size of its own: back to the one every element has (none).
+  Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientWidth')
+  Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientHeight')
+}
+
+beforeAll(leaveTheSkyWithoutCanvas)
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -105,6 +121,11 @@ function startApp(): { commits: () => number } {
   return { commits: () => commits }
 }
 
+/** A click with the mouse (`detail: 1` is what a real one carries). */
+function click(role: 'button' | 'tab', name: string | RegExp): void {
+  fireEvent.click(screen.getByRole(role, { name }), { detail: 1 })
+}
+
 describe('React work per note', () => {
   it('draws at most once when a note starts and at most once when it stops', () => {
     const { commits } = startApp()
@@ -119,17 +140,44 @@ describe('React work per note', () => {
     expect(commits() - before).toBeLessThanOrEqual(2)
   })
 
+  it('draws only the stage for a note: the app shell, its menu and an open panel are left alone', () => {
+    startApp()
+    // The counter works: a change of setting makes the shell draw itself, and the top bar with it.
+    const atStart = drawn.topBar
+    act(() => settingsStore.set({ volume: 0.5 }))
+    expect(drawn.topBar).toBeGreaterThan(atStart)
+    click('button', 'Settings')
+
+    const before = drawn.topBar
+    // The very first note also takes "how to play" off the screen.
+    key('keydown', 'KeyA')
+    key('keyup', 'KeyA')
+    // A chord, by the keyboard, the mouse and a song at once.
+    key('keydown', 'KeyS')
+    act(() => bus.noteOn(64, 'pointer'))
+    act(() => bus.noteOn(67, 'playback'))
+    expect(document.querySelectorAll('.piano-key.is-lit')).toHaveLength(3)
+    act(() => bus.noteOff(67, 'playback'))
+    act(() => bus.noteOff(64, 'pointer'))
+    key('keyup', 'KeyS')
+    act(() => bus.noteOn(72, 'playback'))
+    act(() => bus.allOff())
+    expect(document.querySelectorAll('.piano-key.is-lit')).toHaveLength(0)
+
+    expect(drawn.topBar - before).toBe(0)
+  })
+
   it('draws nothing new for the repeats of a held key', () => {
     const { commits } = startApp()
     key('keydown', 'KeyA')
 
     const before = commits()
-    const toolbarBefore = drawn.toolbar
+    const topBarBefore = drawn.topBar
     for (let repeat = 0; repeat < 50; repeat++) key('keydown', 'KeyA', { repeat: true })
     // React may run the app's own function once more before it sees that
-    // nothing changed; it never gets as far as the toolbar or the piano.
+    // nothing changed; it never gets as far as the top bar or the piano.
     expect(commits() - before).toBeLessThanOrEqual(1)
-    expect(drawn.toolbar - toolbarBefore).toBe(0)
+    expect(drawn.topBar - topBarBefore).toBe(0)
   })
 
   it('draws nothing when a second input joins a note that is already held', () => {
@@ -145,17 +193,18 @@ describe('React work per note', () => {
   it('draws nothing new for a key that plays no note', () => {
     const { commits } = startApp()
     const before = commits()
-    const toolbarBefore = drawn.toolbar
+    const topBarBefore = drawn.topBar
     for (let press = 0; press < 20; press++) {
       key('keydown', 'KeyZ')
       key('keyup', 'KeyZ')
     }
     expect(commits() - before).toBeLessThanOrEqual(1)
-    expect(drawn.toolbar - toolbarBefore).toBe(0)
+    expect(drawn.topBar - topBarBefore).toBe(0)
   })
 
-  it('changes one piano key out of 37, and adds or removes nothing outside the "now playing" line', () => {
+  it('changes one piano key out of 37, and adds or removes nothing but the name of the note above the piano', () => {
     startApp()
+    expect(document.querySelectorAll('.piano-key')).toHaveLength(37)
     const records: MutationRecord[] = []
     const observer = new MutationObserver((batch) => {
       records.push(...batch)
@@ -173,8 +222,9 @@ describe('React work per note', () => {
     observer.disconnect()
 
     const pianoKey = screen.getByRole('button', { name: 'C4, key A' })
-    const nowPlaying = document.querySelector('.now-playing')
-    expect(nowPlaying).not.toBeNull()
+    // The strip above the light line: the sound status, the "Transposed" badge and the note names.
+    const strip = document.querySelector('.stage__foot')
+    expect(strip).not.toBeNull()
 
     const touchedKeys = new Set<Element>()
     for (const record of records) {
@@ -184,10 +234,19 @@ describe('React work per note', () => {
     }
     expect([...touchedKeys]).toEqual([pianoKey])
 
-    const structural = records.filter(
-      (record) => record.type !== 'attributes' && !nowPlaying?.contains(record.target),
-    )
-    expect(structural).toEqual([])
+    const structural = records.filter((record) => record.type !== 'attributes')
+    expect(structural.filter((record) => !strip?.contains(record.target))).toEqual([])
+
+    // In that strip, the list of note names is all that came and went: once on, once off.
+    const isNoteNames = (node: Node): boolean =>
+      node instanceof Element && node.classList.contains('stage__notes')
+    const added = structural.flatMap((record) => [...record.addedNodes])
+    const removed = structural.flatMap((record) => [...record.removedNodes])
+    expect(added).toHaveLength(1)
+    expect(removed).toHaveLength(1)
+    expect([...added, ...removed].every(isNoteNames)).toBe(true)
+    expect(added[0]?.textContent).toBe('C4')
+    expect(document.querySelector('.stage__notes')).toBeNull()
   })
 })
 
@@ -249,6 +308,25 @@ describe('settings writes', () => {
 })
 
 describe('listeners', () => {
+  /*
+   * Here the sky draws for real, on a stand-in canvas with a stand-in frame
+   * clock and resize observer: it then follows the bus, the window and the
+   * size of its box, like everything else that is counted below.
+   */
+  let browser: FakeBrowser
+
+  beforeEach(() => {
+    browser = installFakeBrowser()
+  })
+
+  afterEach(() => {
+    cleanup()
+    // A test that stopped half-way must not leave its song playing into the next one.
+    closeSong()
+    vi.unstubAllGlobals()
+    leaveTheSkyWithoutCanvas()
+  })
+
   /** Counts add/remove calls on a target and tells how many listeners are still attached. */
   function track(target: EventTarget): () => number {
     let attached = 0
@@ -308,8 +386,15 @@ describe('listeners', () => {
       key('keydown', 'Enter')
       key('keyup', 'Enter')
       key('keydown', 'KeyA')
-      fireEvent.click(screen.getByRole('button', { name: 'Customize keys' }), { detail: 1 })
-      fireEvent.click(screen.getByRole('button', { name: /Advanced/ }), { detail: 1 })
+      // Both panels, one after the other, then the Keys tab, where the computer keys are chosen.
+      click('button', 'Songs')
+      click('button', 'Settings')
+      click('tab', 'Keys')
+      expect(document.querySelector('.piano--editing')).not.toBeNull()
+      // A note is being held, and its light is rising, when the app goes away.
+      key('keydown', 'KeyS')
+      expect([...bus.getActiveNotes()]).toEqual([62])
+      expect(browser.frames.pending.size).toBeGreaterThan(0)
       cleanup()
     }
 
@@ -318,6 +403,10 @@ describe('listeners', () => {
     expect(onBus()).toBe(0)
     expect(audio.listeners.size).toBe(engineBefore)
     expect([...bus.getActiveNotes()]).toEqual([])
+    // Nothing of the sky is left either: no resize observer, no listener, no frame waiting.
+    expect(browser.observers()).toBe(0)
+    expect(browser.motionListeners()).toBe(0)
+    expect(browser.frames.pending.size).toBe(0)
   })
 
   it('do not grow while the app is used', () => {
@@ -330,19 +419,39 @@ describe('listeners', () => {
     const onWindow = track(window)
     const onDocument = track(document)
     const busBefore = onBus()
+    const observersBefore = browser.observers()
+    const motionListenersBefore = browser.motionListeners()
+    expect(busBefore).toBeGreaterThan(0)
+    expect(observersBefore).toBeGreaterThan(0)
 
     for (let round = 0; round < 5; round++) {
       key('keydown', 'KeyA')
       key('keyup', 'KeyA')
-      fireEvent.click(screen.getByRole('button', { name: /Higher/ }), { detail: 1 })
-      fireEvent.click(screen.getByRole('button', { name: /Lower/ }), { detail: 1 })
-      fireEvent.click(screen.getByRole('button', { name: 'Customize keys' }), { detail: 1 })
-      fireEvent.click(screen.getByRole('button', { name: 'Done' }), { detail: 1 })
+      // Settings, on the tab where the computer keys are chosen and moved, and closed again.
+      click('button', 'Settings')
+      click('tab', 'Keys')
+      expect(document.querySelector('.piano--editing')).not.toBeNull()
+      click('button', /Higher/)
+      click('button', /Lower/)
+      click('button', 'Close Settings')
+      expect(document.querySelector('.piano--editing')).toBeNull()
+      // The other panel, and closed again.
+      click('button', 'Songs')
+      click('button', 'Close Songs')
+      // A song: played from the Songs panel, its options opened, and closed.
+      click('button', 'Songs')
+      click('button', /^Play Twinkle/)
+      expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
+      click('button', /^Song options/)
+      click('button', 'Close')
+      expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
       act(() => settingsStore.set({ showTrails: round % 2 === 0 }))
     }
 
     expect(onWindow()).toBe(0)
     expect(onDocument()).toBe(0)
     expect(onBus()).toBe(busBefore)
+    expect(browser.observers()).toBe(observersBefore)
+    expect(browser.motionListeners()).toBe(motionListenersBefore)
   })
 })

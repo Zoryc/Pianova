@@ -1,0 +1,170 @@
+/*
+ * The stage: the sky, the light line and the piano.
+ *
+ * The stage lies on the three rows of the screen (the menu, what is left,
+ * the piano: see src/styles/app.css) and puts its two parts on them. The
+ * piano's row is as high as the piano makes itself; the sky gets every pixel
+ * above it. So the bottom edge of the sky is exactly the top edge of the
+ * piano, at any window size, and both are as wide as the window: the light
+ * drawn in the sky lines up with the keys.
+ *
+ * Neither part may get a margin, a border or a width of its own.
+ */
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: subgrid;
+}
+
+/* ---------- The sky ---------- */
+
+/*
+ * From the very top of the window, behind the menu that floats over it, down
+ * to the piano. Everything in it is placed on top of it and takes no room,
+ * so that nothing in the sky can push the piano.
+ */
+.stage__sky {
+  position: relative;
+  grid-row: 1 / 3;
+  min-height: 0;
+}
+
+/* A menu that is always shown has a row of its own: the sky starts below it. */
+.stage--below-menu .stage__sky {
+  grid-row: 2;
+}
+
+/* The canvas is exactly the sky. */
+.stage__sky > .sky {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * The light line: on the last two pixels of the sky, which is the top edge
+ * of the piano. The piano is drawn after it, so the glow of a key that is
+ * being played falls over the line.
+ */
+.stage__line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--light);
+  box-shadow:
+    0 0 calc(var(--glow) * 6px) var(--light),
+    0 0 calc(var(--glow) * 18px) color-mix(in srgb, var(--light) 60%, transparent);
+  pointer-events: none;
+}
+
+/* ---------- The quiet words over the sky ---------- */
+
+/* How to play, in the middle of the sky until the first note. */
+.stage__hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0 24px;
+  color: var(--text-muted);
+  font-size: 16px;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  transition:
+    opacity 400ms ease-out,
+    visibility 0s;
+}
+
+/* It fades out, and is truly gone once it has. */
+.stage__hint--gone {
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 400ms;
+}
+
+/*
+ * The strip just above the light line: the sound status on the left, the
+ * names of the notes being played in the middle. The two never overlap: the
+ * names take the room they need, and the sides share the rest.
+ *
+ * These words stand where the light rises and lands. So every letter has a
+ * dark edge around it: it cannot be seen against the dark sky, and it keeps
+ * the words readable on a bar of light. (The edge is drawn first, the letter
+ * over it.)
+ */
+.stage__foot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 16px;
+  padding: 0 16px 12px;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 3px var(--stage-bg);
+  text-shadow: 0 0 6px var(--stage-bg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.stage__sound {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  grid-column: 1;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.stage__status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage__status[data-status='error'] {
+  color: var(--danger);
+}
+
+/* Smoked glass: light that passes behind the badge is dimmed, not hidden. */
+.stage__badge {
+  flex: none;
+  padding: 0 12px;
+  border: 1px solid var(--control-line-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--stage-bg) 64%, transparent);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stage__notes {
+  display: flex;
+  gap: 8px;
+  grid-column: 2;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stage__note {
+  flex: none;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- The piano ---------- */
+
+/* Pinned to the bottom of the window, with a little room under it. */
+.stage__piano {
+  grid-row: 3;
+  padding-bottom: max(8px, 2dvh);
+}

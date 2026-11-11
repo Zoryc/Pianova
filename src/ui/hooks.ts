@@ -7,23 +7,11 @@ import { bus, engine } from '../app/pianoApp'
 import { RELEASE_SECONDS } from '../audio/audioEngine'
 import type { AudioStatus } from '../audio/audioEngine'
 import { slotToMidi } from '../core/layout'
+import type { PianoRange } from '../core/layout'
 import type { Midi } from '../core/types'
 import { attachKeyboardInput } from '../input/keyboardInput'
 import { settingsStore } from '../state/settings'
 import type { Settings } from '../state/settings'
-
-function subscribeToNotes(onChange: () => void): () => void {
-  return bus.subscribe(onChange)
-}
-
-function heldNotes(): ReadonlySet<Midi> {
-  return bus.getActiveNotes()
-}
-
-/** The notes held right now, whatever is holding them. A new set whenever they change. */
-export function useActiveNotes(): ReadonlySet<Midi> {
-  return useSyncExternalStore(subscribeToNotes, heldNotes, heldNotes)
-}
 
 /** Where the sound stands: not started, loading the piano, ready… */
 export function useAudioStatus(): AudioStatus {
@@ -42,11 +30,14 @@ export function useSoundSettings(settings: Settings): void {
 
 /**
  * Lets go of every held note at the moments one could otherwise get stuck:
- * when the piano moves lower or higher, and when the page is hidden or closed.
+ * when the computer keys move lower or higher, when the piano on screen
+ * becomes another one (its size was changed, or the window was resized and
+ * another size fits), and when the page is hidden or closed.
  */
-export function useNoStuckNotes(baseOctave: number): void {
-  // The clean-up runs each time `baseOctave` changes, and when the app goes away.
-  useEffect(() => () => bus.allOff(), [baseOctave])
+export function useNoStuckNotes(baseOctave: number, range: PianoRange): void {
+  const { first, last } = range
+  // The clean-up runs each time one of these changes, and when the app goes away.
+  useEffect(() => () => bus.allOff(), [baseOctave, first, last])
 
   useEffect(() => {
     const releaseAll = (): void => bus.allOff()
