@@ -64,6 +64,13 @@
  * A style is one block of variables: how the white and the black keys are
  * filled and edged, and the colours of the labels on them. Keys being played
  * and the selected key look the same in every style. Classic is the default.
+ *
+ * Every gradient that is drawn on all the keys says `in srgb`. A gradient
+ * with a `color-mix()` in it is otherwise blended in another colour space
+ * (Oklab), which Firefox works out again, stop by stop, for every key each
+ * time anything on the piano is painted: most of the cost of a key press.
+ * These gradients only fade one colour out, or run between two nearly equal
+ * darks, so they look the same either way.
  */
 
 /* Classic: ivory and ebony. */
@@ -76,13 +83,13 @@
    */
   --piano-white-fill:
     linear-gradient(
-      to bottom,
+      to bottom in srgb,
       color-mix(in srgb, var(--key-ebony) 46%, transparent),
       color-mix(in srgb, var(--key-ebony) 10%, transparent) 5%,
       transparent 11%
     ),
     linear-gradient(
-      to right,
+      to right in srgb,
       color-mix(in srgb, var(--key-ivory-shine) 85%, transparent),
       transparent 24%
     ),
@@ -112,20 +119,20 @@
    */
   --piano-black-fill:
     linear-gradient(
-      to top,
+      to top in srgb,
       color-mix(in srgb, var(--key-ebony-edge) 46%, var(--key-ebony)),
       color-mix(in srgb, var(--key-ebony-edge) 72%, var(--key-ebony)) var(--piano-black-front),
       transparent var(--piano-black-front)
     ),
     linear-gradient(
-      to right,
+      to right in srgb,
       color-mix(in srgb, var(--key-ebony-edge) 85%, transparent),
       transparent 20%,
       transparent 78%,
       color-mix(in srgb, var(--stage-bg) 70%, transparent)
     ),
     linear-gradient(
-      to bottom,
+      to bottom in srgb,
       color-mix(in srgb, var(--key-ebony-edge) 34%, var(--key-ebony)),
       var(--key-ebony) 46%
     );
@@ -228,7 +235,7 @@
   bottom: auto;
   height: min(32%, 56px);
   background: linear-gradient(
-    to bottom,
+    to bottom in srgb,
     color-mix(in srgb, var(--light) 44%, transparent),
     color-mix(in srgb, var(--light) 15%, transparent) 38%,
     transparent
@@ -529,10 +536,17 @@
   line-height: 1.1;
   /* "Num 1" takes two lines. A word that still does not fit is broken rather than cut. */
   overflow-wrap: anywhere;
-  /* The colours follow the light of the key, which fades slowly after a release. */
+  /*
+   * The colours follow the light of the key, in one step and not little by
+   * little: a colour on its way from one to the other has to be painted again
+   * for every frame, and a browser that paints the whole piano each time
+   * (Firefox) then cannot keep up with fast playing. After a release the step
+   * waits until the light is about half gone, where it shows least. A key
+   * that is struck again before that keeps its colours.
+   */
   transition:
-    background-color 250ms ease-out,
-    color 250ms ease-out;
+    background-color 0s linear 90ms,
+    color 0s linear 90ms;
 }
 
 /* Longer labels are the small print of a keycap. */
@@ -552,7 +566,8 @@
   white-space: nowrap;
   color: var(--piano-note-ink);
   font-weight: 500;
-  transition: color 250ms ease-out;
+  /* In one step, like the keycap above. */
+  transition: color 0s linear 90ms;
 }
 
 /*
@@ -580,7 +595,8 @@
   font-weight: 700;
 }
 
+/* A key that is struck takes its colours at once. */
 .piano-key.is-lit .piano-key__cap,
 .piano-key.is-lit .piano-key__note {
-  transition-duration: 50ms;
+  transition-delay: 0s;
 }

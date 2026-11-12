@@ -1901,6 +1901,59 @@ describe('what the stylesheet promises', () => {
     expect(styleValue('.piano-key.is-lit', 'transition-delay')).toBe('0s')
   })
 
+  /*
+   * The two checks below keep a key press cheap. Measured in Firefox on a
+   * screen that shows 144 pictures a second, with the full piano: before
+   * them, a run of quick notes showed about 75 pictures a second, and 144
+   * with them. Firefox paints the whole piano again whenever anything on it
+   * changes, so what counts is how much one painting costs and how often it
+   * is asked for.
+   */
+
+  it('blends in plain sRGB every gradient that is drawn on all the keys, so that painting the piano stays cheap', () => {
+    // A gradient with a color-mix() in it is blended in Oklab unless it says otherwise, and Firefox
+    // then works out every step of every such gradient again, for every key, each time it paints.
+    const drawnOnEveryKey = [styleValue('.piano::after', 'background')]
+    for (const keyStyle of KEY_STYLES) {
+      const selector = keyStyle === 'classic' ? '.piano' : `.piano[data-key-style='${keyStyle}']`
+      drawnOnEveryKey.push(styleValue(selector, '--piano-white-fill'), styleValue(selector, '--piano-black-fill'))
+    }
+    const mixed = drawnOnEveryKey
+      .flatMap((value) => value.split('linear-gradient(').slice(1))
+      .filter((gradient) => gradient.includes('color-mix('))
+    // Classic: two layers of a white key, three of a black key. And the wash of light over the keys.
+    expect(mixed.length).toBeGreaterThanOrEqual(6)
+    for (const gradient of mixed) {
+      expect(gradient).toMatch(/^ ?to (?:top|right|bottom|left) in srgb,/)
+    }
+    // No other kind of gradient on the keys: this check would not see it.
+    expect(drawnOnEveryKey.join(' ')).not.toMatch(/(?:radial|conic)-gradient\(/)
+  })
+
+  it('changes the colours of the labels in one step: nothing on a key is painted again for every frame of a fade', () => {
+    // After a release the labels wait until the light is about half gone; a struck key takes its colours at once.
+    expect(styleValue('.piano-key__cap', 'transition')).toBe('background-color 0s linear 90ms, color 0s linear 90ms')
+    expect(styleValue('.piano-key__note', 'transition')).toBe('color 0s linear 90ms')
+    const struck = '.piano-key.is-lit .piano-key__cap'
+    expect(styleValue(struck, 'transition-delay')).toBe('0s')
+    expect(declared(struck, 'transition-duration')).toBeNull()
+    expect(declared(struck, 'transition')).toBeNull()
+
+    // In the whole stylesheet, only what a browser can move without painting
+    // again changes little by little: the tilt and the light of a key. (The
+    // dimming of the keys that cannot be chosen happens once, when customizing
+    // starts, not on a note.)
+    const gradual = styleRules().flatMap(({ declarations }) => {
+      const transition = /(?:^|;)\s*transition\s*:\s*([^;]+)/.exec(declarations)?.[1] ?? ''
+      return transition
+        .split(',')
+        .map((part) => part.trim().split(/\s+/))
+        .filter(([property, duration]) => property !== undefined && property !== '' && duration !== '0s')
+        .map(([property]) => property)
+    })
+    expect([...new Set(gradual)].sort()).toEqual(['filter', 'opacity', 'transform'])
+  })
+
   it('stacks a played key in front of its neighbours, and white keys under the black ones', () => {
     const layers = [
       styleValue('.piano-key--white', 'z-index'),
@@ -1938,7 +1991,9 @@ describe('what the stylesheet promises', () => {
     // Behind the keys: whatever the key style puts there. Over them: the wash, at their far end only.
     expect(styleValue('.piano::before', 'background')).toBe('var(--piano-bed)')
     expect(styleValue('.piano', '--piano-bed')).toBe('none')
-    expect(styleValue('.piano::after', 'background')).toMatch(/^linear-gradient\( to bottom, .*var\(--light\).*transparent \)$/)
+    expect(styleValue('.piano::after', 'background')).toMatch(
+      /^linear-gradient\( to bottom in srgb, .*var\(--light\).*transparent \)$/,
+    )
     expect(styleValue('.piano::after', 'bottom')).toBe('auto')
     expect(Number(styleValue('.piano::after', 'z-index'))).toBeGreaterThan(
       Number(styleValue('.piano-key--black.is-lit', 'z-index')),
