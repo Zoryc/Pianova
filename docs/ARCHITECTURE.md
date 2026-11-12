@@ -6,7 +6,7 @@ This is the source of truth for how the app is put together. `ROADMAP.md` (repo 
 
 ## 1. Who it is for and what Phase 1 must do
 
-The app is for casual players, not programmers, who play with a **computer keyboard** in a desktop browser (Chrome or Edge). The guiding goal: something simple that plays easily, with no Shift and no double key presses.
+The app is for casual players, not programmers, who play with a **computer keyboard** in a desktop browser (Chrome, Edge or Firefox). The guiding goal: something simple that plays easily, with no Shift and no double key presses.
 
 Hard rules that follow from that:
 

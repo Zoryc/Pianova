@@ -266,9 +266,9 @@ describe('the documents and the code', () => {
     expect(notFoundIn(readme, features)).toEqual([])
   })
 
-  it('the README says the app is for a computer, in Chrome or Edge, and not for phones or tablets', () => {
+  it('the README says the app is for a computer, in Chrome, Edge or Firefox, and not for phones or tablets', () => {
     const readme = read('README.md')
-    expect(notFoundIn(readme, [/\b(desktop|laptop)\b/i, /\bChrome\b/, /\bEdge\b/])).toEqual([])
+    expect(notFoundIn(readme, [/\b(desktop|laptop)\b/i, /\bChrome\b/, /\bEdge\b/, /\bFirefox\b/])).toEqual([])
     // One sentence names phones or tablets and says no to them.
     const sentences = readme.split(/(?<=[.!?])\s+/)
     const saysNo = sentences.filter(

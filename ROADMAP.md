@@ -4,7 +4,7 @@ A browser piano played with the computer keyboard. How it is built: `docs/ARCHIT
 
 ## Design decisions
 
-- Runs in the browser (Chrome or Edge), no install. Could be packaged as a desktop app later.
+- Runs in the browser (Chrome, Edge or Firefox), no install. Could be packaged as a desktop app later.
 - **One key = one note.** No Shift, no key combinations, nothing that must be held down (sustain is an on/off toggle).
 - Default layout: home row (`A S D F G H J K L ; '`) = white keys from middle C, row above (`W E T Y U O P`) = black keys. Two more ready-made layouts (Two octaves, White keys only) can be chosen in Settings.
 - Every key is customizable (click a note, press the key you want), saved automatically, with a reset.

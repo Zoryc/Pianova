@@ -23,7 +23,7 @@ Planned next: Practice mode (the song waits for you), then Real-time mode with s
 
 ## Run it
 
-You need [Node.js](https://nodejs.org) 22 (22.22.2 or newer), 24 (24.15 or newer) or 26 and later, and Chrome or Edge on a computer.
+You need [Node.js](https://nodejs.org) 22 (22.22.2 or newer), 24 (24.15 or newer) or 26 and later, and a current version of Chrome, Edge or Firefox on a computer. Firefox cannot tell the app which letters are printed on your keyboard: if the letters on the piano keys do not match yours, choose your keyboard type in Settings, on the Keys tab.
 
 ```bash
 npm install
