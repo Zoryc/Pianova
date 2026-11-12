@@ -16,6 +16,7 @@ A browser piano played with the computer keyboard. How it is built: `docs/ARCHIT
 - **Desktop only**: the app is for a PC with a keyboard and a mouse. No phone or tablet support.
 - The interface is an immersive full-window stage (see `docs/INTERFACE.md`): the piano across the bottom, light bars and sparks above it, falling notes when a song plays, a top menu bar that hides when the mouse is still, and one Settings panel that holds every option.
 - The project is meant to be a **public repository**: no personal information, local paths, credentials or private notes in any committed file.
+- **As little browser-specific code as possible**: the less, the better. New code uses standard web features that work the same in every current browser. Something that only some browsers have is used only when nothing standard does the job; it is then kept small, in one place, and the app still works without it.
 
 ## Phases
 
