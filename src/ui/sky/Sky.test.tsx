@@ -1335,15 +1335,47 @@ describe('a song is loaded: key letters', () => {
     expect(text.alpha).toBeLessThan(1)
   })
 
-  it('writes the letter in white where a solid bar is still its deep shade, and dark from where the bar has turned light', () => {
-    // The first note is low in the sky; the second has only just come in at the top, where the bar is dark.
-    const song = fakeSong([note(C4, 1, 1), note(D4, 2.6, 0.3)])
+  it('writes a letter in one colour at any height, with a thin edge in the opposite tone under it', () => {
+    // One note resting on the line, one low in the sky, one that has only just come in at the top.
+    const song = fakeSong([note(C4, -0.2, 1), note(D4, 1, 1), note(C4, 2.6, 0.3)])
     const sky = mount({ falling: song.source, hints })
-    const [low, high] = sky.context.texts
-    expect([low?.text, high?.text]).toEqual(['A', 'S'])
-    expect(high?.y).toBeLessThan(low?.y ?? 0)
-    expect(low?.colour).toBe('#000000')
-    expect(high?.colour).toBe('#ffffff')
+    const letters = sky.context.texts
+    const edges = sky.context.textEdges
+    expect(letters.map((letter) => letter.text)).toEqual(['A', 'S', 'A'])
+    expect(letters[2]?.y).toBeLessThan(letters[1]?.y ?? 0)
+    expect(letters[1]?.y).toBeLessThan(letters[0]?.y ?? 0)
+    // White on red, all the way down: the letter does not change while it falls.
+    expect(letters.map((letter) => letter.colour)).toEqual(['#ffffff', '#ffffff', '#ffffff'])
+
+    // Every letter has its edge, in the same place and at the same strength, with round corners.
+    expect(edges).toHaveLength(3)
+    for (const [index, edge] of edges.entries()) {
+      const letter = letters[index]
+      expect([edge.text, edge.x, edge.y, edge.font, edge.alpha]).toEqual([
+        letter?.text,
+        letter?.x,
+        letter?.y,
+        letter?.font,
+        letter?.alpha,
+      ])
+      expect(String(edge.colour).startsWith('#000000')).toBe(true)
+      expect(edge.lineWidth).toBeGreaterThanOrEqual(2)
+      expect(edge.lineWidth).toBeLessThan(6)
+      expect(edge.lineJoin).toBe('round')
+    }
+    // The corners of everything drawn after the letters are as they were.
+    expect(sky.context.lineJoin).toBe('miter')
+  })
+
+  it('writes dark letters on a bar of a light colour, and no edge inside neon bars', () => {
+    const song = fakeSong([note(C4, 1, 1)])
+    const sky = mount({ falling: song.source, hints, accent: 'amber' })
+    expect(only(sky.context.texts).colour).toBe('#000000')
+    expect(sky.context.textEdges).toHaveLength(1)
+
+    sky.update({ barStyle: 'neon' })
+    expect(sky.context.texts).toHaveLength(1)
+    expect(sky.context.textEdges).toEqual([])
   })
 })
 

@@ -20,19 +20,17 @@ export function withAlpha(colour: string, alpha: number): string {
     .padStart(2, '0')}`
 }
 
-/**
- * The '#rrggbb' colour that lies `share` of the way from `from` (0) to `to`
- * (1), mixed the way a canvas gradient mixes two solid colours.
- */
-export function mixColours(from: string, to: string, share: number): string {
-  const along = Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 0
-  let mixed = '#'
-  for (let at = 1; at < 7; at += 2) {
-    const start = Number.parseInt(from.slice(at, at + 2), 16)
-    const end = Number.parseInt(to.slice(at, at + 2), 16)
-    mixed += Math.round(start + (end - start) * along)
-      .toString(16)
-      .padStart(2, '0')
+/** How much each of red, green and blue adds to how light a colour looks. */
+const CHANNEL_WEIGHTS = [0.2126, 0.7152, 0.0722] as const
+
+/** How light a '#rrggbb' colour looks to the eye: 0 for black, 1 for white. */
+export function lightnessOf(colour: string): number {
+  let lightness = 0
+  for (const [channel, weight] of CHANNEL_WEIGHTS.entries()) {
+    const value = Number.parseInt(colour.slice(1 + channel * 2, 3 + channel * 2), 16) / 255
+    // A screen does not show half the number as half the light: this is the usual correction.
+    const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+    lightness += weight * linear
   }
-  return mixed
+  return lightness
 }

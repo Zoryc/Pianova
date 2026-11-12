@@ -1,8 +1,7 @@
-import { inkOn } from '../../core/colour'
 import type { LightPalette } from '../../core/colour'
 import type { BarStyle } from '../../core/types'
 import { barRadius } from './skyModel'
-import { mixColours, withAlpha } from './skyColour'
+import { lightnessOf, withAlpha } from './skyColour'
 
 /*
  * The pieces of light that are made once and then used many times a frame:
@@ -42,15 +41,16 @@ export interface LightArt {
   neonFill: string
   neonLine: string
   /**
-   * The colour of a key letter written on a bar. A solid bar is dark far
-   * from the line and nearly white on it, so no single colour reads all the
-   * way down: a letter whose middle is higher than `farInkUntil` (CSS pixels
-   * from the top of the sky) is written in `farInk`, any other in `ink`.
-   * Inside a neon bar both are the bright tint.
+   * The colour of a key letter written on a bar: the same all the way down,
+   * so the letter never changes while it falls. A solid bar is a deep shade
+   * far from the line and nearly white on it, so no colour alone reads on
+   * all of it: `inkEdge` is a thin edge drawn around the letter in the
+   * opposite tone, which shows only where the bar comes close to the colour
+   * of the letter. Inside a neon bar the letter is the bright tint and has
+   * no edge (null).
    */
   ink: string
-  farInk: string
-  farInkUntil: number
+  inkEdge: string | null
   /** The glow of a white-key bar and of a black-key bar. Null when there is no glow. */
   whiteGlow: BarGlow | null
   blackGlow: BarGlow | null
@@ -91,8 +91,15 @@ const LIGHT_FROM = 0.42
 /** The hot end of a bar, where it turns bright: this share of the sky above the line, but never more pixels than this. */
 const HOT_SHARE = 0.1
 const MAX_HOT_HEIGHT = 64
-/** In how many steps down the sky the place where the ink of the key letters changes is looked for. */
-const INK_STEPS = 200
+/**
+ * A solid bar whose own colour is at least this light (0 = black, 1 = white)
+ * carries dark key letters; a darker one carries white letters. Set by eye,
+ * not by the rule used for the text on buttons (inkOn): that rule puts black
+ * on a pure red, where white is the easier one to read.
+ */
+const DARK_INK_FROM = 0.4
+/** How solid the edge around a key letter is. */
+const INK_EDGE_ALPHA = 0.7
 
 /** How far the glow of a bar reaches at full strength, in CSS pixels. */
 const MAX_GLOW_BLUR = 30
@@ -183,7 +190,7 @@ function makeArt(
     barFill: makeBarFill(context, palette, skyHeight),
     neonFill: withAlpha(palette.light, NEON_FILL_ALPHA),
     neonLine: palette.bright,
-    ...(spec?.barStyle === 'neon' ? neonInks(palette) : solidInks(palette, skyHeight)),
+    ...(spec?.barStyle === 'neon' ? neonInk(palette) : solidInk(palette)),
     whiteGlow: spec ? makeBarGlow(page, palette, spec.whiteBarWidth, spec) : null,
     blackGlow: spec ? makeBarGlow(page, palette, spec.blackBarWidth, spec) : null,
     spark: makeSpark(page, palette),
@@ -191,61 +198,32 @@ function makeArt(
   }
 }
 
-/** A colour of a bar and where it is reached, from the top of the sky (0) to the line (1). */
-type BarStop = readonly [at: number, colour: string]
-
-/** The colours of a solid bar down the sky, in order. Above the first one the bar has that colour. */
-function barStops(palette: LightPalette, skyHeight: number): readonly BarStop[] {
-  const hot = skyHeight > 0 ? Math.min(HOT_SHARE, MAX_HOT_HEIGHT / skyHeight) : HOT_SHARE
-  return [
-    [DEEP_UNTIL, palette.deep],
-    [LIGHT_FROM, palette.light],
-    [1 - hot, palette.light],
-    [1, palette.bright],
-  ]
-}
-
 function makeBarFill(
   context: CanvasRenderingContext2D,
   palette: LightPalette,
   skyHeight: number,
 ): CanvasGradient {
+  const hot = skyHeight > 0 ? Math.min(HOT_SHARE, MAX_HOT_HEIGHT / skyHeight) : HOT_SHARE
   const fill = context.createLinearGradient(0, 0, 0, skyHeight)
-  for (const [at, colour] of barStops(palette, skyHeight)) fill.addColorStop(at, colour)
+  fill.addColorStop(DEEP_UNTIL, palette.deep)
+  fill.addColorStop(LIGHT_FROM, palette.light)
+  fill.addColorStop(1 - hot, palette.light)
+  fill.addColorStop(1, palette.bright)
   return fill
 }
 
-/** The colour of a solid bar at `at`, from the top of the sky (0) to the line (1). */
-function barColourAt(stops: readonly BarStop[], at: number): string {
-  let [before, colour] = stops[0] ?? [0, '#000000']
-  for (const [here, next] of stops) {
-    if (at <= here) return here > before ? mixColours(colour, next, (at - before) / (here - before)) : next
-    before = here
-    colour = next
-  }
-  return colour
+type Ink = Pick<LightArt, 'ink' | 'inkEdge'>
+
+/** Inside a neon bar there is hardly any colour: the letter is the bright tint, with nothing around it. */
+function neonInk(palette: LightPalette): Ink {
+  return { ink: palette.bright, inkEdge: null }
 }
 
-type Inks = Pick<LightArt, 'ink' | 'farInk' | 'farInkUntil'>
-
-/** Inside a neon bar there is hardly any colour: the letter is the bright tint at any height. */
-function neonInks(palette: LightPalette): Inks {
-  return { ink: palette.bright, farInk: palette.bright, farInkUntil: 0 }
-}
-
-/**
- * The inks for a solid bar, which gets lighter all the way down: the one
- * that reads best on its bright end, the one that reads best on its deep
- * end, and how far down the sky the second one reads better than the first.
- */
-function solidInks(palette: LightPalette, skyHeight: number): Inks {
-  const ink = inkOn(palette.bright)
-  const farInk = inkOn(palette.deep)
-  if (farInk === ink) return { ink, farInk, farInkUntil: 0 }
-  const stops = barStops(palette, skyHeight)
-  let step = 0
-  while (step < INK_STEPS && inkOn(barColourAt(stops, step / INK_STEPS)) === farInk) step++
-  return { ink, farInk, farInkUntil: (step / INK_STEPS) * skyHeight }
+/** White letters with a dark edge on a bar of a dark colour, dark letters with a pale edge on a bar of a light one. */
+function solidInk(palette: LightPalette): Ink {
+  return lightnessOf(palette.light) >= DARK_INK_FROM
+    ? { ink: '#000000', inkEdge: withAlpha(palette.bright, INK_EDGE_ALPHA) }
+    : { ink: '#ffffff', inkEdge: withAlpha('#000000', INK_EDGE_ALPHA) }
 }
 
 /** A bar standing in a picture of its glow: where it is, in CSS pixels. */

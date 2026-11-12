@@ -95,6 +95,9 @@ const MAX_FALLING_BARS = 400
 const MIN_HINT_BAR_WIDTH = 13
 const MIN_HINT_SIZE = 8
 const MAX_HINT_SIZE = 20
+/** The edge around a letter: the width of its line as a share of the size of the letter, and at least this many pixels. Half of it shows. */
+const HINT_EDGE_SHARE = 0.22
+const MIN_HINT_EDGE = 2
 const HINT_SIZE_SHARE = 0.62
 const HINT_PADDING = 3
 /** Letters are measured once, at this size, and scaled from there. */
@@ -518,6 +521,8 @@ export class SkyPainter {
     context.globalCompositeOperation = 'source-over'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
+    // Round corners on the edge of the letters: a pointed one would stick out of a sharp letter like A or W.
+    context.lineJoin = 'round'
 
     for (let i = this.fallingFrom; i < this.fallingTo; i++) {
       const note = notes[i]
@@ -543,11 +548,18 @@ export class SkyPainter {
       const middle = restsAt - HINT_PADDING - size / 2
       // The letter fades with its bar at the top of the sky.
       context.globalAlpha = Math.min(1, Math.max(0, middle / fade))
-      // A solid bar is dark high in the sky and nearly white on the line: the letter takes the ink that reads there.
       const art = this.artFor(picture, note.midi)
-      context.fillStyle = middle < art.farInkUntil ? art.farInk : art.ink
-      context.fillText(label, barLeft(key.left * surface.width, keyWidth) + width / 2, middle)
+      const centre = barLeft(key.left * surface.width, keyWidth) + width / 2
+      // The edge first, the letter over it: only the half of the edge that lies outside the letter shows.
+      if (art.inkEdge) {
+        context.lineWidth = Math.max(MIN_HINT_EDGE, size * HINT_EDGE_SHARE)
+        context.strokeStyle = art.inkEdge
+        context.strokeText(label, centre, middle)
+      }
+      context.fillStyle = art.ink
+      context.fillText(label, centre, middle)
     }
+    context.lineJoin = 'miter'
   }
 
   /** The largest whole size at which `label` fits a bar `width` wide. Each label is measured only once. */

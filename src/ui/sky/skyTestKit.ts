@@ -42,6 +42,12 @@ export interface WrittenText {
   alpha: number
 }
 
+/** The outline drawn around a text. */
+export interface TextEdge extends WrittenText {
+  lineWidth: number
+  lineJoin: string
+}
+
 export interface FilledRect {
   x: number
   y: number
@@ -92,6 +98,7 @@ export class FakeContext {
   fillStyle: unknown = '#000000'
   strokeStyle: unknown = '#000000'
   lineWidth = 1
+  lineJoin = 'miter'
   globalAlpha = 1
   globalCompositeOperation = 'source-over'
   font = '10px sans-serif'
@@ -104,6 +111,7 @@ export class FakeContext {
   bars: PaintedBar[] = []
   images: StampedImage[] = []
   texts: WrittenText[] = []
+  textEdges: TextEdge[] = []
   rects: FilledRect[] = []
   discs = 0
 
@@ -150,6 +158,7 @@ export class FakeContext {
     this.bars = []
     this.images = []
     this.texts = []
+    this.textEdges = []
     this.rects = []
     this.discs = 0
     this.wipes++
@@ -252,6 +261,20 @@ export class FakeContext {
 
   fillText(text: string, x: number, y: number): void {
     this.texts.push({ text, x, y, font: this.font, colour: this.fillStyle, alpha: this.globalAlpha })
+  }
+
+  /** The outline of a text: kept apart from the texts themselves. */
+  strokeText(text: string, x: number, y: number): void {
+    this.textEdges.push({
+      text,
+      x,
+      y,
+      font: this.font,
+      colour: this.strokeStyle,
+      alpha: this.globalAlpha,
+      lineWidth: this.lineWidth,
+      lineJoin: this.lineJoin,
+    })
   }
 
   /** Every character is 0.6 times as wide as the font is tall, as in a typewriter face. */

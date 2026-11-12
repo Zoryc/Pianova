@@ -11,7 +11,7 @@ import { keyRectOf } from '../../core/pianoGeometry'
 import type { BackgroundName } from '../../core/types'
 import { paintBackdrop, sameBackdrop } from './skyBackdrop'
 import type { BackdropSpec } from './skyBackdrop'
-import { NIGHT_COLOUR, mixColours, withAlpha } from './skyColour'
+import { NIGHT_COLOUR, lightnessOf, withAlpha } from './skyColour'
 import { BLOOM_PICTURE_SIZE, SPARK_PICTURE_SIZE, createSkyArt } from './skySprites'
 import type { ArtSpec } from './skySprites'
 import { FakeGradient, installFakeBrowser } from './skyTestKit'
@@ -47,18 +47,15 @@ describe('withAlpha', () => {
   })
 })
 
-describe('mixColours', () => {
-  it('goes from the first colour to the second, channel by channel', () => {
-    expect(mixColours('#000000', '#ffffff', 0)).toBe('#000000')
-    expect(mixColours('#000000', '#ffffff', 1)).toBe('#ffffff')
-    expect(mixColours('#000000', '#ffffff', 0.5)).toBe('#808080')
-    expect(mixColours('#ff2a2a', '#8c0000', 0.25)).toBe('#e22020')
-  })
-
-  it('keeps odd shares inside 0..1', () => {
-    expect(mixColours('#102030', '#405060', -3)).toBe('#102030')
-    expect(mixColours('#102030', '#405060', 7)).toBe('#405060')
-    expect(mixColours('#102030', '#405060', Number.NaN)).toBe('#102030')
+describe('lightnessOf', () => {
+  it('is 0 for black, 1 for white, and counts green most and blue least', () => {
+    expect(lightnessOf('#000000')).toBe(0)
+    expect(lightnessOf('#ffffff')).toBeCloseTo(1, 10)
+    expect(lightnessOf('#ff0000')).toBeCloseTo(0.2126, 4)
+    expect(lightnessOf('#00ff00')).toBeCloseTo(0.7152, 4)
+    expect(lightnessOf('#0000ff')).toBeCloseTo(0.0722, 4)
+    // Half the number is much less than half the light.
+    expect(lightnessOf('#808080')).toBeCloseTo(0.2159, 3)
   })
 })
 
@@ -221,30 +218,32 @@ describe('the art made for each colour', () => {
     },
   )
 
-  it('writes key letters in the ink that reads on a solid bar where they are, and bright inside neon bars', () => {
+  it('writes key letters white with a dark edge on bars of a dark colour, dark with a pale edge on bars of a light one', () => {
     const { art } = newArt()
     art.prepare(spec)
-    // A red bar is nearly white on the line and a deep red far from it.
-    const red = art.of(RED)
-    expect(red.ink).toBe('#000000')
-    expect(red.farInk).toBe('#ffffff')
-    // The ink changes where the bar turns from its deep shade into its own colour.
-    expect(red.farInkUntil).toBeGreaterThan(600 * 0.04)
-    expect(red.farInkUntil).toBeLessThan(600 * 0.42)
+    for (const accent of ['red', 'blue', 'purple'] as const) {
+      const dark = art.of(paletteFor(accent, ''))
+      expect([accent, dark.ink]).toEqual([accent, '#ffffff'])
+      expect(dark.inkEdge?.startsWith('#000000')).toBe(true)
+    }
+    for (const accent of ['amber', 'green', 'white'] as const) {
+      const palette = paletteFor(accent, '')
+      const light = art.of(palette)
+      expect([accent, light.ink]).toEqual([accent, '#000000'])
+      expect(light.inkEdge?.startsWith(palette.bright)).toBe(true)
+    }
+    // The edge is see-through, so that it is soft where it shows.
+    const edge = art.of(RED).inkEdge ?? ''
+    expect(edge).toHaveLength(9)
+    expect(Number.parseInt(edge.slice(7), 16)).toBeGreaterThan(100)
+    expect(Number.parseInt(edge.slice(7), 16)).toBeLessThan(255)
+  })
 
-    // A dark colour stays dark until its hot end, just above the line.
-    const blue = art.of(paletteFrom('#0000ff'))
-    expect([blue.ink, blue.farInk]).toEqual(['#000000', '#ffffff'])
-    expect(blue.farInkUntil).toBeGreaterThan(600 * 0.9)
-    expect(blue.farInkUntil).toBeLessThan(600)
-
-    // A pale colour is light enough for dark letters all the way up.
-    const pale = art.of(paletteFor('white', ''))
-    expect([pale.ink, pale.farInk, pale.farInkUntil]).toEqual(['#000000', '#000000', 0])
-
+  it('writes key letters in the bright tint inside neon bars, with no edge', () => {
+    const { art } = newArt()
     art.prepare({ ...spec, barStyle: 'neon' })
     const neon = art.of(RED)
-    expect([neon.ink, neon.farInk, neon.farInkUntil]).toEqual([RED.bright, RED.bright, 0])
+    expect([neon.ink, neon.inkEdge]).toEqual([RED.bright, null])
     expect(neon.neonLine).toBe(RED.bright)
     expect(neon.neonFill.startsWith(RED.light)).toBe(true)
   })
