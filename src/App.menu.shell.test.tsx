@@ -204,11 +204,11 @@ describe('the menu stays while the mouse is over it', () => {
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    moveMouse(sky(), button('Stop'))
+    moveMouse(sky(), button('Restart'))
     wait(AUTO_HIDE_DELAY_MS * 4)
     expect(isHidden()).toBe(false)
 
-    moveMouse(button('Stop'), sky())
+    moveMouse(button('Restart'), sky())
     wait(AUTO_HIDE_DELAY_MS)
     expect(isHidden()).toBe(true)
   })

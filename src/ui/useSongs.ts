@@ -106,7 +106,7 @@ export function useSongSession(range: PianoRange): SongSession {
   const arrangement = useLoadedSong()?.arrangement ?? null
   const playing = useSyncExternalStore(player.subscribe, isPlaying, isPlaying)
   // A song that stands still is put somewhere else (the position slider,
-  // "Stop"): the screen is drawn again, which shows the sky the new place at once.
+  // "Restart"): the screen is drawn again, which shows the sky the new place at once.
   useSyncExternalStore(player.subscribe, placeWhileStill, placeWhileStill)
   const falling = useMemo(
     () => (arrangement === null ? null : fallingNotesOf(arrangement)),

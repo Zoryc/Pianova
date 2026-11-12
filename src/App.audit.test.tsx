@@ -583,9 +583,9 @@ describe('a note of a song never stays stuck', () => {
     expectSilence()
   })
 
-  it('stops at Stop', () => {
+  it('stops at Restart', () => {
     playUntilFirstNote()
-    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Restart'))
     expectSilence()
     wait(3000)
     expectSilence()
@@ -1000,7 +1000,7 @@ describe("what is written to the browser's storage", () => {
     })
     clickWithMouse(button('Play'))
     wait(1000)
-    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Restart'))
 
     expect(writes).toEqual([])
   })

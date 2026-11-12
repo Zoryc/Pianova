@@ -401,7 +401,7 @@ A **"Songs"** button in the top bar, next to "Settings", in the same quiet style
 
 Shown under the top bar whenever a song is loaded:
 
-- **Play / Pause** (one button whose label and icon change), **Stop**.
+- **Play / Pause** (one button whose label and icon change), **Restart** (takes the song back to its beginning, where it waits: Play starts it again from there. In the player this is `stop()`; the button is not called "Stop" because, next to Pause and Close, players could not tell what it did).
 - The song title (cut with an ellipsis when long).
 - The progress slider (`aria-label="Position in the song"`), with the elapsed and total time on either side (`formatDuration`). Dragging it seeks. The total is the length of what is played, lead-in included (`docs/INTERFACE.md` section 9).
 - **Speed**: a slider from 50% to 150% in steps of 5, showing the value ("100%").

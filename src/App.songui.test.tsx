@@ -495,14 +495,14 @@ describe('the two seconds before the first note of a song', () => {
     expect(row?.querySelector('.song-row__length')?.textContent).toBe('0:28')
   })
 
-  it('come again after "Stop", and when the song is taken back to its start', () => {
+  it('come again after "Restart", and when the song is taken back to its start', () => {
     vi.useFakeTimers()
     startApp()
     playFromList(/^Play Twinkle/)
     wait(LEAD_IN_MS + 200)
     expect(heldNotes()).toEqual([60])
 
-    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Restart'))
     clickWithMouse(button('Play'))
     wait(LEAD_IN_MS - 100)
     expect(heldNotes()).toEqual([])
@@ -744,7 +744,7 @@ describe('Escape, with a song in the player', () => {
     act(() => {
       playSong(TWINKLE)
     })
-    const stop = button('Stop')
+    const stop = button('Restart')
     stop.focus()
     wait(AUTO_HIDE_DELAY_MS * 2)
     // The menu stays for as long as the keyboard is in it.
@@ -773,7 +773,7 @@ describe('where the computer keys sit, and a song', () => {
 
     // The player moves the keys back up while the song is loaded.
     act(() => settingsStore.set({ baseOctave: 2 }))
-    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Restart'))
     clickWithMouse(button('Play'))
     expect(settingsStore.get().baseOctave).toBe(2)
 
@@ -973,7 +973,7 @@ describe('nothing is left playing or lit', () => {
     expect(heldNotes()).toEqual([64])
   })
 
-  it('after "Stop", after "Pause", and after the position was dragged in the middle of a note', () => {
+  it('after "Restart", after "Pause", and after the position was dragged in the middle of a note', () => {
     startApp()
     playUntilANoteSounds(/^Play Twinkle/)
     clickWithMouse(button('Pause'))
@@ -989,7 +989,7 @@ describe('nothing is left playing or lit', () => {
 
     wait(700)
     expect(heldNotes()).not.toEqual([])
-    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Restart'))
     expect(player.getState().position).toBe(0)
     expectSilenceFromNowOn()
   })
@@ -1066,7 +1066,7 @@ describe('someone with the keyboard alone', () => {
     expect(stops.every((stop) => stop.tabIndex >= 0 && !stop.matches(':disabled'))).toBe(true)
     expect(stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent?.replace('▾', ''))).toEqual([
       'Pause',
-      'Stop',
+      'Restart',
       'Position in the song',
       'Speed',
       'Song options',
@@ -1207,7 +1207,7 @@ describe('a long session with songs, in any order', () => {
           if (toggle) clickWithMouse(toggle)
         },
         stop() {
-          const stop = screen.queryByRole('button', { name: 'Stop' })
+          const stop = screen.queryByRole('button', { name: 'Restart' })
           if (stop) clickWithMouse(stop)
         },
         close() {

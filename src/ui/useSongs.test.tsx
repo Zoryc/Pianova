@@ -922,7 +922,7 @@ describe('useSongSession', () => {
     // The notes are the same ones, so the sky keeps what it has worked out about them.
     expect(result.current.falling).toBe(falling)
 
-    // Put where it already is, nothing is drawn; "Stop" takes it back to the start.
+    // Put where it already is, nothing is drawn; "Restart" takes it back to the start.
     act(() => player.seek(0.25))
     expect(renders).toBe(rendersOncePaused + 2)
     act(() => player.stop())

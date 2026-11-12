@@ -2065,7 +2065,7 @@ describe('after a click with the mouse the player can go straight back to playin
 
     // The song is paused first, so that the only notes are the player's own.
     const player = screen.getByRole('region', { name: 'Song player' })
-    for (const name of ['Pause', 'Stop', 'Song options']) {
+    for (const name of ['Pause', 'Restart', 'Song options']) {
       await user.click(within(player).getByRole('button', { name }))
       await expectStraightBackToPlaying(user)
     }
@@ -3006,12 +3006,12 @@ describe('ARIA', () => {
       expect(holderOf(glyph)?.getAttribute('aria-hidden'), glyph).toBe('true')
     }
 
-    // The player line: the drawings on Play and Stop, and the chevron of "Song options".
+    // The player line: the drawings on Play and Restart, and the chevron of "Song options".
     await user.click(songsButton())
     await user.click(screen.getByRole('button', { name: /^Play Twinkle/ }))
     const player = screen.getByRole('region', { name: 'Song player' })
     expect(within(player).getByRole('button', { name: 'Pause' })).toBeTruthy()
-    expect(within(player).getByRole('button', { name: 'Stop' })).toBeTruthy()
+    expect(within(player).getByRole('button', { name: 'Restart' })).toBeTruthy()
     expect(within(player).getByRole('button', { name: 'Song options' })).toBeTruthy()
     expect(holderOf('▾')?.getAttribute('aria-hidden')).toBe('true')
     for (const drawing of player.querySelectorAll('svg')) {

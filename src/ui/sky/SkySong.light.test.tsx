@@ -443,7 +443,7 @@ describe('a song the app starts, with its own player and its song glue', () => {
     }
   })
 
-  it('shows a song that stands still at its new place at once when it is moved, and at its start after "Stop"', () => {
+  it('shows a song that stands still at its new place at once when it is moved, and at its start after "Restart"', () => {
     const context = drawShell()
     act(() => {
       playSong(TWINKLE.id)

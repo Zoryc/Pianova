@@ -983,7 +983,7 @@ describe('someone with the keyboard alone', () => {
         'Songs',
         'Settings',
         'Pause',
-        'Stop',
+        'Restart',
         'Position in the song',
         'Speed',
         'Song options▾',

@@ -20,13 +20,22 @@ import './songs.css'
 /** The speed slider moves in steps of this many percent. */
 const SPEED_STEP = 5
 
-/** The shapes of the three icons, drawn in a square of 16 by 16. */
+/** The shapes of the three icons, drawn in a square of 16 by 16. Restart is a bar with an arrow pointing back at it. */
 const PLAY_ICON = 'M4 2.5v11l9-5.5z'
 const PAUSE_ICON = 'M3.5 2.5h3v11h-3zm6 0h3v11h-3z'
-const STOP_ICON = 'M3.5 3.5h9v9h-9z'
+const RESTART_ICON = 'M3 2.5h2v11H3zM13 2.5v11L5.5 8z'
 
 /**
- * The line of controls for the song in the player: play, pause, stop, where
+ * Takes the song back to its beginning, where it waits: "Play" starts it
+ * again from there. The button is named for where the song goes, not "Stop":
+ * next to "Pause" and "Close", a button that stops was one too many to tell apart.
+ */
+function restart(): void {
+  player.stop()
+}
+
+/**
+ * The line of controls for the song in the player: play, pause, restart, where
  * the song is, how fast it goes, and its options. Nothing when no song is loaded.
  */
 export function PlayerLine(): JSX.Element | null {
@@ -87,9 +96,9 @@ function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
           <Icon shape={playing ? PAUSE_ICON : PLAY_ICON} />
           {playing ? 'Pause' : 'Play'}
         </button>
-        <button type="button" className="button" onClick={() => player.stop()}>
-          <Icon shape={STOP_ICON} />
-          Stop
+        <button type="button" className="button" onClick={restart}>
+          <Icon shape={RESTART_ICON} />
+          Restart
         </button>
         <span className="player-line__title" title={state.title}>
           {state.title}

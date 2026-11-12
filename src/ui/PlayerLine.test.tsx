@@ -132,7 +132,7 @@ describe('the player line', () => {
     )
     expect(controls).toEqual([
       'Pause',
-      'Stop',
+      'Restart',
       'Position in the song',
       'Speed',
       'Song options▾',
@@ -159,7 +159,7 @@ describe('the player line', () => {
     await playOnScreen('Moonlight.mid')
     letTimePass(900)
 
-    click(button('Stop'))
+    click(button('Restart'))
     expect(player.getState()).toMatchObject({ status: 'stopped', position: 0 })
     expect(bus.getActiveNotes().size).toBe(0)
     expect(button('Play')).toBeTruthy()
@@ -404,14 +404,14 @@ describe('song options', () => {
   it('leave the keyboard focus where it is when they are closed with the focus somewhere else', async () => {
     await playOnScreen('Moonlight.mid')
     openOptions()
-    act(() => button('Stop').focus())
+    act(() => button('Restart').focus())
     act(() => {
       closeSongOptions()
     })
-    expect(document.activeElement).toBe(button('Stop'))
+    expect(document.activeElement).toBe(button('Restart'))
 
     openOptions()
-    act(() => button('Stop').blur())
+    act(() => button('Restart').blur())
     act(() => {
       closeSongOptions()
     })
@@ -624,7 +624,7 @@ describe('the progress line', () => {
 
     moveSlider('Position in the song', 4.5)
     expect(progressShown()).toBeCloseTo(0.75, 2)
-    click(button('Stop'))
+    click(button('Restart'))
     expect(progressShown()).toBe(0)
   })
 

@@ -217,10 +217,10 @@ describe('the position, dragged as far as it goes', () => {
 })
 
 describe('a song that is stopped', () => {
-  it('can be moved without starting, plays on from there, and "Stop" takes it back to the start', async () => {
+  it('can be moved without starting, plays on from there, and "Restart" takes it back to the start', async () => {
     useFakeClock()
     await playOnScreen('Tune.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
-    click(button('Stop'))
+    click(button('Restart'))
     // To a little over two seconds into the notes of the song.
     moveSlider('Position in the song', LEAD_IN_SECONDS + 2.1)
 
@@ -233,16 +233,16 @@ describe('a song that is stopped', () => {
     letTimePass(500)
     expect(heldNotes()).toEqual([69])
 
-    click(button('Stop'))
+    click(button('Restart'))
     expect(player.getState()).toMatchObject({ status: 'stopped', position: 0 })
     expect(heldNotes()).toEqual([])
   })
 
-  it('is left as it is when "Stop" is pressed again', async () => {
+  it('is left as it is when "Restart" is pressed again', async () => {
     await playOnScreen('Tune.mid')
-    click(button('Stop'))
+    click(button('Restart'))
     const before = player.getState()
-    click(button('Stop'))
+    click(button('Restart'))
     expect(player.getState()).toBe(before)
     expect(before).toMatchObject({ status: 'stopped', position: 0 })
   })
@@ -358,7 +358,7 @@ describe('someone with the keyboard alone', () => {
     expect([...visited].sort()).toEqual(
       [
         'Pause',
-        'Stop',
+        'Restart',
         'Position in the song',
         'Speed',
         'Song options',
@@ -432,7 +432,7 @@ describe('someone with the keyboard alone', () => {
   it('is left where it is when the options are closed while it is somewhere else', async () => {
     await playOnScreen('Tune.mid')
     fireEvent.click(button('Song options'), { detail: 1 })
-    const stop = button('Stop')
+    const stop = button('Restart')
     stop.focus()
 
     act(() => {
