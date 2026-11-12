@@ -2,7 +2,7 @@
 
 This is the source of truth for how the app is put together. `ROADMAP.md` (repo root) lists the phases.
 
-> **The screen has been redesigned.** `docs/INTERFACE.md` replaces sections 5.6, 5.7, 5.8 and 6 of this document (the piano component, the app shell, the light trails and the visual direction) and adds to sections 5.1 to 5.3. `docs/SONGS.md` describes songs. Where they disagree with this document, they win.
+> **The screen has been redesigned.** `docs/INTERFACE.md` replaces sections 5.6, 5.7, 5.8 and 6 of this document (the piano component, the app shell, the light trails and the visual direction) and adds to sections 5.1 to 5.3. Those four sections are kept as the record of the first screen; each says at its top what still applies. `docs/SONGS.md` describes songs. Where they disagree with this document, they win.
 
 ## 1. Who it is for and what Phase 1 must do
 
@@ -12,12 +12,12 @@ Hard rules that follow from that:
 
 - **One key = one note.** No Shift, no Ctrl, no key combinations, anywhere in the app.
 - **Nothing has to be held down to change how the piano behaves.** Sustain is an on/off toggle, not a held pedal.
-- Wording in the UI is plain and short. No jargon ("MIDI", "binding", "slot", "octave shift") in user-facing text. Say "key", "note", "lower / higher".
+- Wording in the UI is plain and short. No jargon ("MIDI", "binding", "slot", "octave shift") in user-facing text. Say "key", "note", "lower / higher". (The one exception is "MIDI file", which is what the player has to look for: `docs/SONGS.md` section 1.)
 - The piano must feel instant: a key press makes sound with no noticeable delay.
-- **Easy to navigate.** One screen, no hidden menus: the modes are tabs at the top, every control is visible and labelled with a plain word, and the same things stay in the same place. A first-time user should understand the whole screen in a few seconds.
-- **Elegant and interactive with the piano.** The piano is the centre of the screen and reacts to everything: keys light up and dip when played, glowing trails rise from the keys being played (section 5.8), hovering a key gives gentle feedback. Polished, restrained, never gaudy.
+- **Easy to navigate.** One screen: the modes are tabs in the menu bar at the top, which hides while the mouse is still and comes back when it moves or Tab is pressed; every control is labelled with a plain word, and the same things stay in the same place. A first-time user should understand the whole screen in a few seconds.
+- **Elegant and interactive with the piano.** The piano is the centre of the screen and reacts to everything: keys light up and dip when played, bars of light rise from the keys being played (`docs/INTERFACE.md` 5.2), hovering a key gives gentle feedback. Polished, restrained, never gaudy.
 
-- **Simple first, advanced on demand.** Easy for a beginner, customizable for an experienced pianist. The main screen stays simple and works with zero configuration. Everything an experienced player may want to tune lives in an **Advanced** panel that is closed by default, where every option has a plain one-line explanation and a sensible default, and can be reset. Later phases follow the same rule (their fine-tuning options go in the same panel).
+- **Simple first, advanced on demand.** Easy for a beginner, customizable for an experienced pianist. The main screen stays simple and works with zero configuration. Everything an experienced player may want to tune lives in one **Settings** panel, grouped in tabs, where every option has a sensible default and can be reset, and every option that is not plain from its name has a one-line explanation. Later phases follow the same rule (their fine-tuning options go in the same panel).
 - The app's name is a **placeholder** (`APP_NAME` in `src/app/appInfo.ts`, currently "PianoApp"). Never hard-code the name anywhere else.
 
 Phase 1 = **the playable piano (Free Play)**:
@@ -27,16 +27,18 @@ Phase 1 = **the playable piano (Free Play)**:
 3. Real piano sound (sampled grand piano), with a basic built-in sound as fallback while samples load or when offline.
 4. Volume slider, sustain on/off, buttons to move the piano lower/higher, a choice of what labels to show on the keys.
 5. **Customizable keys**: click a piano key, press the computer key you want for it. Saved automatically. Reset to default.
-6. Mouse / touch on the on-screen keys also plays.
+6. The mouse on the on-screen keys also plays.
 7. Everything the user changes is remembered next time (localStorage).
 8. An **Advanced** panel (closed by default): touch strength, transpose, note names as C D E or Do Ré Mi, room echo, how long notes ring after release, light trails on/off.
+
+This list is the record of what Phase 1 delivered. Since then the piano on screen can have up to 88 keys (the 37 are the keys the computer keyboard can play), and the controls of item 4 and the options of item 8 have moved into the top bar and the Settings panel: see `docs/INTERFACE.md`.
 
 Later phases (do not build now, but do not block them): record/replay and metronome, Practice mode (song waits for the right key), Real-time mode (timed, scored), real-instrument input from audio, sheet music mode.
 
 ## 2. Stack and commands
 
 - Vite 8, React 19, TypeScript 7 (strict, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`: use `import type` for types), Tone.js 15, Vitest 5.
-- Plain CSS files using the variables in `src/styles/theme.css`. No CSS framework, no UI library, no state library, no extra npm dependencies.
+- Plain CSS files using the variables in `src/styles/theme.css`. No CSS framework, no UI library, no state library, no extra npm dependencies. (The one dependency added since Phase 1 is `midi-file`, which reads the bytes of a MIDI file: `docs/SONGS.md` section 3.)
 - `npm run dev` (port 5173, strict) · `npm run typecheck` · `npm test` · `npm run build`.
 - Tests are Vitest (`src/**/*.test.{ts,tsx}`). The default environment is `node`; a test that needs a DOM opts in with `// @vitest-environment jsdom` on its first line and uses Testing Library (`jsdom`, `@testing-library/react` and `@testing-library/user-event` are dev dependencies). Pure logic still takes the DOM or `localStorage` as a parameter, so it can be tested with a fake.
 
@@ -45,14 +47,15 @@ Later phases (do not build now, but do not block them): record/replay and metron
 ```
 Inputs                         NoteBus                     Consumers
 computer keyboard ─┐                                   ┌─▶ AudioEngine (sound)
-mouse / touch ─────┼─▶ noteOn / noteOff (midi, source) ┼─▶ on-screen piano (lit keys)
-real instrument ───┘        src/core/noteBus.ts        └─▶ practice / scoring (later)
+mouse ─────────────┼─▶ noteOn / noteOff (midi, source) ┼─▶ on-screen piano (lit keys)
+song player ───────┤        src/core/noteBus.ts        ├─▶ the sky (bars of light, sparks)
+real instrument ───┘                                   └─▶ practice / scoring (later)
 (later)
 ```
 
-Inputs never talk to the sound engine or the UI directly. They call the bus. Consumers subscribe to the bus. This is what lets later phases add a new input (audio from a real keyboard) or a new consumer (scoring) without touching the others.
+Inputs never talk to the sound engine or the UI directly. They call the bus. Consumers subscribe to the bus. This is what lets later phases add a new input (audio from a real keyboard) or a new consumer (scoring) without touching the others. The song player (`docs/SONGS.md`) was added in exactly this way.
 
-**Slots.** The on-screen piano is a window of `SLOT_COUNT = 37` keys. Slot 0 is the C of `baseOctave` (default 3, so slots cover C3..C6 and middle C is slot 12). A key binding maps a physical computer key (`KeyboardEvent.code`) to a **slot**, not to an absolute note, so moving the piano lower/higher moves all bound keys with it.
+**Slots.** The computer keys play a window of `SLOT_COUNT = 37` notes, the keyboard zone (the piano on screen can be larger: `docs/INTERFACE.md` section 3). Slot 0 is the C of `baseOctave` (default 3, so slots cover C3..C6 and middle C is slot 12). A key binding maps a physical computer key (`KeyboardEvent.code`) to a **slot**, not to an absolute note, so moving the keys lower/higher moves all bound keys with it.
 
 **Physical keys.** Bindings use `KeyboardEvent.code` (physical position, e.g. `KeyA`, `Semicolon`), never `KeyboardEvent.key`, so the default layout sits on the same physical keys on any keyboard layout (QWERTY, AZERTY, Canadian French…). The *label* shown to the user is the character printed on their keyboard, resolved by `src/input/keyLabels.ts`.
 
@@ -60,26 +63,27 @@ Inputs never talk to the sound engine or the UI directly. They call the bus. Con
 
 | File | What it is |
 |---|---|
-| `src/core/types.ts` | `Midi`, `NoteSource`, `NoteEvent`, `LabelMode` types. **Done, read-only.** |
-| `src/core/notes.ts` | Note names, black/white, `toneName`. **Done, read-only.** |
-| `src/core/layout.ts` | `SLOT_COUNT`, base-octave limits, `slotToMidi`, `midiToSlot`. **Done, read-only.** |
-| `src/core/noteBus.ts` | `NoteBus` class. **Done, read-only.** |
-| `src/core/keyGeometry.ts` | `KEY_RECTS` / `keyRect(slot)`: where each key sits across the piano (fractions of its width). The piano and the note trails both use it so they line up. **Done, read-only.** |
-| `src/ui/NoteTrails.tsx`, `src/ui/noteTrails.css` | Canvas above the piano: glowing trails rise from the keys being played. |
-| `src/styles/theme.css` | Design tokens (CSS variables) and base styles. **Done, read-only.** |
-| `src/input/keymap.ts` (+ test) | Default bindings and pure functions to change them. |
+| `src/core/types.ts` | `Midi`, `NoteSource`, `NoteEvent`, `LabelMode` and the other small types the modules share. |
+| `src/core/notes.ts` | Note names, black/white, `toneName`. |
+| `src/core/layout.ts` | `SLOT_COUNT`, base-octave limits, `slotToMidi`, `midiToSlot`, and the sizes and ranges of the piano on screen (`docs/INTERFACE.md` section 3). |
+| `src/core/noteBus.ts` | `NoteBus` class. |
+| `src/core/pianoGeometry.ts` | `keyRects(range)` / `keyRectOf(midi, range)`: where each key of the piano on screen sits across its width (fractions). The piano and the sky both use it so they line up. |
+| `src/core/colour.ts` | The colours of the light, all derived from one base colour (`docs/INTERFACE.md` 4.1). |
+| `src/ui/sky/` | The canvas above the piano: rising bars, falling notes, sparks (see `docs/INTERFACE.md` 5.2). |
+| `src/styles/theme.css` | Design tokens (CSS variables) and base styles. |
+| `src/input/keymap.ts` (+ test) | Default bindings, the ready-made layouts and pure functions to change them. |
 | `src/input/keyLabels.ts` (+ test) | Physical key → the character printed on the user's keyboard. |
 | `src/state/settings.ts` (+ test) | Persistent settings store + `useSettings` hook. |
+| `src/state/themes.ts` (+ test) | The themes of the Look tab (`docs/INTERFACE.md` 4.2). |
 | `src/audio/audioEngine.ts` (+ test for pure helpers) | Sound: sampled piano, fallback synth, sustain, volume. |
 | `src/input/keyboardInput.ts` (+ test) | Computer keyboard → bus. |
 | `src/ui/Piano.tsx`, `src/ui/piano.css` | The on-screen piano component (pointer input, lit keys, labels). |
 | `src/app/pianoApp.ts` | Creates the singletons (bus, engine) and wires bus → engine. |
 | `src/App.tsx`, `src/main.tsx`, `src/styles/app.css` | App shell and wiring. |
-| `src/ui/Toolbar.tsx`, `src/ui/KeyEditor.tsx`, `src/ui/StartOverlay.tsx` | Controls, key customization panel, "click to start" overlay. |
-| `src/ui/AdvancedPanel.tsx` | The Advanced settings panel (closed by default). |
-| `src/app/appInfo.ts` | `APP_NAME`, the placeholder app name. **Done, read-only.** |
+| `src/ui/TopBar.tsx`, `src/ui/SettingsPanel.tsx`, `src/ui/StartOverlay.tsx` | The menu bar, the Settings panel (the computer keys are chosen in its Keys tab), the "click to start" overlay. |
+| `src/app/appInfo.ts` | `APP_NAME`, the placeholder app name. |
 
-"Read-only" files: do not change them. If you believe one has a bug, say so in your report instead.
+The files of the screen are listed in full in `docs/INTERFACE.md` section 5, and those of songs in `docs/SONGS.md` section 3.
 
 ## 5. Module contracts
 
@@ -134,6 +138,8 @@ Default bindings (US-QWERTY positions shown; stored as codes). Home row = white 
 
 Bindable codes (allow-list): `KeyA`…`KeyZ`, `Digit0`…`Digit9`, `Minus`, `Equal`, `BracketLeft`, `BracketRight`, `Backslash`, `Semicolon`, `Quote`, `Backquote`, `Comma`, `Period`, `Slash`, `IntlBackslash`, `IntlRo`, `IntlYen`, `Numpad0`…`Numpad9`, `NumpadDecimal`, `NumpadAdd`, `NumpadSubtract`, `NumpadMultiply`, `NumpadDivide`. Everything else (Space, Enter, Tab, Escape, Backspace, Delete, arrows, F-keys, modifiers, CapsLock, navigation keys…) is not bindable.
 
+`docs/INTERFACE.md` 4.3 adds the ready-made layouts (`KEY_PRESETS`, `matchingPreset`); `DEFAULT_BINDINGS` is the first of them, "Home row".
+
 ### 5.2 `src/input/keyLabels.ts`
 
 ```ts
@@ -161,6 +167,8 @@ export function useLayoutMap(): LayoutMap | null
 
 `navigator.keyboard` is not in the TypeScript DOM lib; declare the minimal shape locally.
 
+`docs/INTERFACE.md` 4.3 adds a fourth parameter to `keyLabel`, the keyboard type the player chose (QWERTY, AZERTY, QWERTZ), which comes first in that priority, and the function `typedKeyLabel`. Number-pad keys always read "Num 1", "Num +"…, whatever the layout.
+
 ### 5.3 `src/state/settings.ts`
 
 ```ts
@@ -176,20 +184,19 @@ export interface Settings {
   sustain: boolean
   labelMode: LabelMode
 
-  // Advanced settings (the Advanced panel). Defaults suit a beginner.
+  // Fine-tuning (the Settings panel). Defaults suit a beginner.
   velocity: number        // "Touch": how hard notes are played, MIN_VELOCITY..1
   transpose: number       // whole semitones, -MAX_TRANSPOSE..MAX_TRANSPOSE
   noteNaming: NoteNaming  // 'letters' (C D E) or 'solfege' (Do Ré Mi)
   reverb: number          // "Room echo", 0..1
   release: ReleaseLength  // how long a note rings after its key is released
-  showTrails: boolean     // light trails above the piano
+  showTrails: boolean     // light bars: the bars that rise from the keys and the falling notes of a song
+
+  // …and the settings of the piano on screen and of the look: docs/INTERFACE.md section 4.
 }
 
 export const MIN_VELOCITY = 0.1
 export const MAX_TRANSPOSE = 12
-
-/** The keys of Settings that the Advanced panel controls (used by "Reset advanced settings"). */
-export const ADVANCED_KEYS: readonly (keyof Settings)[]   // velocity, transpose, noteNaming, reverb, release, showTrails
 
 // DEFAULT_BINDINGS, {}, DEFAULT_BASE_OCTAVE, volume 0.8, sustain false, labelMode 'both',
 // velocity 0.8, transpose 0, noteNaming 'letters', reverb 0.15, release 'normal', showTrails true
@@ -230,6 +237,10 @@ export function useSettings(): Settings
 `customLabels` sanitizing: keep only entries whose code is bindable and whose value is a string of 1–6 characters.
 
 Number sanitizing: non-numbers and non-finite values fall back to the default; in-range rule is clamp (`volume`, `reverb` to 0..1; `velocity` to MIN_VELOCITY..1; `transpose` rounded to a whole number then clamped to ±MAX_TRANSPOSE; `baseOctave` via `clampBaseOctave`). Unknown enum strings fall back to the default. Unknown extra keys are dropped. Settings saved by an older version that lacks the newer fields simply get the defaults for them.
+
+A value of `undefined` in a patch given to `set` means "leave this setting as it is" (applying a theme uses it to leave the player's own colour alone: `docs/INTERFACE.md` 4.2).
+
+The app-wide store also follows the other tabs: when the app is open in several tabs and one of them saves, the others read the settings again (the browser's `storage` event), so a tab opened earlier never saves its old copy over a newer one.
 
 ### 5.4 `src/audio/audioEngine.ts`
 
@@ -311,7 +322,7 @@ export interface KeyboardInputOptions {
   onToggleSustain?(): void
   /** How hard new notes are played (0..1). Called on key down. Defaults to the bus default. */
   getVelocity?(): number
-  /** Defaults to `window`. Also receives the `blur` listener. */
+  /** Defaults to `window`. Also receives the `blur`, `focusin` and `click` listeners. */
   target?: KeyEventTarget
 }
 
@@ -330,10 +341,13 @@ Behaviour:
 - `preventDefault()` for bound keys and Space (stops page scrolling and Firefox quick-find on `'` and `/`). Unbound keys keep their default behaviour.
 - Space (`code === 'Space'`) calls `onToggleSustain` once per tap, including when a button has focus, without also "clicking" that button (no double toggle, no accidental button press).
 - Window `blur` (and `visibilitychange` to hidden when a document is available) releases every keyboard-held note, so notes never get stuck when the user alt-tabs.
+- A control that opens a pop-up of the browser's own (the list of a `<select>`, the colour picker of an `<input type="color">`) releases every keyboard-held note when it gets the focus (`focusin`) or is clicked (`click`): while such a pop-up is open, Chrome and Edge keep every key event to themselves, key-ups included, and the window does not lose focus.
 - Releasing the Meta key (Command / Windows) releases every keyboard-held note: while it is down, some systems never deliver the key-up of other keys.
 - The keyboard's own record of which key holds which note follows the bus: when a note is released by someone else (for example `bus.allOff()` when the piano moves), the keys that were holding it no longer count as holding it.
 
 ### 5.6 `src/ui/Piano.tsx` + `src/ui/piano.css`
+
+> `docs/INTERFACE.md` 5.1 replaces the props, the geometry and the look described here: the piano now draws a `PianoRange` with `keyRects(range)` from `src/core/pianoGeometry.ts`, and `src/core/keyGeometry.ts` is gone. What this section says about labels, pointer input, edit mode and accessibility still applies.
 
 ```ts
 export interface PianoProps {
@@ -361,11 +375,13 @@ export function Piano(props: PianoProps): JSX.Element   // (React 19: return typ
 - Interactive feel: keys dip slightly and light up when pressed (short, snappy transition on press, slightly softer on release), white keys get a soft glow at the bottom when lit, and hovering a key with the mouse gives a subtle highlight.
 - Labels per `labelMode`: `'keys'` = computer-key label only, `'notes'` = note name only, `'both'`, `'none'`. The computer-key label is the prominent one (looks like a small keycap). Note names: on white keys show the full name on C keys (`C4` / `Do4`) and just the pitch name elsewhere; on black keys show the pitch name (`C♯` / `Do♯`) small. Solfège names are longer (`Sol♯`): size the text so they fit without overflowing the key. Keys with no bound key simply have no keycap.
 - Pressed keys (in `activeNotes`) are clearly lit with the accent colours from the theme.
-- Pointer input (mouse, touch, pen) with Pointer Events: press plays, release stops; dragging across keys with the button held plays each key passed over (glissando) and releases the previous one; multi-touch plays several keys; leaving the piano or `pointercancel` releases. A fast drag does not skip keys: every key on the straight line between two pointer positions is played, in order (coalesced pointer events are used when the browser has them). No stuck notes: every `onNoteDown` is eventually matched by an `onNoteUp`, including on unmount. No text selection or context menu while playing; `touch-action: none` on the keys.
+- Pointer input (mouse, touch, pen) with Pointer Events: press plays, release stops; dragging across keys with the button held plays each key passed over (glissando) and releases the previous one; multi-touch plays several keys; leaving the piano or `pointercancel` releases. A fast drag does not skip keys: every key on the straight line between two pointer positions is played, in order (coalesced pointer events are used when the browser has them). No stuck notes: every `onNoteDown` is eventually matched by an `onNoteUp`, including on unmount. Notes held by the mouse are also let go when the window loses focus, when the page is hidden and when it is left (`pagehide`): a button released then never reaches the page. No text selection or context menu while playing; `touch-action: none` on the keys.
 - Edit mode: clicking selects (`onSelectSlot`), nothing plays, the selected key is highlighted with `--key-selected`, and keys show a pointer cursor.
 - Accessibility: each key is focusable-free (do not put 37 tab stops in the page: the piano is one group with `role="group"` and an `aria-label`), but each key element has an `aria-label` such as "C4, key A" and `aria-pressed`. In edit mode keys are real buttons reachable by Tab.
 
 ### 5.8 `src/ui/NoteTrails.tsx` + `src/ui/noteTrails.css`
+
+> Replaced as a whole by the sky (`src/ui/sky/`, `docs/INTERFACE.md` 5.2). `NoteTrails` no longer exists; this section is the record of the light trails of the first screen.
 
 ```ts
 export interface NoteTrailsProps {
@@ -386,6 +402,8 @@ A `<canvas>` that sits directly above the piano, exactly as wide as it, and make
 - Keep the simulation logic (bars list, advance by dt, cull) in small pure functions so they can be unit-tested without a canvas (`src/ui/noteTrails.test.ts`).
 
 ### 5.7 App shell (`src/App.tsx`, `src/app/pianoApp.ts`, `src/ui/Toolbar.tsx`, `src/ui/KeyEditor.tsx`, `src/ui/StartOverlay.tsx`, `src/styles/app.css`, `src/main.tsx`)
+
+> `docs/INTERFACE.md` replaces the layout described here (its sections 2, 5.3, 5.4 and 5.6): `Toolbar`, `KeyEditor`, `AdvancedPanel`, the Now playing line and the footer no longer exist, and everything below from "Layout, top to bottom" down to "Behaviour:" is the record of the first screen. What is said about `src/app/pianoApp.ts`, and the list under "Behaviour:", still apply, with the changes noted there.
 
 `src/app/pianoApp.ts` creates the module-level singletons and the bus → engine wiring:
 
@@ -417,24 +435,26 @@ Layout, top to bottom, centred, max width ~1280 px:
 
 Behaviour:
 
-- **Start overlay**: until audio has started, a full-screen overlay says "Click or press any key to start". Any click or key press calls `engine.start()` and removes the overlay. That first key press does not play a note and is not treated as anything else.
-- Settings (`useSettings`) drive everything: `engine.setVolume` / `setSustain` / `setTranspose` / `setReverb` / `setRelease(RELEASE_SECONDS[release])` follow the settings (also on first load); the toolbar and the Advanced panel write to `settingsStore`.
+- **Start overlay**: until the first click or key press, a full-screen overlay says "Click or press any key to start". Any click or key press removes the overlay and calls `engine.start()`. (A key the browser does not count as a gesture, such as Escape or Shift, only removes the overlay: the sound then starts at the next click or key press.) That first key press does not play a note and is not treated as anything else; a function key such as F5 is left to the browser. A file dropped on the page removes the overlay too (`docs/INTERFACE.md` 5.6).
+- Settings (`useSettings`) drive everything: `engine.setVolume` / `setSustain` / `setTranspose` / `setReverb` / `setRelease(RELEASE_SECONDS[release])` follow the settings (also on first load); the top bar and the Settings panel write to `settingsStore`.
 - Keyboard: `attachKeyboardInput({ bus, resolveNote, intercept, onToggleSustain, getVelocity })` where `resolveNote(code)` and `getVelocity()` read the **current** settings (no stale closures: read from `settingsStore.get()`). Pointer notes use the same velocity.
-- A `<select>` or text field that keeps keyboard focus would stop the keyboard from playing (see `isTextEntryTarget`): blur the Labels select as soon as its value changes and when its list is dismissed without a change (Escape, or choosing the option it already shows), and blur buttons after they are clicked, so the player can go straight back to playing.
-- Changing the base octave or leaving the page releases held notes (`bus.allOff()`), so nothing gets stuck.
+- A `<select>` or text field that keeps keyboard focus would stop the keyboard from playing (see `isTextEntryTarget`): blur the Labels select as soon as its value changes and when its list is dismissed without a change (Escape, or choosing the option it already shows), and blur buttons, sliders and links after they are clicked with the mouse, so the player can go straight back to playing. (Someone who presses a button with Enter keeps their place.)
+- Changing the base octave, a change of the piano on screen, or hiding or leaving the page releases held notes (`bus.allOff()`), so nothing gets stuck.
 - Pointer notes go to the bus with source `'pointer'`.
-- **Customize keys** (edit mode), a panel shown above the piano while active:
-  - Instruction: "Click a piano key, then press the key you want to use for it."
-  - Clicking a piano key selects it; the panel then says e.g. "Press a key for C4…" and shows "Esc = cancel · Backspace = remove this key".
+- **Customize keys** (edit mode). On the first screen this was a panel shown above the piano; it is now the Keys tab of the Settings panel (`docs/INTERFACE.md` 5.5), and its rules are these:
+  - Instruction: "Click a piano key below, then press the key you want to use for it."
+  - Clicking a piano key selects it; the tab then says e.g. "Press a key for C4…" and shows "Esc = cancel · Backspace = remove this key".
   - The next key press (handled through `intercept`, so it never plays a note or toggles sustain): a bindable key → `assignBinding`, store the label from `labelFromEventKey(event.key)` in `customLabels`, deselect, and show a short result message, e.g. `"K" now plays C4.` plus, when relevant, ` "A" no longer plays a note.` (replaced key) or ` G4 has no key now.` (vacated note). Escape → deselect. Backspace/Delete → `clearSlot`, deselect, message "C4 has no key now." Anything else (Space, Enter, arrows, F-keys…) → message "That key can't be used. Try a letter, number or symbol key." and stay selected. Ctrl/Alt/Meta combos are not intercepted.
   - With no key selected, the keyboard plays normally so the user can try their layout.
-  - While Customize keys is open the piano always shows the computer-key labels, whatever the Labels setting says (the saved setting is not changed).
-  - The prompt and the hint are announced to screen readers (`aria-live="polite"`), and keyboard focus is never dropped on the floor: when a focused button disappears (the reset question, its answer, Done) focus moves to the sensible next control.
-  - "Reset to default keys" asks for confirmation inline (button turns into "Really reset?" with Yes / No). Never use `window.confirm` / `alert`.
-  - "Done" leaves edit mode. Escape with nothing selected also leaves it.
+  - While the keys are being chosen the piano always shows the computer-key labels, whatever the Labels setting says (the saved setting is not changed).
+  - The prompt and the hint are announced to screen readers (`aria-live="polite"`), and keyboard focus is never dropped on the floor: when a focused button disappears (the reset question, its answer) focus moves to the sensible next control.
+  - "Reset to default keys" asks for confirmation inline (button turns into "Really reset?" with Yes / No). Never use `window.confirm` / `alert`. The second click of a double-click is ignored on the button and on both answers: the button and the answers take each other's place, so that click would land on whatever has just appeared (`ConfirmButton`, `docs/INTERFACE.md` 5.0).
+  - Leaving the Keys tab or closing the Settings panel leaves edit mode; there is no "Done" button any more. Escape with nothing selected is no longer a rule of the key editor: that Escape is the app shell's (`docs/INTERFACE.md` 5.0).
 - Buttons must not keep keyboard focus in a way that breaks playing (see Space rule in 5.5).
 
 ## 6. Visual direction
+
+> Replaced by `docs/INTERFACE.md` (sections 1, 5.1 and 6): the stage is black, the light takes the player's colour, and the tokens named below (`--panel`, `--accent`, `--key-white`…) are gone. Kept as the record of the first screen. Still in force for the shared controls of `src/ui/chrome.css`: spacing in multiples of 4 px (a rule for those controls only, not for a panel's own stylesheet), controls at least 36 px high, transitions of 80–160 ms, no external images or fonts.
 
 Dark, calm, slightly warm, elegant; the piano is the hero and everything about it responds to the player. Use only the tokens in `theme.css`.
 
@@ -449,5 +469,5 @@ Dark, calm, slightly warm, elegant; the piano is the hero and everything about i
 
 - `npm run typecheck`, `npm test` and `npm run build` pass with no errors.
 - No console errors or warnings in the browser during normal use.
-- No stuck notes, ever: every path that starts a note has a path that stops it (key up, blur, pointer cancel, unmount, edit-mode entry, octave change).
+- No stuck notes, ever: every path that starts a note has a path that stops it (key up, blur, a drop-down or the colour picker taking the keyboard, pointer cancel, the page hidden or left, unmount, edit-mode entry, octave change, a change of the piano on screen). A song that is playing is paused when the page is hidden or left and when the app is taken off the page (`docs/SONGS.md` 4.5).
 - Works when `localStorage` is unavailable or contains garbage.

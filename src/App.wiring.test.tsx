@@ -216,6 +216,43 @@ describe('before the first click or key press', () => {
     expect(audio.state.starts).toBe(1)
   })
 
+  it('asks for the sound once at the click that starts it, not twice', () => {
+    // A sound that takes its time: it has not started yet while the click travels up the page.
+    vi.spyOn(audio.engine, 'start').mockImplementation(() => {
+      audio.state.starts += 1
+      return Promise.resolve()
+    })
+    drawApp()
+    clickWithMouse(button(new RegExp(START_TEXT)))
+    expect(audio.state.starts).toBe(1)
+
+    // Every later click asks again for as long as the sound has not started.
+    clickWithMouse(emptySky())
+    expect(audio.state.starts).toBe(2)
+  })
+
+  it('starts at a dropped file too: the Songs panel is not left behind the overlay', async () => {
+    drawApp()
+    const dataTransfer = { types: ['Files'], files: [songFile('Dropped.mid')], dropEffect: 'none' }
+
+    await act(async () => {
+      fireEvent(document.body, createEvent.drop(document.body, { dataTransfer }))
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(document.querySelector('.app__screen')?.hasAttribute('inert')).toBe(false)
+    expect(await screen.findByText('"Dropped" was added.')).toBeTruthy()
+    // The panel can be used: it has taken the keyboard focus, as after a click on "Songs".
+    expect(document.activeElement).toBe(panel('Songs'))
+
+    // A drop is not what the browser waits for: the sound starts at the next click or key press.
+    expect(audio.state.starts).toBe(0)
+    key('keydown', 'KeyA')
+    expect(audio.state.starts).toBe(1)
+    expect(heldNotes()).toEqual([60])
+  })
+
   it('leaves the function keys to the browser, and keyboard shortcuts alone', () => {
     drawApp()
     expect(key('keydown', 'KeyR', { ctrlKey: true }).defaultPrevented).toBe(false)
@@ -561,6 +598,129 @@ describe('Escape, one thing at a time', () => {
     tap('Escape')
     expect(settingsStore.get()).toBe(before)
   })
+
+  function songOptions(): HTMLElement | null {
+    return screen.queryByRole('group', { name: 'Song options' })
+  }
+
+  it('closes the song options before the panel, and the panel at the next press', () => {
+    startApp()
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    openPanel('Songs')
+    clickWithMouse(button('Song options'))
+    expect(songOptions()).not.toBeNull()
+
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(songOptions()).toBeNull()
+    expect(panel('Songs')).not.toBeNull()
+
+    // Still held down: it has closed its one thing.
+    for (let repeat = 0; repeat < 5; repeat++) {
+      expect(key('keydown', 'Escape', { repeat: true }).defaultPrevented).toBe(true)
+    }
+    expect(panel('Songs')).not.toBeNull()
+    key('keyup', 'Escape')
+
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(panel('Songs')).toBeNull()
+    // Escape is not a button of the player: the song goes on.
+    expect(player.getState().status).toBe('playing')
+  })
+
+  it('held down since before the song options were opened does not close them', () => {
+    startApp()
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    key('keydown', 'Escape')
+    clickWithMouse(button('Song options'))
+
+    expect(key('keydown', 'Escape', { repeat: true }).defaultPrevented).toBe(true)
+    expect(songOptions()).not.toBeNull()
+
+    key('keyup', 'Escape')
+    tap('Escape')
+    expect(songOptions()).toBeNull()
+  })
+
+  it('lets go of the piano key that is waiting before it closes the song options', () => {
+    startApp()
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    openSettingsOn('Keys')
+    fireEvent.click(pianoKey(64))
+    clickWithMouse(button('Song options'))
+    expect(pianoKey(64).classList.contains('is-selected')).toBe(true)
+
+    tap('Escape')
+    expect(piano().querySelector('.is-selected')).toBeNull()
+    expect(songOptions()).not.toBeNull()
+
+    tap('Escape')
+    expect(songOptions()).toBeNull()
+    expect(panel('Settings')).not.toBeNull()
+  })
+
+  it('closes song options that were used with the keyboard, then lets go of the menu', () => {
+    startApp()
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    pressEnterOn(button('Song options'))
+    within(songOptions() as HTMLElement).getByRole('switch', { name: 'Melody only' }).focus()
+
+    // 1. The options close. The focus is not lost with them: it is on their button.
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(songOptions()).toBeNull()
+    expect(document.activeElement).toBe(button('Song options'))
+    // Held down, it does not go on to take the focus away.
+    expect(key('keydown', 'Escape', { repeat: true }).defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(button('Song options'))
+    key('keyup', 'Escape')
+
+    // 2. The menu lets go of the keyboard.
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(document.body)
+    // Held down after that, there is nothing left to take back.
+    expect(key('keydown', 'Escape', { repeat: true }).defaultPrevented).toBe(false)
+    key('keyup', 'Escape')
+
+    // 3. Nothing is left: the key is the browser's.
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
+    expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
+  })
+
+  it('closes a panel, then lets go of the button the focus went back to', () => {
+    startApp()
+    pressEnterOn(button('Settings'))
+
+    tap('Escape')
+    expect(panel('Settings')).toBeNull()
+    expect(document.activeElement).toBe(button('Settings'))
+
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(document.body)
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('takes the keyboard focus off any control of the menu, and changes nothing with it', () => {
+    startApp()
+    const before = settingsStore.get()
+    for (const control of [
+      within(menu()).getByRole('slider', { name: 'Volume' }),
+      within(menu()).getByRole('switch', { name: 'Sustain' }),
+      screen.getByRole('tab', { name: 'Free Play' }),
+    ]) {
+      control.focus()
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(document.body)
+      key('keyup', 'Escape')
+    }
+    expect(settingsStore.get()).toBe(before)
+  })
 })
 
 describe('the labels', () => {
@@ -830,6 +990,76 @@ describe('the menu', () => {
     wait(AUTO_HIDE_DELAY_MS)
     expect(isHidden()).toBe(true)
   })
+
+  // "Close" takes the player line away from under the mouse, which is then
+  // over the sky without having moved. Nothing says that it left the menu.
+  // What a browser does say then depends on the browser.
+  it.each([
+    [
+      'that the mouse is over the sky now',
+      () => fireEvent.mouseOver(emptySky(), { relatedTarget: menu() }),
+    ],
+    [
+      'a "move" to where the mouse already is',
+      () => fireEvent.mouseMove(emptySky(), { screenX: 900, screenY: 80 }),
+    ],
+  ])(
+    'hides again after "Close" under a mouse that stands still (the browser says %s)',
+    (_what, browserSays) => {
+      startApp()
+      act(() => {
+        playSong(A_STARTER_SONG)
+      })
+      const close = button('Close')
+      fireEvent.mouseOver(close)
+      fireEvent.mouseMove(close, { screenX: 900, screenY: 80 })
+      wait(AUTO_HIDE_DELAY_MS * 4)
+      expect(isHidden()).toBe(false)
+
+      clickWithMouse(close)
+      browserSays()
+
+      wait(AUTO_HIDE_DELAY_MS - 1)
+      expect(isHidden()).toBe(false)
+      wait(1)
+      expect(isHidden()).toBe(true)
+      expect(root().className).toBe('app cursor-hidden')
+    },
+  )
+
+  it('hides again once Escape has taken the keyboard focus out of it', () => {
+    startApp()
+    wait(AUTO_HIDE_DELAY_MS)
+    // Tab brings the menu back and puts the focus in it, where it stays.
+    key('keydown', 'Tab', { key: 'Tab' })
+    key('keyup', 'Tab', { key: 'Tab' })
+    wait(AUTO_HIDE_DELAY_MS * 4)
+    expect(isHidden()).toBe(false)
+    expect(menu().contains(document.activeElement)).toBe(true)
+
+    tap('Escape')
+    expect(document.activeElement).toBe(document.body)
+    wait(AUTO_HIDE_DELAY_MS - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
+    expect(isHidden()).toBe(true)
+
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
+  })
+
+  it('leaves a sign on the stage when Space switches sustain while it is hidden', () => {
+    startApp()
+    wait(AUTO_HIDE_DELAY_MS)
+    expect(within(emptySky()).queryByText('Sustain on')).toBeNull()
+
+    tap('Space')
+    expect(isHidden()).toBe(true)
+    expect(within(emptySky()).getByText('Sustain on')).toBeTruthy()
+
+    tap('Space')
+    expect(within(emptySky()).queryByText('Sustain on')).toBeNull()
+  })
 })
 
 describe('the keyboard focus', () => {
@@ -893,6 +1123,77 @@ describe('the keyboard focus', () => {
     })
     clickWithMouse(button('Close'))
     expect(document.activeElement).toBe(document.body)
+  })
+
+  describe('when a panel was opened with the mouse and is then used with the keyboard', () => {
+    it('goes to the Settings button when Escape closes the panel under a focused control', () => {
+      startApp()
+      const settings = openSettingsOn('Sound')
+      within(settings).getByRole('slider', { name: 'Volume' }).focus()
+
+      tap('Escape')
+      expect(panel('Settings')).toBeNull()
+      expect(document.activeElement).toBe(button('Settings'))
+    })
+
+    it.each(['Settings', 'Songs'] as const)('goes to the %s button at Enter on "Close"', (name) => {
+      startApp()
+      openPanel(name)
+      pressEnterOn(button(`Close ${name}`))
+
+      expect(panel(name)).toBeNull()
+      expect(document.activeElement).toBe(button(name))
+    })
+
+    it('goes to the Songs button when Enter on "Play" closes the Songs panel', () => {
+      startApp()
+      const songs = openPanel('Songs')
+      pressEnterOn(within(songs).getByRole('button', { name: /^Play Twinkle/ }))
+
+      expect(panel('Songs')).toBeNull()
+      expect(document.activeElement).toBe(button('Songs'))
+    })
+
+    it('stays in the menu, which therefore does not hide', () => {
+      vi.useFakeTimers()
+      startApp()
+      openPanel('Settings')
+      pressEnterOn(button('Close Settings'))
+
+      act(() => {
+        vi.advanceTimersByTime(AUTO_HIDE_DELAY_MS * 4)
+      })
+      expect(document.activeElement).toBe(button('Settings'))
+      expect(menu().className).toBe('menu')
+    })
+  })
+
+  describe('when a panel was only ever used with the mouse', () => {
+    it('is left nowhere when Escape closes the panel, which held it itself', () => {
+      startApp()
+      const settings = openPanel('Settings')
+      expect(document.activeElement).toBe(settings)
+
+      tap('Escape')
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it.each(['Settings', 'Songs'] as const)(
+      'is left nowhere after a click on "Close %s" or on the empty sky',
+      (name) => {
+        startApp()
+        openPanel(name)
+        clickWithMouse(button(`Close ${name}`))
+        expect(document.activeElement).toBe(document.body)
+
+        // A control of the panel has the focus when the sky is clicked.
+        openPanel(name)
+        button(`Close ${name}`).focus()
+        clickWithMouse(emptySky())
+        expect(panel(name)).toBeNull()
+        expect(document.activeElement).toBe(document.body)
+      },
+    )
   })
 })
 

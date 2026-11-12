@@ -61,7 +61,10 @@ export function LookTab({ settings }: { settings: Settings }): JSX.Element {
         />
       </Field>
 
-      <Field label="Light bars" hint="Bars of light for the notes being played.">
+      <Field
+        label="Light bars"
+        hint="Bars of light for the notes you play and the falling notes of a song."
+      >
         <Switch
           label="Light bars"
           on={settings.showTrails}

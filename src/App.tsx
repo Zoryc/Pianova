@@ -22,7 +22,7 @@ import { useAudioStatus, useKeyboardPiano, useNoStuckNotes, useSoundSettings } f
 import { isFunctionKey } from './ui/keyEditorModel'
 import { useAutoHide } from './ui/useAutoHide'
 import { useKeyEditor } from './ui/useKeyEditor'
-import { useSongSession } from './ui/useSongs'
+import { closeSongOptions, useSongOptionsOpen, useSongSession } from './ui/useSongs'
 
 /** No key letters on the falling notes: what the sky gets while that setting is off. */
 const NO_HINTS: ReadonlyMap<Midi, string> = new Map()
@@ -42,12 +42,16 @@ export function App(): JSX.Element {
   const audioStatus = useAudioStatus()
   const keyEditor = useKeyEditor(layoutMap)
   const { editing, selectedSlot } = keyEditor
-  /** False until the first click or key press, which is what lets the browser play sound. */
+  /**
+   * False while the start overlay is up: until the first click or key press,
+   * which is what lets the browser play sound, or until a file is dropped.
+   */
   const [started, setStarted] = useState(false)
   const [openPanel, setOpenPanel] = useState<PanelName | null>(null)
   /** The piano on screen, as the stage last reported it. A full piano until it has. */
   const [range, setRange] = useState<PianoRange>(() => pianoRange(88, settings.baseOctave))
   const song = useSongSession(range)
+  const songOptionsOpen = useSongOptionsOpen()
   const menu = useAutoHide({
     enabled: settings.autoHideMenu,
     pinned: !started || openPanel !== null || (song.loaded && !song.playing),
@@ -86,8 +90,32 @@ export function App(): JSX.Element {
     setOpenPanel(openPanel === panel ? null : panel)
   }
 
+  /**
+   * Closes the open panel. A control inside it that has the keyboard focus
+   * goes away with it, so the focus is first put on the button that opens the
+   * panel: someone working with the keyboard keeps their place. (After a
+   * click with the mouse, `handleClick` lets go of that button again. A panel
+   * that holds the focus itself was only ever used with the mouse, and leaves
+   * the focus nowhere.)
+   */
   function closePanel(): void {
+    if (openPanel === null) return
+    const isSongs = openPanel === 'songs'
+    const panel = document.getElementById(isSongs ? songsPanelId : settingsPanelId)
+    if (holdsFocus(panel) && document.activeElement !== panel) {
+      const opener = isSongs ? songsButton : settingsButton
+      opener.current?.focus()
+    }
     setOpenPanel(null)
+  }
+
+  /** A file was dropped on the page: the Songs panel shows what became of it. */
+  function showDroppedSongs(): void {
+    // A drop before the first click starts the app too, or the panel would
+    // open behind the start overlay. The sound still waits for a click or a
+    // key press, as the browser wants.
+    setStarted(true)
+    setOpenPanel('songs')
   }
 
   /** Sees every key press before the piano does. Returns true when the press is used up here. */
@@ -108,19 +136,45 @@ export function App(): JSX.Element {
   }
 
   /**
-   * Escape takes back one thing at a time: first the piano key that is
-   * waiting for a computer key, then the open panel.
+   * Escape takes back one thing at a time. The first of these that there is:
+   *
+   *   1. the piano key that is waiting for a computer key;
+   *   2. the song options that are open under the player line;
+   *   3. the open panel;
+   *   4. the keyboard focus, when it is inside the menu: the menu can then hide.
+   *
+   * With none of them, the key is left to the browser.
    */
   function pressEscape(event: KeyboardEvent): boolean {
+    // The key editor leaves the selection alone when the key is only held down.
     if (selectedSlot !== null) return keyEditor.handleKey(event)
-    if (openPanel === null) return false
-    // Escape still held from cancelling a selection must not also close the panel.
-    if (!event.repeat) closePanel()
+    // A key that is held down sends the press again and again. Escape has
+    // then done its one thing: the repeats take nothing more back. They are
+    // still used up while something is left that a new press would take back.
+    if (event.repeat) return songOptionsOpen || openPanel !== null || holdsFocus(menuElement())
+    if (closeSongOptions()) return true
+    if (openPanel !== null) {
+      closePanel()
+      return true
+    }
+    return letGoOfMenu()
+  }
+
+  function menuElement(): HTMLElement | null {
+    return menu.menuProps.ref.current
+  }
+
+  /** Takes the keyboard focus off the menu. False when the focus was not inside it. */
+  function letGoOfMenu(): boolean {
+    const focused = document.activeElement
+    if (!(focused instanceof HTMLElement) || !holdsFocus(menuElement())) return false
+    focused.blur()
     return true
   }
 
   function handleClick(event: ReactMouseEvent): void {
-    wakeAudio()
+    // The click that starts the app has asked for the sound already (see `start`).
+    if (started) wakeAudio()
     clickedWithKeyboard.current = isKeyboardClick(event)
     giveKeyboardBackToPiano(event)
   }
@@ -203,7 +257,7 @@ export function App(): JSX.Element {
       </div>
 
       {!started && <StartOverlay onStart={start} />}
-      <DropOverlay onFilesDropped={() => setOpenPanel('songs')} />
+      <DropOverlay onFilesDropped={showDroppedSongs} />
     </div>
   )
 }

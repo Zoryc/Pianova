@@ -1,7 +1,8 @@
 /**
- * The rules of "Customize keys", with no React and no DOM so they can be
- * unit-tested: what a key press does while customizing, which settings it
- * changes, and the sentence shown to the user afterwards.
+ * The rules of choosing the computer keys (the Keys tab of Settings), with no
+ * React and no DOM so they can be unit-tested: what a key press does while a
+ * piano key waits for its computer key, which settings it changes, and the
+ * sentence shown to the user afterwards.
  */
 import { slotToMidi } from '../core/layout'
 import { noteName } from '../core/notes'
@@ -12,7 +13,7 @@ import { assignBinding, clearSlot, isBindableCode } from '../input/keymap'
 import type { Settings } from '../state/settings'
 
 export interface KeyEditorState {
-  /** True while "Customize keys" is open. */
+  /** True while the computer keys are being chosen: the Keys tab of Settings is showing. */
   editing: boolean
   /** The piano key waiting for a computer key, or null when none is selected. */
   selectedSlot: number | null
@@ -60,10 +61,11 @@ export function slotNoteName(settings: Settings, slot: number): string {
 }
 
 /**
- * What is written on the piano keys while "Customize keys" is open: the
- * player's own choice of labels, with the computer keys added when it leaves
- * them out. They are what is being changed, so they have to be visible. The
- * saved choice is not touched and applies again afterwards.
+ * What is written on the piano keys while the computer keys are being chosen
+ * (the Keys tab of Settings): the player's own choice of labels, with the
+ * computer keys added when it leaves them out. They are what is being
+ * changed, so they have to be visible. The saved choice is not touched and
+ * applies again afterwards.
  */
 export function labelModeWhileEditing(labelMode: LabelMode): LabelMode {
   if (labelMode === 'none') return 'keys'
@@ -79,8 +81,9 @@ export function selectSlot(slot: number): KeyEditorState {
 /**
  * A computer key was pressed. While a piano key is selected the press is for
  * it: a letter, number or symbol becomes its key, Backspace or Delete removes
- * its key, Escape cancels. With nothing selected the keyboard plays as usual
- * and Escape closes the editor.
+ * its key, Escape cancels. With nothing selected no press is used up here:
+ * the keyboard plays as usual, and Escape is left to the app shell, the one
+ * place that decides what it does then (docs/INTERFACE.md, section 5.0).
  */
 export function pressKey(
   state: KeyEditorState,
@@ -88,14 +91,8 @@ export function pressKey(
   settings: Settings,
   layoutMap: LayoutMap | null,
 ): KeyPressResult {
-  if (!state.editing) return { consumed: false, state, changes: null }
-
   const slot = state.selectedSlot
-  if (slot === null) {
-    if (press.code !== 'Escape') return { consumed: false, state, changes: null }
-    // Escape still held from cancelling a selection must not also close the editor.
-    return { consumed: true, state: press.repeat ? state : EDITOR_CLOSED, changes: null }
-  }
+  if (!state.editing || slot === null) return { consumed: false, state, changes: null }
 
   // A key that was already down when the piano key was selected keeps
   // repeating. That is not the user choosing it.

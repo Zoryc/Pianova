@@ -274,6 +274,17 @@ describe('one note at a time', () => {
     const result = arrange(song, options({ melodyOnly: true, fitToPiano: true }), SMALL_PIANO)
     expect(shape(result)).toEqual([[84, 0, 1]])
   })
+
+  it('drops a melody note that the next one cuts to under a millisecond', () => {
+    // The top of the first chord starts 29.5 ms in; the next melody note starts 0.6 ms later,
+    // outside the chord. Cut there, the first is too short to be played at all.
+    const song = songOf(part(0, [note(60, 0, 1), note(72, 0.0295, 1), note(74, 0.0301, 1)]))
+    expect(shape(arrange(song, options({ melodyOnly: true }), FULL_PIANO))).toEqual([
+      [74, 0.0301, 1],
+    ])
+    // With every note played, nothing is cut and nothing is dropped.
+    expect(arrange(song, options(), FULL_PIANO).notes).toHaveLength(3)
+  })
 })
 
 describe('the same pitch twice', () => {
@@ -300,14 +311,26 @@ describe('the same pitch twice', () => {
     ])
   })
 
-  it('drops what is left of a note that is cut to under a millisecond', () => {
+  it('keeps what is left of a note that is cut to a millisecond or more', () => {
+    // 1.5 ms apart is two presses of the key, and the first then lasts 1.5 ms.
     const song = songOf(part(0, [note(60, 0, 2)]), part(1, [note(60, 0.0015, 1)]))
-    // 1.5 ms apart is two presses, and the first then lasts 1.5 ms: kept.
-    // Any closer and what is left of the first is under a millisecond: dropped.
-    expect(arrange(song, options(), FULL_PIANO).notes).toHaveLength(2)
-    const closer = songOf(part(0, [note(60, 0, 2)]), part(1, [note(60, 0.00101, 0.5)]))
-    const result = arrange(closer, options(), FULL_PIANO)
-    expect(result.notes.every((each) => each.duration >= 0.001)).toBe(true)
+    expect(shape(arrange(song, options(), FULL_PIANO))).toEqual([
+      [60, 0, 0.0015],
+      [60, 0.0015, 1],
+    ])
+  })
+
+  it('drops what is left of a note that is cut to under a millisecond', () => {
+    // Three parts strike one key at 0, 0.8 and 1.2 ms. The first two are one press, of which
+    // the longer stays: the one at 0.8 ms. The third is a new press and cuts it to 0.4 ms.
+    const song = songOf(
+      part(0, [note(60, 0, 0.5)]),
+      part(1, [note(60, 0.0008, 2)]),
+      part(2, [note(60, 0.0012, 1)]),
+    )
+    const result = arrange(song, options(), FULL_PIANO)
+    expect(shape(result)).toEqual([[60, 0.0012, 1]])
+    expect(result.duration).toBeCloseTo(1.0012, 9)
   })
 })
 

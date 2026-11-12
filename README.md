@@ -11,19 +11,19 @@ It is made for a desktop or laptop computer with a keyboard and a mouse. Phones 
 - **A piano that fills the window.** The piano lies across the bottom of a dark stage with a sampled grand piano sound. Every note you play lights its key and sends a bar of light up the screen, with sparks where it leaves the key. The menu at the top hides when the mouse is still, and there is a full-screen button.
 - **Play with the computer keyboard.** The home row (`A S D F G H J K L ; '`) plays the white keys from middle C and the row above (`W E T Y U O P`) plays the black keys. Each piano key shows the computer key that plays it. The mouse plays the keys too.
 - **Your own keys.** In Settings, pick a ready-made layout (Home row, Two octaves, White keys only) or click a piano key and press the computer key you want for it. Saved automatically, with a reset. The key labels follow QWERTY, AZERTY and QWERTZ keyboards.
-- **Songs.** Six well-known starter tunes are built in, and you can import your own MIDI files (button or drag and drop). A song plays on the piano while its notes fall toward the keys, each one showing the computer key to press. You can pause, jump around, slow it down or speed it up, choose which parts play, keep only the melody, and fit the notes to the piano on screen.
+- **Songs.** Six well-known starter tunes are built in, and you can import your own MIDI files (button or drag and drop). A song plays on the piano while its notes fall toward the keys, with the computer key to press written on the notes your keys can play. You can pause, jump around, slow it down or speed it up, choose which parts play, keep only the melody, and fit the notes to the piano on screen. While a song is loaded, your keys move to where they can play the most of it; they go back when you close it.
 - **One Settings panel** with five tabs:
   - *Sound*: volume, sustain (also the Space bar), touch strength, room echo, how long notes ring, transpose.
   - *Keys*: the layouts and your own keys, moving the playable keys lower or higher, the keyboard type.
   - *Piano*: 88, 61, 49 or 37 keys (or automatic, to suit the window), three key styles, what is printed on the keys, note names as C D E or Do Ré Mi.
-  - *Look*: six themes, the colour of the light (including your own colour and a rainbow), glow, backgrounds, bar styles, sparks.
-  - *About*: credits.
+  - *Look*: six themes, the colour of the light (including your own colour and a rainbow), glow, backgrounds, bar styles, sparks, and what is shown on screen (the bars of light, the key letters on falling notes, the names of the notes you play).
+  - *About*: credits, and a button that puts every setting back to how it was at the start.
 
 Planned next: Practice mode (the song waits for you), then Real-time mode with scoring. See [ROADMAP.md](ROADMAP.md).
 
 ## Run it
 
-You need [Node.js](https://nodejs.org) 22.22 or newer (24 or 26 recommended) and Chrome or Edge on a computer.
+You need [Node.js](https://nodejs.org) 22 (22.22.2 or newer), 24 (24.15 or newer) or 26 and later, and Chrome or Edge on a computer.
 
 ```bash
 npm install

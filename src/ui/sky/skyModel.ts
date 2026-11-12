@@ -273,6 +273,11 @@ export function fallingHeight(note: PlayableNote, speed: number): number {
   return Math.max(MIN_BAR_HEIGHT, note.duration * speed)
 }
 
+/** True once a falling note has sunk into the line altogether: it has sounded, and nothing of it is left to show. */
+export function hasSunk(note: PlayableNote, position: number, speed: number): boolean {
+  return fallingBottom(note, position, speed) + fallingHeight(note, speed) <= 0
+}
+
 // ---------------------------------------------------------------------------
 // Where a sounding note meets the line
 // ---------------------------------------------------------------------------

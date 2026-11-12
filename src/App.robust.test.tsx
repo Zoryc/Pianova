@@ -2,12 +2,13 @@
 /**
  * "No stuck notes" audit of the whole app in a simulated browser.
  *
- * For every way a note can start (computer keyboard, pointer, and the bus API
- * that the song player uses) each test starts a note and then takes one of
- * the exits the specs list (docs/ARCHITECTURE.md sections 5.5 and 7,
- * docs/INTERFACE.md sections 5.1, 5.5 and 7): key or pointer release, window
- * blur, tab hidden, pagehide, unmount, choosing the computer keys (Settings,
- * Keys tab), moving the computer keys lower / higher, resetting the settings.
+ * For every way a note can start (computer keyboard, pointer, the bus API
+ * that the song player uses, and a real song) each test starts a note and
+ * then takes one of the exits the specs list (docs/ARCHITECTURE.md sections
+ * 5.5 and 7, docs/INTERFACE.md sections 5.1, 5.5 and 7): key or pointer
+ * release, window blur, tab hidden, pagehide, unmount, a pop-up of the
+ * browser that takes the keyboard, choosing the computer keys (Settings, Keys
+ * tab), moving the computer keys lower / higher, resetting the settings.
  * Afterwards nothing may be held on the bus, nothing may still be sounding in
  * the engine and no piano key may still be lit.
  *
@@ -71,15 +72,47 @@ vi.mock('./audio/audioEngine', async (importOriginal) => {
 
 import { App } from './App'
 import { bus } from './app/pianoApp'
+import { player } from './app/songsApp'
 import { keyRects } from './core/pianoGeometry'
 import { slotToMidi } from './core/layout'
+import type { PianoRange } from './core/layout'
 import { settingsStore } from './state/settings'
+import { resetSongs } from './ui/songsTestKit'
+import { LEAD_IN_SECONDS, playSong } from './ui/useSongs'
 
 /** The size the piano box pretends to have (jsdom lays nothing out). */
 const PIANO_BOX = { left: 100, top: 300, width: 1100, height: 200 }
 
 const C4 = 60
 const C5 = 72
+
+/** A piano the tests are played on. */
+interface TestPiano {
+  name: string
+  range: PianoRange
+  /** Where C3 is on it, counted from its lowest key. C3 is where the computer keys start (slot 0). */
+  placeOfC3: number
+}
+
+/**
+ * The piano the simulated browser gets: the 37 keys the computer keyboard
+ * reaches. When the computer keys move lower or higher it moves with them.
+ */
+const SMALL_PIANO: TestPiano = {
+  name: 'the 37-key piano, which moves with the computer keys',
+  range: { first: 48, last: 84 },
+  placeOfC3: 0,
+}
+
+/** The piano with all its 88 keys. It stays as it is when the computer keys move. */
+const FULL_PIANO: TestPiano = {
+  name: 'the full piano, which stays as it is',
+  range: { first: 21, last: 108 },
+  placeOfC3: 27,
+}
+
+/** The piano the app of the running test was started on. */
+let pianoOnScreen = SMALL_PIANO
 
 beforeAll(() => {
   // jsdom has no canvas and no pointer capture. The sky then draws nothing,
@@ -114,6 +147,7 @@ beforeEach(() => {
   bus.allOff()
   audio.reset()
   setVisibility('visible')
+  pianoOnScreen = SMALL_PIANO
 })
 
 afterEach(() => {
@@ -162,9 +196,12 @@ function piano(): HTMLElement {
   return box
 }
 
-/** A point of the piano box that lies on the key for `slot`. */
+/**
+ * A point of the piano box that lies on the key for `slot`: the key that many
+ * keys above C3 on the piano the app was started on.
+ */
 function pointOnSlot(slot: number): { clientX: number; clientY: number } {
-  const rect = keyRects({ first: 48, last: 84 })[slot]
+  const rect = keyRects(pianoOnScreen.range)[pianoOnScreen.placeOfC3 + slot]
   if (!rect) throw new Error(`no key for slot ${slot}`)
   return {
     clientX: PIANO_BOX.left + (rect.left + rect.width / 2) * PIANO_BOX.width,
@@ -190,12 +227,19 @@ function pointer(
   })
 }
 
-/** Draws the app and gets past the start overlay, as a player would. */
-function startApp(): ReturnType<typeof render> {
+/**
+ * Draws the app and gets past the start overlay, as a player would. The
+ * simulated browser gets the 37-key piano; the full one has to be asked for.
+ */
+function startApp(pianoToShow: TestPiano = SMALL_PIANO): ReturnType<typeof render> {
+  if (pianoToShow === FULL_PIANO) act(() => settingsStore.set({ pianoSize: 88 }))
+  pianoOnScreen = pianoToShow
   const view = render(<App />)
   keyDown('Enter')
   keyUp('Enter')
   expect(screen.queryByText('Click or press any key to start')).toBeNull()
+  const { first, last } = pianoToShow.range
+  expect(document.querySelectorAll('.piano-key')).toHaveLength(last - first + 1)
   return view
 }
 
@@ -227,9 +271,8 @@ function openSettingsOn(tab: SettingsTab): void {
 }
 
 /**
- * True while the computer keys are being chosen (what used to be "Customize
- * keys"): Settings is open on its Keys tab, and a click on a piano key
- * selects it instead of playing it.
+ * True while the computer keys are being chosen: Settings is open on its Keys
+ * tab, and a click on a piano key selects it instead of playing it.
  */
 function isChoosingKeys(): boolean {
   return screen.getByRole('group', { name: 'Piano' }).classList.contains('piano--editing')
@@ -303,12 +346,42 @@ describe('a note started with the computer keyboard stops', () => {
     expectSilence()
   })
 
-  it('when the key is released after focus moved to the Labels drop-down', () => {
+  /*
+   * A drop-down's open list and the browser's colour picker keep every key to
+   * themselves, key releases included, and the window does not lose focus. A
+   * key let go at that moment never reaches the page, so its note stops as
+   * soon as one of them takes over (ARCHITECTURE.md 7: "No stuck notes, ever").
+   */
+  it('when the Labels drop-down takes the keyboard, and the key-up that follows changes nothing', () => {
     openSettingsOn('Piano')
     // Settings is open on the tab with the drop-down, and the note is still held.
     expectPlaying(C4)
-    labelsDropDown().focus()
+    act(() => labelsDropDown().focus())
     expect(document.activeElement).toBe(labelsDropDown())
+    expectSilence()
+    keyUp('KeyA')
+    expectSilence()
+  })
+
+  it('when "Your colour" opens the colour picker, and the key plays again at its next press', () => {
+    openSettingsOn('Look')
+    expectPlaying(C4)
+    fireEvent.click(screen.getByRole('radio', { name: 'Your colour' }), { detail: 1 })
+    expect(settingsStore.get().accent).toBe('custom')
+    expectSilence()
+
+    // The picker kept the key-up to itself: for the page the key never came up.
+    keyDown('KeyA')
+    expectPlaying(C4)
+    keyUp('KeyA')
+    expectSilence()
+  })
+
+  it('but not when a ready-made colour is chosen: no pop-up takes the keyboard for that', () => {
+    openSettingsOn('Look')
+    fireEvent.click(screen.getByRole('radio', { name: 'Blue' }), { detail: 1 })
+    expect(settingsStore.get().accent).toBe('blue')
+    expectPlaying(C4)
     keyUp('KeyA')
     expectSilence()
   })
@@ -378,45 +451,6 @@ describe('a note started with the computer keyboard stops', () => {
     expect(screen.getByRole('button', { name: 'C3' }).classList.contains('is-selected')).toBe(true)
     expectSilence()
     keyUp('KeyS')
-    expectSilence()
-  })
-
-  /*
-   * "Lower" and "Higher" are in the Keys tab. Opening it lets go of the note
-   * (see above), so the key is pressed again under the open tab, where the
-   * keyboard plays as long as no piano key is selected.
-   */
-  function holdKeyAUnderTheKeysTab(): void {
-    openSettingsOn('Keys')
-    expectSilence()
-    keyUp('KeyA')
-    keyDown('KeyA')
-    expectPlaying(C4)
-    expect(litKeys()).toEqual(['C4, key A'])
-  }
-
-  it('when the computer keys are moved higher, and the key then plays the new note', () => {
-    holdKeyAUnderTheKeysTab()
-    click(/Higher/)
-    expect(settingsStore.get().baseOctave).toBe(4)
-    expectSilence()
-    // Still held: its auto-repeat must not start anything.
-    keyDown('KeyA', { repeat: true })
-    expectSilence()
-    keyUp('KeyA')
-    expectSilence()
-    keyDown('KeyA')
-    expectPlaying(C5)
-    keyUp('KeyA')
-    expectSilence()
-  })
-
-  it('when the computer keys are moved lower', () => {
-    holdKeyAUnderTheKeysTab()
-    click(/Lower/)
-    expect(settingsStore.get().baseOctave).toBe(2)
-    expectSilence()
-    keyUp('KeyA')
     expectSilence()
   })
 
@@ -548,22 +582,6 @@ describe('a note started with the pointer stops', () => {
     expectSilence()
   })
 
-  /*
-   * "Lower" and "Higher" cannot be reached while the mouse holds a note: they
-   * are in the Keys tab, where the piano is silent. The computer keys still
-   * move under a held note when a song that needs them elsewhere is loaded,
-   * or when they are moved in another browser tab. Both write the same
-   * setting, as here.
-   */
-  it('when the computer keys are moved higher while the pointer is down', () => {
-    act(() => settingsStore.set({ baseOctave: 4 }))
-    expectSilence()
-    pointer('pointerMove', 14)
-    expectSilence()
-    pointer('pointerUp', 14)
-    expectSilence()
-  })
-
   it('when every setting is reset while it is down, on release', () => {
     act(() => settingsStore.set({ transpose: 3, sustain: true }))
     act(() => settingsStore.reset())
@@ -639,20 +657,6 @@ describe('a note started through the bus (the way the song player plays notes) s
     expectPlaying(C4)
     chooseTab('Keys')
     expect(isChoosingKeys()).toBe(true)
-    expectSilence()
-  })
-
-  it('when the computer keys are moved lower or higher', () => {
-    // "Higher" is in the Keys tab, which silences the piano as it opens: the
-    // note starts again under it.
-    openSettingsOn('Keys')
-    expectSilence()
-    act(() => bus.noteOn(C4, 'playback'))
-    expectPlaying(C4)
-    expect(litKeys()).toEqual(['C4, key A'])
-
-    click(/Higher/)
-    expect(settingsStore.get().baseOctave).toBe(4)
     expectSilence()
   })
 
@@ -759,28 +763,232 @@ describe('a key-up the operating system never delivers', () => {
   })
 })
 
-describe('keys held across a move of the computer keys', () => {
-  it('a key pressed and released after the move stops its note, even while an older key is still down', () => {
+/*
+ * Two rules stop a note when the computer keys move lower or higher
+ * (ARCHITECTURE.md 7): held notes are let go when the keys move, and when the
+ * piano on screen becomes another one. On the 37-key piano both fire, because
+ * that piano moves with the keys. The full piano stays as it is, so there the
+ * first rule alone stops the note: each test runs on both.
+ *
+ * "Lower" and "Higher" are in the Keys tab of Settings. Opening that tab lets
+ * go of every note, so the notes start under the open tab, where the piano
+ * plays as long as no piano key is selected.
+ */
+describe.each([SMALL_PIANO, FULL_PIANO])(
+  'a note stops when the computer keys are moved lower or higher, on $name',
+  (pianoToShow) => {
+    beforeEach(() => {
+      startApp(pianoToShow)
+    })
+
+    function holdKeyAUnderTheKeysTab(): void {
+      openSettingsOn('Keys')
+      keyDown('KeyA')
+      expectPlaying(C4)
+      expect(litKeys()).toEqual(['C4, key A'])
+    }
+
+    it('started with the computer keyboard: moved higher, and the key then plays the new note', () => {
+      holdKeyAUnderTheKeysTab()
+      click(/Higher/)
+      expect(settingsStore.get().baseOctave).toBe(4)
+      expectSilence()
+      // Still held: its auto-repeat must not start anything.
+      keyDown('KeyA', { repeat: true })
+      expectSilence()
+      keyUp('KeyA')
+      expectSilence()
+      keyDown('KeyA')
+      expectPlaying(C5)
+      keyUp('KeyA')
+      expectSilence()
+    })
+
+    it('started with the computer keyboard: moved lower', () => {
+      holdKeyAUnderTheKeysTab()
+      click(/Lower/)
+      expect(settingsStore.get().baseOctave).toBe(2)
+      expectSilence()
+      keyUp('KeyA')
+      expectSilence()
+    })
+
+    /*
+     * "Lower" and "Higher" cannot be reached while the mouse holds a note: in
+     * the Keys tab a click on the piano selects a key. The computer keys still
+     * move under a held note when a song that needs them elsewhere is loaded,
+     * or when they are moved in another browser tab. Both write the same
+     * setting, as here.
+     */
+    it('started with the pointer: moved higher while the pointer is down', () => {
+      pointer('pointerDown', 12)
+      expectPlaying(C4)
+      act(() => settingsStore.set({ baseOctave: 4 }))
+      expectSilence()
+      // The button is still down: moving and letting go starts nothing.
+      pointer('pointerMove', 14)
+      expectSilence()
+      pointer('pointerUp', 14)
+      expectSilence()
+    })
+
+    it.each([
+      ['higher', /Higher/, 4],
+      ['lower', /Lower/, 2],
+    ] as const)(
+      'started through the bus, the way the song player plays notes: moved %s',
+      (_direction, buttonName, octave) => {
+        openSettingsOn('Keys')
+        act(() => bus.noteOn(C4, 'playback'))
+        expectPlaying(C4)
+        expect(litKeys()).toEqual(['C4, key A'])
+
+        click(buttonName)
+        expect(settingsStore.get().baseOctave).toBe(octave)
+        expectSilence()
+      },
+    )
+
+    it('and a key pressed and released after the move stops its note, even while an older key is still down', () => {
+      holdKeyAUnderTheKeysTab()
+      // The computer keys move one octave lower while A is held: A's note is let go.
+      click(/Lower/)
+      expect(settingsStore.get().baseOctave).toBe(2)
+      expectSilence()
+
+      // K (slot 24) now plays C4, the note A was playing before the move.
+      expect(slotToMidi(24, settingsStore.get().baseOctave)).toBe(C4)
+      keyDown('KeyK')
+      expectPlaying(C4)
+      keyUp('KeyK')
+      // ARCHITECTURE.md 5.5: "on key up release that note". Nothing else is
+      // holding C4: A's note ended when the computer keys moved.
+      expectSilence()
+
+      keyUp('KeyA')
+      expectSilence()
+    })
+  },
+)
+
+/*
+ * A real song, played by the app's own player. It sounds its first note
+ * (middle C) once its lead-in is over.
+ */
+describe('a song that is playing', () => {
+  const TWINKLE = 'starter:twinkle-twinkle-little-star'
+  /** From "Play" to a moment in the middle of the song's first note. */
+  const INTO_THE_FIRST_NOTE_MS = LEAD_IN_SECONDS * 1000 + 100
+
+  /** The notes the song has started since the test last emptied this list. */
+  const startedBySong: number[] = []
+  let stopListening: () => void = () => {}
+
+  beforeEach(async () => {
+    await resetSongs()
+    vi.useFakeTimers()
+    startedBySong.length = 0
+    stopListening = bus.subscribe((event) => {
+      if (event.type === 'on' && event.source === 'playback') startedBySong.push(event.midi)
+    })
+  })
+
+  afterEach(async () => {
+    stopListening()
+    cleanup()
+    vi.useRealTimers()
+    await resetSongs()
+  })
+
+  function wait(milliseconds: number): void {
+    act(() => {
+      vi.advanceTimersByTime(milliseconds)
+    })
+  }
+
+  /** Starts the app and the song, and waits until the song holds its first note. */
+  function playUntilFirstNote(): void {
     startApp()
-    // "Lower" is in the Keys tab of Settings. The keyboard plays under it.
+    act(() => {
+      expect(playSong(TWINKLE)).toBe(true)
+    })
+    wait(INTO_THE_FIRST_NOTE_MS)
+    expect(player.getState().status).toBe('playing')
+    expectPlaying(C4)
+    expect(litKeys()).toEqual(['C4, key A'])
+  }
+
+  /** The song is paused where it was, and none of its notes starts in the seconds that follow. */
+  function expectTheSongWaits(place: number): void {
+    expect(player.getState().status).toBe('paused')
+    expectSilence()
+    wait(3000)
+    expectSilence()
+    expect(player.getPosition()).toBeCloseTo(place, 2)
+  }
+
+  /*
+   * INTERFACE.md 5.5: opening the Keys tab, and selecting a piano key there,
+   * pauses a song that is playing. Letting go of its notes would not be
+   * enough: the song would start its next note a moment later, while the
+   * piano is meant to wait quietly. The song stays loaded, and "Play" carries
+   * on from the same place.
+   */
+  it('is paused when the Keys tab of Settings opens, and "Play" carries on from there', () => {
+    playUntilFirstNote()
+    const place = player.getPosition()
+
     openSettingsOn('Keys')
-    keyDown('KeyA')
-    expectPlaying(C4)
-    // The computer keys move one octave lower while A is held: A's note is let go (INTERFACE.md 7).
-    click(/Lower/)
-    expect(settingsStore.get().baseOctave).toBe(2)
-    expectSilence()
+    expect(isChoosingKeys()).toBe(true)
+    expectTheSongWaits(place)
 
-    // K (slot 24) now plays C4, the note A was playing before the move.
-    expect(slotToMidi(24, settingsStore.get().baseOctave)).toBe(C4)
-    keyDown('KeyK')
-    expectPlaying(C4)
-    keyUp('KeyK')
-    // ARCHITECTURE.md 5.5: "on key up release that note". Nothing else is
-    // holding C4: A's note ended when the computer keys moved.
-    expectSilence()
+    startedBySong.length = 0
+    click('Play')
+    expect(player.getState().status).toBe('playing')
+    wait(3000)
+    expect(startedBySong.length).toBeGreaterThan(0)
+    expect(player.getPosition()).toBeCloseTo(place + 3, 1)
+  })
 
-    keyUp('KeyA')
-    expectSilence()
+  it('is paused again when a piano key is selected, after "Play" under the Keys tab', () => {
+    playUntilFirstNote()
+    openSettingsOn('Keys')
+    click('Play')
+    wait(1000)
+    expect(player.getState().status).toBe('playing')
+    const place = player.getPosition()
+
+    fireEvent.click(screen.getByRole('button', { name: 'C3' }), { detail: 1 })
+    expect(screen.getByRole('button', { name: 'C3' }).classList.contains('is-selected')).toBe(true)
+    expectTheSongWaits(place)
+  })
+
+  it.each(['Sound', 'Piano', 'Look', 'About'] as const)(
+    'plays on under the %s tab of Settings',
+    (tab) => {
+      playUntilFirstNote()
+      startedBySong.length = 0
+
+      openSettingsOn(tab)
+      expect(isChoosingKeys()).toBe(false)
+      expect(player.getState().status).toBe('playing')
+      expectPlaying(C4)
+      wait(3000)
+      expect(player.getState().status).toBe('playing')
+      expect(startedBySong.length).toBeGreaterThan(0)
+    },
+  )
+
+  // SONGS.md 4.5: the player pauses when the page is hidden. A page that is
+  // being left is treated the same way.
+  it.each([
+    ['the tab is hidden', hideTab],
+    ['the page is left (pagehide)', () => windowEvent('pagehide')],
+  ])('is paused when %s, and starts no note on a page nobody sees', (_exit, leave) => {
+    playUntilFirstNote()
+    const place = player.getPosition()
+
+    leave()
+    expectTheSongWaits(place)
   })
 })

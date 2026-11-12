@@ -39,6 +39,22 @@ function value(css: string, selector: string, property: string): string | undefi
   return found?.[1]?.trim().replace(/\s+/g, ' ')
 }
 
+/** The rules `css` keeps for the windows that match `query`: what is inside "@media query { … }". */
+function mediaRules(css: string, query: string): string {
+  const opening = `@media ${query}`
+  const start = css.indexOf(opening)
+  if (start < 0) throw new Error(`There is no "${opening}"`)
+  const from = css.indexOf('{', start) + 1
+  let depth = 1
+  let at = from
+  while (at < css.length && depth > 0) {
+    if (css[at] === '{') depth += 1
+    if (css[at] === '}') depth -= 1
+    at += 1
+  }
+  return css.slice(from, at - 1)
+}
+
 describe.each([
   ['stage.css', stageCss],
   ['app.css', appCss],
@@ -93,8 +109,22 @@ describe('the three rows of the screen', () => {
     expect(value(appCss, '.app__panels', 'grid-area')).toBe('2 / 1')
     expect(value(appCss, '.app__panels', 'min-height')).toBe('0')
     expect(value(appCss, '.app__panels', 'z-index')).toBe('var(--layer-panel)')
-    // A gap above the light line, and room for the panel's shadow.
-    expect(value(appCss, '.app__panels', 'padding')).toBe('4px 0 12px')
+  })
+
+  it('keep a panel off the line of words above the piano, where the window is high enough', () => {
+    const highWindows = mediaRules(appCss, '(min-height: 560px)')
+    const everyWindow = appCss.replace(highWindows, '')
+
+    // In a low window: a small gap above the light line, and room for the panel's shadow.
+    expect(value(everyWindow, '.app__panels', 'padding')).toBe('4px 0 12px')
+    expect(value(everyWindow, '.app__panels', 'padding-bottom')).toBeUndefined()
+
+    // From 560px of height on, the gap is big enough for the note names, the
+    // sound status and the badges: one line of words that ends 12px above the
+    // piano. Nothing else about the box changes with the height of the window.
+    expect(rule(highWindows, '.app__panels').trim()).toBe('padding-bottom: 44px;')
+    expect(value(stageCss, '.stage__foot', 'padding')).toBe('0 16px 12px')
+    expect(value(stageCss, '.stage__foot', 'bottom')).toBe('0')
   })
 
   it('let clicks beside a panel through to the sky, while the panel itself takes them', () => {

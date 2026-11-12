@@ -8,7 +8,13 @@
  * After every step a few plain truths must hold, whatever came before:
  * one panel at most, keys are being chosen exactly while Settings shows its
  * Keys tab, the menu is on screen whenever something pins it, the cursor is
- * hidden exactly while the menu is, and no note sounds that nobody is holding.
+ * hidden exactly while the menu is, the stage says "Sustain on" exactly while
+ * sustain is on, and no note sounds that nobody is holding. And every press
+ * of Escape takes back one thing, the first there is in its fixed order.
+ *
+ * A second set of runs is about Escape alone, which the first set seldom
+ * meets with much open: a piano key that waits, the song options, a panel,
+ * the focus here and there, and the key pressed, held down and let go.
  *
  * The shuffling is seeded, so a failure can be run again.
  */
@@ -67,6 +73,8 @@ import { playSong } from './ui/useSongs'
 
 const A_STARTER_SONG = 'starter:twinkle-twinkle-little-star'
 const SETTINGS_TABS = ['Sound', 'Keys', 'Piano', 'Look', 'About'] as const
+/** A run takes about a second by itself, and several times that when many test files run side by side. */
+const RUN_TIMEOUT_MS = 20_000
 /** Keys that play a note, one that plays none, and the keys the shell itself listens to. */
 const CODES = ['KeyA', 'KeyS', 'KeyK', 'Quote', 'KeyM', 'Space', 'Escape', 'Enter', 'Tab'] as const
 
@@ -122,12 +130,13 @@ afterEach(async () => {
   await resetSongs()
 })
 
-function key(type: 'keydown' | 'keyup', code: string, init: KeyboardEventInit = {}): void {
+function key(type: 'keydown' | 'keyup', code: string, init: KeyboardEventInit = {}): KeyboardEvent {
   const event = new KeyboardEvent(type, { code, bubbles: true, cancelable: true, ...init })
   const target = document.activeElement ?? document.body
   act(() => {
     target.dispatchEvent(event)
   })
+  return event
 }
 
 function clickWithMouse(target: HTMLElement): void {
@@ -176,8 +185,57 @@ function closeSongButton(): HTMLElement | null {
   return buttons.find((button) => button.textContent === 'Close') ?? null
 }
 
+function songOptionsButton(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.player-line button[aria-expanded]')
+}
+
+function songOptions(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.song-options')
+}
+
+/** What a press of Escape can take back, listed in the order in which it does. */
+interface Open {
+  waitingPianoKey: boolean
+  songOptions: boolean
+  panel: boolean
+  focusInMenu: boolean
+  /** Not taken back by itself: the focus is on a control inside the open panel (not on the panel). */
+  focusInPanel: boolean
+}
+
+function whatIsOpen(): Open {
+  const panel = document.querySelector('.floating-panel')
+  const focused = document.activeElement
+  return {
+    waitingPianoKey: piano().querySelector('.is-selected') !== null,
+    songOptions: songOptions() !== null,
+    panel: panel !== null,
+    focusInMenu: menu().contains(focused),
+    focusInPanel: panel !== null && panel !== focused && panel.contains(focused),
+  }
+}
+
+/** The same after one press of Escape: the first of them is gone, the others are as they were. */
+function afterEscape(before: Open): Open {
+  if (before.waitingPianoKey) return { ...before, waitingPianoKey: false }
+  if (before.songOptions) return { ...before, songOptions: false }
+  // A control of the panel that had the focus goes away with it: the focus is
+  // then on the button that opens the panel, which is in the menu.
+  if (before.panel) {
+    const focusInMenu = before.focusInMenu || before.focusInPanel
+    return { ...before, panel: false, focusInPanel: false, focusInMenu }
+  }
+  return { ...before, focusInMenu: false }
+}
+
+/** True when there is something for a press of Escape to take back. */
+function somethingIsOpen(open: Open): boolean {
+  return open.waitingPianoKey || open.songOptions || open.panel || open.focusInMenu
+}
+
 describe('the shell, through 20 shuffled runs of 140 steps', () => {
-  it.each(Array.from({ length: 20 }, (_, run) => run + 1))('run %i', (seed) => {
+  const runs = Array.from({ length: 20 }, (_, run) => run + 1)
+  it.each(runs)('run %i', { timeout: RUN_TIMEOUT_MS }, (seed) => {
     const random = seeded(seed * 104729)
     const pick = <Item,>(items: readonly Item[]): Item =>
       items[Math.floor(random() * items.length)] as Item
@@ -198,7 +256,12 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
         const code = pick(CODES)
         if (keysDown.has(code)) return 'nothing'
         keysDown.add(code)
+        const open = whatIsOpen()
         key('keydown', code, { key: code === 'KeyM' ? 'm' : code })
+        if (code === 'Escape') {
+          const told = `Escape, after: ${story.slice(-12).join(' / ')}`
+          expect(whatIsOpen(), told).toEqual(afterEscape(open))
+        }
         // What Tab leaves focused in the menu is let go again, as by a click elsewhere.
         if (code === 'Tab' && random() < 0.5) act(() => (document.activeElement as HTMLElement).blur())
         return `down ${code}`
@@ -265,7 +328,7 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
         return `resize ${stageWidth}`
       }
       if (dice < 0.93) {
-        const what = pick(['play', 'pause', 'resume', 'close', 'end'] as const)
+        const what = pick(['play', 'pause', 'resume', 'close', 'end', 'options'] as const)
         act(() => {
           if (what === 'play') playSong(A_STARTER_SONG)
           if (what === 'pause') player.pause()
@@ -274,6 +337,11 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
         })
         const close = closeSongButton()
         if (what === 'close' && close) clickWithMouse(close)
+        // The song options: opened, or closed again, from their button in the player line.
+        const options = songOptionsButton()
+        if (what === 'options' && options) clickWithMouse(options)
+        // A song that was just loaded starts with its options closed.
+        if (what === 'play') expect(songOptions(), 'the options of a song that was just loaded').toBeNull()
         return `song ${what}`
       }
       if (dice < 0.97) {
@@ -321,6 +389,13 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
       if (pinned) expect(hidden, told).toBe(false)
       expect(document.querySelector('.app')?.classList.contains('cursor-hidden'), told).toBe(hidden)
       expect(document.querySelector('.player-line') !== null, told).toBe(state !== 'empty')
+      expect(songOptionsButton()?.getAttribute('aria-expanded') === 'true', told).toBe(
+        songOptions() !== null,
+      )
+
+      // Sustain can be switched with Space while the menu is hidden: the stage says when it is on.
+      const badges = [...document.querySelectorAll('.stage__badge')].map((badge) => badge.textContent)
+      expect(badges.includes('Sustain on'), told).toBe(settingsStore.get().sustain)
 
       // Nobody holds anything and no song is playing: nothing may sound, and no key may be lit.
       if (keysDown.size === 0 && !mouseDownOnPiano && state !== 'playing') {
@@ -341,6 +416,123 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
     const close = closeSongButton()
     if (close) clickWithMouse(close)
     expect([...bus.getActiveNotes()]).toEqual([])
+    expect(problems).not.toHaveBeenCalled()
+  })
+})
+
+describe('Escape, through 16 shuffled runs of 120 steps', () => {
+  const runs = Array.from({ length: 16 }, (_, run) => run + 1)
+  it.each(runs)('run %i', { timeout: RUN_TIMEOUT_MS }, (seed) => {
+    const random = seeded(seed * 15485863)
+    const pick = <Item,>(items: readonly Item[]): Item =>
+      items[Math.floor(random() * items.length)] as Item
+    const problems = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    render(<App />)
+    key('keydown', 'Enter')
+    key('keyup', 'Enter')
+
+    let escapeIsDown = false
+    const story: string[] = []
+
+    function focus(control: HTMLElement | null): string {
+      if (!control) return 'nothing'
+      act(() => control.focus())
+      return `focus on "${control.textContent}"`
+    }
+
+    function step(): string {
+      const dice = random()
+      if (dice < 0.14) {
+        // Settings on its Keys tab, where a click on a piano key makes it wait for a computer key.
+        if (!dialog('Settings')) clickWithMouse(menuButton('Settings'))
+        const keys = settingsTab('Keys')
+        if (keys) clickWithMouse(keys)
+        return 'Settings on Keys'
+      }
+      if (dice < 0.2) {
+        const name = pick(['Settings', 'Songs'] as const)
+        // With the mouse, or with Enter: the focus then goes into the panel that opens.
+        const button = menuButton(name)
+        if (random() < 0.5) clickWithMouse(button)
+        else {
+          button.focus()
+          fireEvent.click(button, { detail: 0 })
+        }
+        return `press ${name}`
+      }
+      if (dice < 0.34) {
+        const pianoKey = piano().querySelector(`.piano-key[data-slot="${Math.floor(random() * 37)}"]`)
+        if (pianoKey) fireEvent.click(pianoKey, { detail: 1 })
+        return 'click a piano key'
+      }
+      if (dice < 0.46) {
+        const options = songOptionsButton()
+        if (!options) return 'nothing'
+        if (random() < 0.5) clickWithMouse(options)
+        else {
+          options.focus()
+          fireEvent.click(options, { detail: 0 })
+        }
+        return 'press Song options'
+      }
+      if (dice < 0.56) {
+        // The focus goes where Tab can take it: into the panel, the song options or the top bar.
+        const where = pick(['.floating-panel button', '.song-options button', '.top-bar button'])
+        return focus(document.querySelector<HTMLElement>(where))
+      }
+      if (dice < 0.64) {
+        if (random() < 0.6) {
+          act(() => {
+            playSong(A_STARTER_SONG)
+          })
+          return 'play a song'
+        }
+        const close = closeSongButton()
+        if (close) clickWithMouse(close)
+        return 'close the song'
+      }
+      if (dice < 0.68) {
+        clickWithMouse(sky())
+        return 'click sky'
+      }
+
+      // Escape: pressed, then held down (it repeats) or let go.
+      if (!escapeIsDown) {
+        const open = whatIsOpen()
+        const press = key('keydown', 'Escape')
+        escapeIsDown = true
+        const told = `Escape, after: ${story.slice(-12).join(' / ')}`
+        expect(whatIsOpen(), told).toEqual(afterEscape(open))
+        // It is kept from the browser exactly when there was something to take back.
+        expect(press.defaultPrevented, told).toBe(somethingIsOpen(open))
+        return 'Escape down'
+      }
+      if (random() < 0.5) {
+        const open = whatIsOpen()
+        const focused = document.activeElement
+        key('keydown', 'Escape', { repeat: true })
+        const told = `Escape held, after: ${story.slice(-12).join(' / ')}`
+        expect(whatIsOpen(), told).toEqual(open)
+        expect(document.activeElement, told).toBe(focused)
+        return 'Escape repeats'
+      }
+      key('keyup', 'Escape')
+      escapeIsDown = false
+      return 'Escape up'
+    }
+
+    for (let count = 0; count < 120; count++) {
+      story.push(step())
+      const told = `after: ${story.slice(-12).join(' / ')}`
+      expect(document.querySelectorAll('[role="dialog"]').length, told).toBeLessThanOrEqual(1)
+      expect(songOptions() === null || document.querySelector('.player-line') !== null, told).toBe(true)
+      // Escape never plays a note, and never leaves keys being chosen behind a closed panel.
+      expect([...bus.getActiveNotes()], told).toEqual([])
+      expect(piano().classList.contains('piano--editing'), told).toBe(
+        settingsTab('Keys')?.getAttribute('aria-selected') === 'true',
+      )
+    }
     expect(problems).not.toHaveBeenCalled()
   })
 })

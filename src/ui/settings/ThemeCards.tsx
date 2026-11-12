@@ -13,9 +13,9 @@ import { ChoiceCard, ChoiceGroup, CustomLabel } from './ChoiceGroup'
 import { MiniKeys } from './MiniKeys'
 
 /**
- * The themes, one card each. A click applies everything the theme sets; the
- * card of the theme the settings match is marked, and when they match none
- * the group says "Custom".
+ * The themes, one card each. A click applies the look of the theme; the card
+ * of the theme the settings match is marked, and when they match none the
+ * group says "Custom".
  */
 export function ThemeCards({ settings }: { settings: Settings }): JSX.Element {
   const current = matchingTheme(settings)
@@ -33,7 +33,7 @@ export function ThemeCards({ settings }: { settings: Settings }): JSX.Element {
             name={theme.name}
             description={theme.description}
             chosen={theme.id === current}
-            onClick={() => settingsStore.set(theme.values)}
+            onClick={() => applyTheme(theme)}
           >
             <ThemePreview look={theme.values} />
           </ChoiceCard>
@@ -41,6 +41,15 @@ export function ThemeCards({ settings }: { settings: Settings }): JSX.Element {
       </div>
     </ChoiceGroup>
   )
+}
+
+/**
+ * Saves the look of a theme. "Your colour" is not part of it: the player made
+ * that colour, and it is still theirs after a theme was tried. (In a change to
+ * the settings, `undefined` means "leave this one as it is".)
+ */
+function applyTheme(theme: LookTheme): void {
+  settingsStore.set({ ...theme.values, customColour: undefined })
 }
 
 type Look = LookTheme['values']

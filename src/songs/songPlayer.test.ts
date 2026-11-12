@@ -940,6 +940,85 @@ describe('load', () => {
     expect(soundingNow(session)).toEqual([])
   })
 
+  it('with keepPlace and the notes it already has, only takes the new name', () => {
+    const session = playing(TUNE)
+    session.time.advance(700)
+    session.heard.length = 0
+    const news = countNews(session.player)
+
+    session.player.load({ id: SONG.id, title: 'A new name' }, TUNE, { keepPlace: true })
+
+    // A name is not a note: nothing is let go, nothing is struck again.
+    expect(session.heard).toEqual([])
+    expect(soundingNow(session)).toEqual([60, 64])
+    expect(session.player.getState()).toMatchObject({
+      status: 'playing',
+      songId: 'song-1',
+      title: 'A new name',
+      duration: 2.5,
+    })
+    expect(session.player.getPosition()).toBeCloseTo(0.7, 9)
+    expect(news()).toBe(1)
+    expect(session.time.timersMade()).toBe(1)
+
+    // The notes that were sounding end where the song says, and the rest of it follows.
+    session.time.advance(305)
+    expect(soundingNow(session)).toEqual([64])
+    session.time.advance(2000)
+    expect(names(session.heard)).toEqual(['off 60', 'on 67', 'off 64', 'off 67', 'on 72', 'off 72'])
+    expect(session.player.getState()).toMatchObject({ status: 'stopped', title: 'A new name' })
+  })
+
+  it('with keepPlace and the notes it already has, a paused song only takes the new name', () => {
+    const session = playing(TUNE)
+    session.time.advance(700)
+    session.player.pause()
+    session.heard.length = 0
+
+    session.player.load({ id: SONG.id, title: 'A new name' }, TUNE, { keepPlace: true })
+
+    expect(session.heard).toEqual([])
+    expect(session.player.getState()).toMatchObject({ status: 'paused', title: 'A new name' })
+    expect(session.player.getState().position).toBeCloseTo(0.7, 9)
+    expect(session.time.timerCount()).toBe(0)
+  })
+
+  it('with keepPlace and a copy of the notes it has, lets go of the notes it is playing', () => {
+    const session = playing(TUNE)
+    session.time.advance(700)
+
+    load(session, { ...TUNE, notes: [...TUNE.notes] }, { keepPlace: true })
+
+    expect(soundingNow(session)).toEqual([])
+    expect(session.player.getState().status).toBe('playing')
+    expect(session.player.getPosition()).toBeCloseTo(0.7, 9)
+  })
+
+  it('with keepPlace, the notes it already has and another length, takes the new length', () => {
+    const session = playing(TUNE)
+    session.time.advance(700)
+
+    load(session, { ...TUNE, duration: 1 }, { keepPlace: true })
+
+    expect(soundingNow(session)).toEqual([])
+    expect(session.player.getState()).toMatchObject({ status: 'playing', duration: 1 })
+
+    session.time.advance(400)
+    expect(session.player.getState()).toMatchObject({ status: 'stopped', position: 0 })
+    expect(soundingNow(session)).toEqual([])
+  })
+
+  it('without keepPlace, stops and lets go of the notes even when they are the ones it has', () => {
+    const session = playing(TUNE)
+    session.time.advance(700)
+
+    load(session, TUNE)
+
+    expect(soundingNow(session)).toEqual([])
+    expect(session.player.getState()).toMatchObject({ status: 'stopped', position: 0 })
+    expect(session.time.timerCount()).toBe(0)
+  })
+
   it('with keepPlace on an empty player, simply loads the song', () => {
     const session = setUp()
 

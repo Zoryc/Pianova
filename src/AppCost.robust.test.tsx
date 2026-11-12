@@ -43,15 +43,33 @@ const audio = vi.hoisted(() => {
 })
 
 /**
- * How many times the top bar was drawn. Nothing in it changes when a note
- * plays, and the app shell draws it each time it draws itself: a note that
- * makes this number grow has made the whole shell draw again.
+ * How many times parts of the screen were drawn.
+ *
+ * `topBar`: nothing in the top bar changes when a note plays, and the app
+ * shell draws it each time it draws itself. A note that makes this number
+ * grow has made the whole shell draw again.
+ *
+ * `pianoKeys`: a piano key works out the colour of its letters (`inkOn`) each
+ * time it is drawn, and nothing else on the screen does while notes are
+ * played. Those calls are counted: a note that makes this number grow by 37
+ * has drawn the whole piano again.
  */
-const drawn = vi.hoisted(() => ({ topBar: 0 }))
+const drawn = vi.hoisted(() => ({ topBar: 0, pianoKeys: 0 }))
 
 vi.mock('./audio/audioEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('./audio/audioEngine')>()
   return { ...original, createAudioEngine: () => audio.engine }
+})
+
+vi.mock('./core/colour', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./core/colour')>()
+  return {
+    ...original,
+    inkOn(colour: string) {
+      drawn.pianoKeys += 1
+      return original.inkOn(colour)
+    },
+  }
 })
 
 vi.mock('./ui/TopBar', async (importOriginal) => {
@@ -167,6 +185,36 @@ describe('React work per note', () => {
     expect(drawn.topBar - before).toBe(0)
   })
 
+  // src/ui/Piano.tsx: "when a note starts or stops, only the keys that change are drawn again".
+  it('draws one piano key again when a note starts or stops, not the whole piano', () => {
+    startApp()
+    expect(document.querySelectorAll('.piano-key')).toHaveLength(37)
+    // The counter works: other note names are written on every key.
+    const atStart = drawn.pianoKeys
+    act(() => settingsStore.set({ noteNaming: 'solfege' }))
+    expect(drawn.pianoKeys - atStart).toBeGreaterThanOrEqual(37)
+
+    const litKeys = (): number => document.querySelectorAll('.piano-key.is-lit').length
+    const before = drawn.pianoKeys
+    key('keydown', 'KeyA')
+    expect(litKeys()).toBe(1)
+    expect(drawn.pianoKeys - before).toBeLessThanOrEqual(1)
+    key('keyup', 'KeyA')
+    expect(litKeys()).toBe(0)
+    expect(drawn.pianoKeys - before).toBeLessThanOrEqual(2)
+
+    // A second and a third note next to a held one: the held key is not drawn again either.
+    key('keydown', 'KeyS')
+    const withOneHeld = drawn.pianoKeys
+    act(() => bus.noteOn(64, 'pointer'))
+    act(() => bus.noteOn(67, 'playback'))
+    expect(litKeys()).toBe(3)
+    expect(drawn.pianoKeys - withOneHeld).toBeLessThanOrEqual(2)
+    act(() => bus.allOff())
+    expect(litKeys()).toBe(0)
+    expect(drawn.pianoKeys - withOneHeld).toBeLessThanOrEqual(5)
+  })
+
   it('draws nothing new for the repeats of a held key', () => {
     const { commits } = startApp()
     key('keydown', 'KeyA')
@@ -222,7 +270,8 @@ describe('React work per note', () => {
     observer.disconnect()
 
     const pianoKey = screen.getByRole('button', { name: 'C4, key A' })
-    // The strip above the light line: the sound status, the "Transposed" badge and the note names.
+    // The strip above the light line: the sound status, the "Transposed" and
+    // "Sustain on" badges, and the note names.
     const strip = document.querySelector('.stage__foot')
     expect(strip).not.toBeNull()
 
@@ -236,6 +285,11 @@ describe('React work per note', () => {
 
     const structural = records.filter((record) => record.type !== 'attributes')
     expect(structural.filter((record) => !strip?.contains(record.target))).toEqual([])
+    // Only the strip's own list of children changed: no text inside it was
+    // written again, not the sound status and not a badge.
+    expect(
+      structural.every((record) => record.type === 'childList' && record.target === strip),
+    ).toBe(true)
 
     // In that strip, the list of note names is all that came and went: once on, once off.
     const isNoteNames = (node: Node): boolean =>

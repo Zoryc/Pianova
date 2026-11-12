@@ -16,6 +16,7 @@ import {
   fallingHeight,
   firstNoteFrom,
   firstUnfinishedNote,
+  hasSunk,
   lineGlow,
   skySpeed,
   sparkStrength,
@@ -85,8 +86,13 @@ const FALLING_GAP = 1.5
 /** A crowded song never asks for more bars than this in one picture: the ones furthest away wait. */
 const MAX_FALLING_BARS = 400
 
-/** Key letters: only on bars at least this wide, between these sizes, with this much room around them. */
-const MIN_HINT_BAR_WIDTH = 14
+/**
+ * Key letters: only on bars at least this wide, between these sizes, with
+ * this much room around them. The narrowest bar gets the smallest letter:
+ * the black keys of the full piano in a window 1366 pixels wide have bars
+ * between 13 and 14 pixels wide, and their notes must carry a letter too.
+ */
+const MIN_HINT_BAR_WIDTH = 13
 const MIN_HINT_SIZE = 8
 const MAX_HINT_SIZE = 20
 const HINT_SIZE_SHARE = 0.62
@@ -155,6 +161,8 @@ export class SkyPainter {
   /** How wide each key letter is when written one pixel tall, and the font for each whole size. */
   private readonly hintWidths = new Map<string, number>()
   private readonly hintFonts: string[] = []
+  /** The size the canvas is set to write letters at. 0 when that is not known: the font is then set before the next letter. */
+  private hintFontSize = 0
 
   /** `fontFamily` is the typeface of the key letters. */
   constructor(context: CanvasRenderingContext2D, fontFamily: string) {
@@ -168,6 +176,19 @@ export class SkyPainter {
     const { context } = this
     context.setTransform(1, 0, 0, 1, 0, 0)
     context.clearRect(0, 0, context.canvas.width, context.canvas.height)
+  }
+
+  /**
+   * Forgets the pictures that were made in advance (the glows, the sparks
+   * and the background), so that the next picture makes them anew. For when
+   * the browser took the drawing away and gave it back: those pictures may
+   * have been emptied along with the canvas.
+   */
+  forget(): void {
+    this.art.forget()
+    // A new canvas, not the old one painted again: the old one may be lost as well.
+    this.backdrop = null
+    this.backdropPainted = null
   }
 
   /**
@@ -273,12 +294,12 @@ export class SkyPainter {
     const speed = skySpeed(surface.height)
     for (let i = this.fallingFrom; i < this.fallingTo; i++) {
       const note = notes[i]
-      const key = note ? keyRectOf(note.midi, range) : null
-      if (!note || !key || key.black !== black) continue
+      // A note between the two ends of the search may have ended already: it has sunk below the line.
+      if (!note || hasSunk(note, song.position, speed)) continue
+      const key = keyRectOf(note.midi, range)
+      if (!key || key.black !== black) continue
       const height = fallingHeight(note, speed)
       const top = surface.height - fallingBottom(note, song.position, speed) - height
-      // A note between the two ends of the search may have ended already: it has sunk below the line.
-      if (top >= surface.height) continue
       const keyWidth = key.width * surface.width
       this.drawBar(
         picture,
@@ -296,15 +317,24 @@ export class SkyPainter {
    * Finds the notes that are in the picture: the first one that has not
    * ended yet, up to the last one that is low enough to have entered the sky.
    * Both are found by halving the sorted notes, never by walking the song.
+   *
+   * Only the notes between those two are then stepped through, to stop at
+   * the limit of bars. A note that has ended does not count toward it: while
+   * one long note sounds, the many short ones that came and went after it
+   * began lie between the two ends as well.
    */
   private findFallingNotes(picture: SkyPicture, song: SongPicture): void {
     const { height } = picture.surface
-    const lastTime = song.position + height / skySpeed(height)
+    const { notes } = song.index
+    const speed = skySpeed(height)
+    const entered = firstNoteFrom(song.index, song.position + height / speed)
     this.fallingFrom = firstUnfinishedNote(song.index, song.position)
-    this.fallingTo = Math.min(
-      firstNoteFrom(song.index, lastTime),
-      this.fallingFrom + MAX_FALLING_BARS,
-    )
+    let to = this.fallingFrom
+    for (let showing = 0; to < entered && showing < MAX_FALLING_BARS; to++) {
+      const note = notes[to]
+      if (note && !hasSunk(note, song.position, speed)) showing++
+    }
+    this.fallingTo = to
   }
 
   /**
@@ -483,35 +513,39 @@ export class SkyPainter {
     const { notes } = song.index
     const speed = skySpeed(surface.height)
     const fade = fadeHeight(surface.height)
-    let size = 0
+    // A canvas forgets its font when it is resized, so what an earlier picture set is not relied on.
+    this.hintFontSize = 0
     context.globalCompositeOperation = 'source-over'
     context.textAlign = 'center'
     context.textBaseline = 'middle'
 
     for (let i = this.fallingFrom; i < this.fallingTo; i++) {
       const note = notes[i]
-      const label = note ? song.hints.get(note.midi) : undefined
-      const key = note && label ? keyRectOf(note.midi, range) : null
-      if (!note || !label || !key) continue
+      if (!note || hasSunk(note, song.position, speed)) continue
+      const label = song.hints.get(note.midi)
+      const key = label ? keyRectOf(note.midi, range) : null
+      if (!label || !key) continue
       const keyWidth = key.width * surface.width
       const width = barWidth(keyWidth)
       if (width < MIN_HINT_BAR_WIDTH) continue
 
-      const wanted = this.hintSize(label, width)
+      const size = this.hintSize(label, width)
       const bottom = surface.height - fallingBottom(note, song.position, speed)
       const top = bottom - fallingHeight(note, speed) + FALLING_GAP
       const restsAt = Math.min(bottom, surface.height)
       // Only when the part of the bar that shows is tall enough to hold the letter.
-      if (wanted < MIN_HINT_SIZE || restsAt - Math.max(top, 0) < wanted + HINT_PADDING * 2) continue
+      if (size < MIN_HINT_SIZE || restsAt - Math.max(top, 0) < size + HINT_PADDING * 2) continue
 
-      if (wanted !== size) {
-        size = wanted
+      if (size !== this.hintFontSize) {
         context.font = this.hintFont(size)
+        this.hintFontSize = size
       }
       const middle = restsAt - HINT_PADDING - size / 2
       // The letter fades with its bar at the top of the sky.
       context.globalAlpha = Math.min(1, Math.max(0, middle / fade))
-      context.fillStyle = this.artFor(picture, note.midi).ink
+      // A solid bar is dark high in the sky and nearly white on the line: the letter takes the ink that reads there.
+      const art = this.artFor(picture, note.midi)
+      context.fillStyle = middle < art.farInkUntil ? art.farInk : art.ink
       context.fillText(label, barLeft(key.left * surface.width, keyWidth) + width / 2, middle)
     }
   }
@@ -521,6 +555,8 @@ export class SkyPainter {
     let labelWidth = this.hintWidths.get(label)
     if (labelWidth === undefined) {
       this.context.font = this.hintFont(HINT_MEASURE_SIZE)
+      // Measuring changed the font of the canvas: it has to be set again before a letter is written.
+      this.hintFontSize = 0
       labelWidth = this.context.measureText(label).width / HINT_MEASURE_SIZE
       if (this.hintWidths.size >= MAX_REMEMBERED_HINTS) this.hintWidths.clear()
       this.hintWidths.set(label, labelWidth)

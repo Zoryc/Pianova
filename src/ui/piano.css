@@ -467,7 +467,9 @@
 
 /*
  * The keyboard zone: a thin line under the keys that the computer keyboard
- * can play, drawn only on a piano that has more keys than that.
+ * can play, drawn only on a piano that has more keys than that. The dark
+ * hairline above it sets it apart from the keys when the two are nearly the
+ * same colour (a pale light on ivory keys); on dark keys it cannot be seen.
  */
 .piano__zone {
   position: absolute;
@@ -475,6 +477,7 @@
   z-index: 5;
   height: 2px;
   background: color-mix(in srgb, var(--light) 60%, transparent);
+  box-shadow: 0 -1px 0 color-mix(in srgb, var(--stage-bg) 60%, transparent);
   pointer-events: none;
 }
 

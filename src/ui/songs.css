@@ -149,8 +149,9 @@
 }
 
 /*
- * The title and the position share the width the other controls leave, two
- * parts to three. Both give some of it up when the window gets narrower.
+ * The title takes the width the other controls of its row leave, up to a
+ * limit, and gives some of it up when the window gets narrower. (In a wide
+ * window it is only as wide as its words: see further down.)
  */
 .player-line__title {
   flex: 2 1 0;
@@ -209,13 +210,33 @@
   }
 }
 
+/*
+ * A window wide enough for one row: the title is as wide as its words, up to
+ * its limit, and the position takes all that is left. The row never breaks in
+ * two: a title that is too long for it is the one thing that gets cut.
+ */
+@media (min-width: 960px) {
+  .player-line__controls {
+    flex-wrap: nowrap;
+  }
+
+  .player-line__title {
+    flex: 0 1 auto;
+  }
+}
+
 /* ---------- Song options ---------- */
 
 /*
  * Hangs under the right end of the player line, where its button is. The
  * parts of the song are on the left and the two switches on the right; in a
- * narrow window the switches go under the parts. It stays low, so that it
- * does not reach the piano, and scrolls inside if it must.
+ * narrow window the switches go under the parts.
+ *
+ * It ends above the piano, and scrolls inside if it must. The piano is never
+ * higher than 34% of the window (piano.css) and the room under it is 2%
+ * (stage.css), so the piano's top edge is 64% of the way down or lower. The
+ * options start under the top bar, the player line (50px high) and a gap of
+ * 8px; another 8px stay free above the piano.
  */
 .song-options {
   position: absolute;
@@ -227,7 +248,7 @@
   gap: 16px 24px;
   width: max-content;
   max-width: 100%;
-  max-height: min(340px, 44vh);
+  max-height: min(340px, 64dvh - var(--top-bar-height) - 66px);
   padding: 16px;
   overflow: hidden auto;
   border: 1px solid var(--control-line);
@@ -235,6 +256,13 @@
   background: var(--panel-glass);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(12px);
+}
+
+/* In a narrow window the player line has two rows, 90px high: the options start 40px lower. */
+@media (max-width: 959px) {
+  .song-options {
+    max-height: min(340px, 64dvh - var(--top-bar-height) - 106px);
+  }
 }
 
 .song-options > .field,

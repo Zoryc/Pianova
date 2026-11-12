@@ -2,7 +2,7 @@ import { inkOn } from '../../core/colour'
 import type { LightPalette } from '../../core/colour'
 import type { BarStyle } from '../../core/types'
 import { barRadius } from './skyModel'
-import { withAlpha } from './skyColour'
+import { mixColours, withAlpha } from './skyColour'
 
 /*
  * The pieces of light that are made once and then used many times a frame:
@@ -41,8 +41,16 @@ export interface LightArt {
   /** Neon bars: a faint fill and a bright outline. */
   neonFill: string
   neonLine: string
-  /** The colour of a key letter written on a bar: dark on a solid bar, bright inside a neon one. */
+  /**
+   * The colour of a key letter written on a bar. A solid bar is dark far
+   * from the line and nearly white on it, so no single colour reads all the
+   * way down: a letter whose middle is higher than `farInkUntil` (CSS pixels
+   * from the top of the sky) is written in `farInk`, any other in `ink`.
+   * Inside a neon bar both are the bright tint.
+   */
   ink: string
+  farInk: string
+  farInkUntil: number
   /** The glow of a white-key bar and of a black-key bar. Null when there is no glow. */
   whiteGlow: BarGlow | null
   blackGlow: BarGlow | null
@@ -70,6 +78,8 @@ export interface SkyArt {
   prepare(spec: ArtSpec): void
   /** The art for one palette: made the first time it is asked for, remembered after that. */
   of(palette: LightPalette): LightArt
+  /** Forgets everything made so far, so that it is made anew when next asked for: the pictures may have been emptied. */
+  forget(): void
 }
 
 /** A spark's bright centre is this share of its picture; the rest is its soft edge. */
@@ -81,6 +91,8 @@ const LIGHT_FROM = 0.42
 /** The hot end of a bar, where it turns bright: this share of the sky above the line, but never more pixels than this. */
 const HOT_SHARE = 0.1
 const MAX_HOT_HEIGHT = 64
+/** In how many steps down the sky the place where the ink of the key letters changes is looked for. */
+const INK_STEPS = 200
 
 /** How far the glow of a bar reaches at full strength, in CSS pixels. */
 const MAX_GLOW_BLUR = 30
@@ -102,20 +114,6 @@ const GLOW_LAYERS: readonly (readonly [blurShare: number, alpha: number])[] = [
 const GLOW_MIDDLE_ROWS = 2
 /** The glow slips this far under the edge of its bar, so no dark seam shows between the two. */
 const GLOW_OVERLAP = 0.75
-/**
- * A solid bar is hottest down its middle, like a tube of light: the
- * near-white tint of its colour is added there. How solid that is at full
- * glow, and how it falls away toward the two edges of the bar (how far
- * across the bar, how much of it is left).
- */
-const CORE_ALPHA = 0.8
-const CORE_PROFILE: readonly (readonly [across: number, share: number])[] = [
-  [0, 0],
-  [0.2, 0.28],
-  [0.5, 1],
-  [0.8, 0.28],
-  [1, 0],
-]
 /** Far outside any picture: where a shape is drawn when only its shadow is wanted. */
 const OUT_OF_SIGHT = 10000
 
@@ -156,7 +154,11 @@ export function createSkyArt(context: CanvasRenderingContext2D): SkyArt {
     return art
   }
 
-  return { prepare, of }
+  const forget = (): void => {
+    made.clear()
+  }
+
+  return { prepare, of, forget }
 }
 
 function sameSpec(a: ArtSpec, b: ArtSpec): boolean {
@@ -176,11 +178,12 @@ function makeArt(
   spec: ArtSpec | null,
 ): LightArt {
   const page = context.canvas.ownerDocument
+  const skyHeight = spec?.skyHeight ?? 1
   return {
-    barFill: makeBarFill(context, palette, spec?.skyHeight ?? 1),
+    barFill: makeBarFill(context, palette, skyHeight),
     neonFill: withAlpha(palette.light, NEON_FILL_ALPHA),
     neonLine: palette.bright,
-    ink: spec?.barStyle === 'neon' ? palette.bright : inkOn(palette.bright),
+    ...(spec?.barStyle === 'neon' ? neonInks(palette) : solidInks(palette, skyHeight)),
     whiteGlow: spec ? makeBarGlow(page, palette, spec.whiteBarWidth, spec) : null,
     blackGlow: spec ? makeBarGlow(page, palette, spec.blackBarWidth, spec) : null,
     spark: makeSpark(page, palette),
@@ -188,18 +191,61 @@ function makeArt(
   }
 }
 
+/** A colour of a bar and where it is reached, from the top of the sky (0) to the line (1). */
+type BarStop = readonly [at: number, colour: string]
+
+/** The colours of a solid bar down the sky, in order. Above the first one the bar has that colour. */
+function barStops(palette: LightPalette, skyHeight: number): readonly BarStop[] {
+  const hot = skyHeight > 0 ? Math.min(HOT_SHARE, MAX_HOT_HEIGHT / skyHeight) : HOT_SHARE
+  return [
+    [DEEP_UNTIL, palette.deep],
+    [LIGHT_FROM, palette.light],
+    [1 - hot, palette.light],
+    [1, palette.bright],
+  ]
+}
+
 function makeBarFill(
   context: CanvasRenderingContext2D,
   palette: LightPalette,
   skyHeight: number,
 ): CanvasGradient {
-  const hot = skyHeight > 0 ? Math.min(HOT_SHARE, MAX_HOT_HEIGHT / skyHeight) : HOT_SHARE
   const fill = context.createLinearGradient(0, 0, 0, skyHeight)
-  fill.addColorStop(DEEP_UNTIL, palette.deep)
-  fill.addColorStop(LIGHT_FROM, palette.light)
-  fill.addColorStop(1 - hot, palette.light)
-  fill.addColorStop(1, palette.bright)
+  for (const [at, colour] of barStops(palette, skyHeight)) fill.addColorStop(at, colour)
   return fill
+}
+
+/** The colour of a solid bar at `at`, from the top of the sky (0) to the line (1). */
+function barColourAt(stops: readonly BarStop[], at: number): string {
+  let [before, colour] = stops[0] ?? [0, '#000000']
+  for (const [here, next] of stops) {
+    if (at <= here) return here > before ? mixColours(colour, next, (at - before) / (here - before)) : next
+    before = here
+    colour = next
+  }
+  return colour
+}
+
+type Inks = Pick<LightArt, 'ink' | 'farInk' | 'farInkUntil'>
+
+/** Inside a neon bar there is hardly any colour: the letter is the bright tint at any height. */
+function neonInks(palette: LightPalette): Inks {
+  return { ink: palette.bright, farInk: palette.bright, farInkUntil: 0 }
+}
+
+/**
+ * The inks for a solid bar, which gets lighter all the way down: the one
+ * that reads best on its bright end, the one that reads best on its deep
+ * end, and how far down the sky the second one reads better than the first.
+ */
+function solidInks(palette: LightPalette, skyHeight: number): Inks {
+  const ink = inkOn(palette.bright)
+  const farInk = inkOn(palette.deep)
+  if (farInk === ink) return { ink, farInk, farInkUntil: 0 }
+  const stops = barStops(palette, skyHeight)
+  let step = 0
+  while (step < INK_STEPS && inkOn(barColourAt(stops, step / INK_STEPS)) === farInk) step++
+  return { ink, farInk, farInkUntil: (step / INK_STEPS) * skyHeight }
 }
 
 /** A bar standing in a picture of its glow: where it is, in CSS pixels. */
@@ -212,10 +258,11 @@ interface BarShape {
 }
 
 /**
- * The glow of a bar `barWidth` wide: the light around it and, for a solid
- * bar, the lighter line down its middle. The picture holds the two ends of
- * the bar and a couple of rows of its middle; `stampGlow` in skyDraw.ts
- * stretches the middle to the height of the bar.
+ * The glow of a bar `barWidth` wide: the light around it, and nothing inside
+ * it. A bar is one even colour from edge to edge, solid or neon: no lighter
+ * line is drawn down its middle. The picture holds the two ends of the bar
+ * and a couple of rows of its middle; `stampGlow` in skyDraw.ts stretches the
+ * middle to the height of the bar.
  */
 function makeBarGlow(
   page: Document,
@@ -249,7 +296,6 @@ function makeBarGlow(
     castShadow(context, bar, palette.light, alpha, blur * blurShare * scale, scale)
   }
   removeInside(context, bar)
-  if (spec.barStyle === 'solid') addCore(context, bar, palette, spec.glow)
   return { image: canvas, margin, cap, width, height, scale }
 }
 
@@ -291,23 +337,6 @@ function removeInside(context: CanvasRenderingContext2D, bar: BarShape): void {
   )
   context.fill()
   context.restore()
-}
-
-/** The hot middle of the bar: its bright tint, fading to nothing at its edges. */
-function addCore(
-  context: CanvasRenderingContext2D,
-  bar: BarShape,
-  palette: LightPalette,
-  glow: number,
-): void {
-  const core = context.createLinearGradient(bar.left, 0, bar.left + bar.width, 0)
-  for (const [across, share] of CORE_PROFILE) {
-    core.addColorStop(across, withAlpha(palette.bright, CORE_ALPHA * glow * share))
-  }
-  context.fillStyle = core
-  context.beginPath()
-  context.roundRect(bar.left, bar.top, bar.width, bar.height, bar.radius)
-  context.fill()
 }
 
 /** A small round light with a bright centre and a soft edge. */

@@ -21,6 +21,15 @@ export const BLACK_KEY_WIDTH_RATIO = 0.62
 
 const cache = new Map<string, readonly KeyRect[]>()
 
+/**
+ * The range that was asked for last, and its keys. The sky asks for the same
+ * piano once for every note it draws, on every frame: that range is found by
+ * comparing two numbers, without building the text the cache is looked up by.
+ */
+let latestFirst = Number.NaN
+let latestLast = Number.NaN
+let latestRects: readonly KeyRect[] = []
+
 /** Number of white keys in the range. */
 export function whiteKeyCount(range: PianoRange): number {
   let count = 0
@@ -36,10 +45,22 @@ export function whiteKeyCount(range: PianoRange): number {
  * white keys on either side. The same array is returned for the same range.
  */
 export function keyRects(range: PianoRange): readonly KeyRect[] {
-  const key = `${range.first}:${range.last}`
-  const cached = cache.get(key)
-  if (cached) return cached
+  if (range.first === latestFirst && range.last === latestLast) return latestRects
 
+  const key = `${range.first}:${range.last}`
+  let rects = cache.get(key)
+  if (!rects) {
+    rects = layOutKeys(range)
+    cache.set(key, rects)
+  }
+  latestFirst = range.first
+  latestLast = range.last
+  latestRects = rects
+  return rects
+}
+
+/** Works out where the keys of a range sit. Done once for each range: `keyRects` remembers the result. */
+function layOutKeys(range: PianoRange): readonly KeyRect[] {
   const whites = whiteKeyCount(range)
   const whiteWidth = whites > 0 ? 1 / whites : 0
   const blackWidth = whiteWidth * BLACK_KEY_WIDTH_RATIO
@@ -58,9 +79,7 @@ export function keyRects(range: PianoRange): readonly KeyRect[] {
       whitesBefore++
     }
   }
-  const frozen = Object.freeze(rects)
-  cache.set(key, frozen)
-  return frozen
+  return Object.freeze(rects)
 }
 
 /** The key for `midi`, or null when the note is not on this piano. */

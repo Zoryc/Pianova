@@ -6,6 +6,11 @@
  * `createAutoHide` holds the rules and knows nothing about the page: it is
  * told what happens and it is given a timer. `useAutoHide` connects it to the
  * mouse, the Tab key and the element that holds the menu.
+ *
+ * The pointer and the focus over the menu are followed in two ways: the menu
+ * says when they come and go, and they are looked up again at whatever the
+ * page hears from the mouse and the keyboard. Neither is enough alone (see
+ * `watchPage`).
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
@@ -169,7 +174,14 @@ export function useAutoHide({ enabled, pinned }: AutoHideOptions): AutoHideMenu 
   }, [])
 
   useEffect(() => autoHide.current?.setEnabled(enabled), [enabled])
-  useEffect(() => autoHide.current?.setPinned(pinned), [pinned])
+  useEffect(() => {
+    // A panel that closes hands the keyboard focus back to its button while
+    // React is changing the page, and React passes no events on at that
+    // moment: the menu is not told (see onFocus below). So the focus is looked
+    // up here, before the reason that kept the menu on screen goes away.
+    autoHide.current?.setFocused(holdsFocus(menu.current))
+    autoHide.current?.setPinned(pinned)
+  }, [pinned])
 
   // A hidden menu cannot take the focus, so this waits until it is drawn as shown.
   useLayoutEffect(() => {
@@ -218,7 +230,24 @@ function watchPage(
     autoHide.setFocused(holdsFocus(menu.current))
   }
 
+  /*
+   * The menu hears the mouse come and go (onMouseEnter and onMouseLeave), but
+   * not always. When what is under the mouse is taken off the page (the player
+   * line at "Close", the picture on the full-screen button), nothing tells
+   * the menu that the mouse has left it; and a mouse that rests on the menu
+   * while the page is drawn never arrives. So where the mouse is, is also
+   * read from whatever the browser says about it: that it is over something
+   * else (all that Chrome says when the page has changed under a mouse that
+   * stands still), that it moves, that one of its buttons is pressed.
+   */
+  function lookUpPointer(event: MouseEvent): void {
+    const under = whatIsUnderMouse(event, menu.current)
+    autoHide.setHovered(under instanceof Node && (menu.current?.contains(under) ?? false))
+  }
+
   function onMouseMove(event: MouseEvent): void {
+    // Before the check below: a mouse that stands still can be over something else than before.
+    lookUpPointer(event)
     // Browsers also send a "move" when the page changes under a mouse that is
     // standing still (a key lights up, the menu slides away). Only a mouse
     // that really is somewhere else has moved.
@@ -229,7 +258,8 @@ function watchPage(
     autoHide.activity()
   }
 
-  function onMouseDown(): void {
+  function onMouseDown(event: MouseEvent): void {
+    lookUpPointer(event)
     lookUpFocus()
     autoHide.activity()
   }
@@ -243,15 +273,30 @@ function watchPage(
     autoHide.activity()
   }
 
+  window.addEventListener('mouseover', lookUpPointer)
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mousedown', onMouseDown)
   // Before anything else on the page sees the key.
   window.addEventListener('keydown', onKeyDown, true)
   return () => {
+    window.removeEventListener('mouseover', lookUpPointer)
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mousedown', onMouseDown)
     window.removeEventListener('keydown', onKeyDown, true)
   }
+}
+
+/**
+ * What the mouse is over, as `event` says. Except when it names the menu
+ * itself: once something inside the menu has been taken away from under the
+ * mouse (the player line at "Close"), Chrome goes on naming the menu in its
+ * place, also where the menu no longer reaches, and may never say anything
+ * else while the mouse stands still. So the page is asked what is at that
+ * place. (A test's simulated page cannot say: the event is then believed.)
+ */
+function whatIsUnderMouse(event: MouseEvent, menu: Element | null): EventTarget | null {
+  if (event.target !== menu || typeof document.elementFromPoint !== 'function') return event.target
+  return document.elementFromPoint(event.clientX, event.clientY)
 }
 
 /** True when the keyboard focus is on something inside `container`. */

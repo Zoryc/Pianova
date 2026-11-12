@@ -6,8 +6,9 @@
  *
  * Covered here: the start overlay, every control of the top bar and of the
  * Settings panel with what it stores and shows, both reset flows, the
- * Transposed badge, the notes being played, the sound status and its retry,
- * where the keyboard focus goes, keyboard-only use, ARIA and wording.
+ * Transposed and Sustain badges, the notes being played, the sound status and
+ * its retry, where the keyboard focus goes, keyboard-only use (with what
+ * Escape takes back, one thing at a time), ARIA and wording.
  *
  * In this simulated browser nothing has a size, so the piano is the smallest
  * one: 37 keys, C3 to C6.
@@ -25,10 +26,8 @@ const audio = vi.hoisted(() => {
     status: 'idle' as 'idle' | 'loading' | 'ready' | 'fallback' | 'error',
     /** What start() leads to. */
     startsAs: 'ready' as 'idle' | 'loading' | 'ready' | 'fallback' | 'error',
-    /** How many attempts to start the sound were made. */
+    /** How many times the app asked for the sound to start. Every call counts. */
     starts: 0,
-    /** The attempt that is under way, if any. */
-    attempt: null as Promise<void> | null,
     calls: [] as string[],
   }
   function setStatus(next: typeof state.status): void {
@@ -38,17 +37,9 @@ const audio = vi.hoisted(() => {
   }
   const engine = {
     start(): Promise<void> {
-      // As in the real engine, calls made while an attempt is under way share
-      // it. Here an attempt lasts until what called it has finished, so the
-      // one click or key press that asks twice still makes one attempt.
-      if (state.attempt) return state.attempt
       state.starts += 1
       setStatus(state.startsAs)
-      const attempt = Promise.resolve().then(() => {
-        if (state.attempt === attempt) state.attempt = null
-      })
-      state.attempt = attempt
-      return attempt
+      return Promise.resolve()
     },
     getStatus: () => state.status,
     subscribe(listener: () => void): () => void {
@@ -125,7 +116,6 @@ beforeEach(async () => {
   audio.state.status = 'idle'
   audio.state.startsAs = 'ready'
   audio.state.starts = 0
-  audio.state.attempt = null
   audio.state.calls.length = 0
   bus.allOff()
   settingsStore.reset()
@@ -297,6 +287,11 @@ function transposedBadge(): HTMLElement | null {
   return within(sky()).queryByText(/^Transposed/)
 }
 
+/** The sign on the stage that sustain is on. It stays when the menu, and its switch, is hidden. */
+function sustainBadge(): HTMLElement | null {
+  return within(sky()).queryByText('Sustain on')
+}
+
 /** The text of an element with single spaces, as it is read. */
 function textOf(element: Element | null): string {
   return (element?.textContent ?? '').replace(/\s+/g, ' ').trim()
@@ -349,9 +344,9 @@ function nameOf(element: Element | null): string {
 const TOP_BAR_ORDER = ['Free Play', 'Volume', 'Sustain', 'Songs', 'Settings']
 
 /**
- * How long a test may take that walks through dozens of controls with Tab.
- * Such a walk takes about a second, which is too close to the usual limit
- * when the machine is busy.
+ * How long a test may take that walks through dozens of controls, with Tab or
+ * with one click after the other. Such a walk takes about a second, which is
+ * too close to the usual limit when the machine is busy.
  */
 const LONG_WALK_MS = 20_000
 
@@ -812,7 +807,7 @@ describe('full screen', () => {
     expect([...topBar().querySelectorAll('button')].at(-1)).toBe(settingsButton())
   })
 
-  it('fills the screen with the app and puts it back, and always says which of the two it will do', async () => {
+  it('fills the screen with the whole page and puts it back, and always says which of the two it will do', async () => {
     const user = await startApp()
     const button = fullScreenButton()
     // The last control of the top bar: a small drawing, named for screen readers and in a tooltip.
@@ -823,10 +818,9 @@ describe('full screen', () => {
     expect(wordsOn(button)).toBe('')
 
     await user.click(button)
+    // Full screen is asked for the whole page, once: everything the app draws is in it.
     expect(browser.requests).toHaveLength(1)
-    // What fills the screen is the app, or what the app is in.
-    const app = found(document.querySelector('.app'), 'The app')
-    expect(browser.requests[0]?.contains(app)).toBe(true)
+    expect(browser.requests[0]).toBe(document.documentElement)
     expect(button.getAttribute('aria-label')).toBe('Leave full screen')
     expect(button.getAttribute('title')).toBe('Leave full screen')
     expect(browser.exits).toBe(0)
@@ -1075,8 +1069,9 @@ describe('the fine-tuning options of Settings', () => {
     expect(within(pianoTab).getByText('How notes are written on the piano.')).toBeTruthy()
 
     const look = await openSettings(user, 'Look')
-    expect(explanationOf(option(look, 'Light bars'))).toBe('Bars of light for the notes being played.')
-    expect(within(look).getByText('Bars of light for the notes being played.')).toBeTruthy()
+    const lightBars = 'Bars of light for the notes you play and the falling notes of a song.'
+    expect(explanationOf(option(look, 'Light bars'))).toBe(lightBars)
+    expect(within(look).getByText(lightBars)).toBeTruthy()
   })
 
   it('touch: a slider from 10% to 100% that sets how hard notes are played', async () => {
@@ -1332,17 +1327,23 @@ describe('Reset all settings', () => {
     expect(
       within(panel).getByText('Puts every setting and every key back to how it was at the start.'),
     ).toBeTruthy()
+    // The line that says the reset was done is there, and says nothing yet.
+    const done = within(panel).getByRole('status')
+    expect(done.textContent).toBe('')
 
     await user.click(within(panel).getByRole('button', { name: 'Reset all settings' }))
     expect(within(panel).queryByRole('button', { name: 'Reset all settings' })).toBeNull()
     expect(within(panel).getByText('Really reset?')).toBeTruthy()
     expect(settingsStore.get()).toBe(before)
+    expect(done.textContent).toBe('')
 
     await user.click(within(panel).getByRole('button', { name: 'No' }))
     expect(settingsStore.get()).toBe(before)
     expect(within(panel).queryByText('Really reset?')).toBeNull()
     expect(within(panel).getByRole('button', { name: 'Reset all settings' })).toBeTruthy()
+    expect(within(panel).getByRole('status').textContent).toBe('')
     expect(transposedBadge()?.textContent).toBe('Transposed +5')
+    expect(sustainBadge()).not.toBeNull()
     expect(pianoKey('Do2, key Z')).toBeTruthy()
   })
 
@@ -1350,6 +1351,7 @@ describe('Reset all settings', () => {
     const user = await startApp()
     act(() => settingsStore.set(CHANGED))
     const panel = await openSettings(user, 'About')
+    const done = within(panel).getByRole('status')
 
     await user.click(within(panel).getByRole('button', { name: 'Reset all settings' }))
     await user.click(within(panel).getByRole('button', { name: 'Yes' }))
@@ -1357,10 +1359,16 @@ describe('Reset all settings', () => {
     expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
     expect(saved()).toEqual(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)))
 
-    // The screen follows: the question is gone, the badge too, and the piano and the top bar are as at the start.
+    // The tab says so, in one line. It is the line that was there, empty, all
+    // along: that is what makes a screen reader speak it.
+    expect(within(panel).getByRole('status')).toBe(done)
+    expect(done.textContent).toBe('Everything is back to how it was at the start.')
+
+    // The screen follows: the question is gone, the badges too, and the piano and the top bar are as at the start.
     expect(within(panel).queryByText('Really reset?')).toBeNull()
     expect(within(panel).getByRole('button', { name: 'Reset all settings' })).toBeTruthy()
     expect(transposedBadge()).toBeNull()
+    expect(sustainBadge()).toBeNull()
     expect(pianoKey('C4, key A')).toBeTruthy()
     expect(piano().getAttribute('data-key-style')).toBe('classic')
     expect(piano().querySelectorAll('.piano-key__cap')).toHaveLength(18)
@@ -1597,14 +1605,56 @@ describe('Customize keys and "Reset to default keys"', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('Transposed badge and the notes being played', () => {
-  it('shows the hint while nothing was played yet and no badge while the transpose is 0', async () => {
+describe('Transposed badge, Sustain badge and the notes being played', () => {
+  it('shows the hint while nothing was played yet, and no badge while the transpose is 0 and sustain is off', async () => {
     await startApp()
     expect(hintIsShown()).toBe(true)
     expect(playedNotes()).toEqual([])
     expect(within(sky()).queryByRole('list')).toBeNull()
     expect(transposedBadge()).toBeNull()
     expect(screen.queryByText(/Transposed/)).toBeNull()
+    expect(sustainBadge()).toBeNull()
+    expect(screen.queryByText(/Sustain on/)).toBeNull()
+  })
+
+  // Space switches sustain while the menu, and the switch in it, is hidden.
+  // The badge is the sign that stays on the stage.
+  it('shows a quiet "Sustain on" badge next to the Transposed badge for as long as sustain is on', async () => {
+    const user = await startApp()
+
+    await user.keyboard('[Space]')
+    const badge = found(sustainBadge(), 'The Sustain badge')
+    expect(badge.textContent).toBe('Sustain on')
+    // Next to the sound status, and not part of it: it is not read out with it.
+    expect(badge.parentElement).toBe(soundStatus().parentElement)
+    expect(badge.closest('[role="status"], [aria-live]')).toBeNull()
+    // The top bar keeps saying "Sustain On" in its own words: nothing there is renamed.
+    expect(wordsOn(within(topBar()).getByRole('switch', { name: 'Sustain' }))).toBe('Sustain On')
+
+    await user.keyboard('[Space]')
+    expect(sustainBadge()).toBeNull()
+
+    // The two switches show it as well.
+    await user.click(within(topBar()).getByRole('switch', { name: 'Sustain' }))
+    expect(sustainBadge()).not.toBeNull()
+    const sound = await openSettings(user, 'Sound')
+    await user.click(within(sound).getByRole('switch', { name: 'Sustain' }))
+    expect(sustainBadge()).toBeNull()
+    await user.click(within(sound).getByRole('switch', { name: 'Sustain' }))
+    expect(sustainBadge()).not.toBeNull()
+
+    // With the piano transposed too, the two badges stand side by side and look alike.
+    await user.click(within(sound).getByRole('button', { name: 'Transpose up' }))
+    const transposed = found(transposedBadge(), 'The Transposed badge')
+    expect(transposed.nextElementSibling).toBe(sustainBadge())
+    expect(sustainBadge()?.className).toBe(transposed.className)
+
+    // It stays while notes are played and while Settings is closed.
+    await user.click(settingsButton())
+    await user.keyboard('[KeyA>]')
+    expect(sustainBadge()?.textContent).toBe('Sustain on')
+    await user.keyboard('[/KeyA]')
+    expect(sustainBadge()?.textContent).toBe('Sustain on')
   })
 
   it('shows the badge next to the sound status as soon as the transpose is not 0, with its sign', async () => {
@@ -2031,7 +2081,7 @@ describe('after a click with the mouse the player can go straight back to playin
     await user.click(within(player).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
     await expectStraightBackToPlaying(user)
-  })
+  }, LONG_WALK_MS)
 
   it('Customize keys: a piano key that was clicked and given a key does not keep the focus', async () => {
     const user = await startApp()
@@ -2444,7 +2494,7 @@ describe('keyboard only', () => {
     // A piano key must not keep the keyboard once customizing is over.
     expect(piano().contains(document.activeElement)).toBe(false)
     expect(document.activeElement).toBe(settingsButton())
-  })
+  }, LONG_WALK_MS)
 
   // Space is the sustain key everywhere and never presses the button that has
   // the focus. While customizing, the piano keys are such buttons: Enter is
@@ -2464,7 +2514,7 @@ describe('keyboard only', () => {
     await user.keyboard('[Space]')
     expect(settingsStore.get().sustain).toBe(false)
     expect(piano().querySelector('.is-selected')).toBeNull()
-  })
+  }, LONG_WALK_MS)
 
   it.each(['Enter', 'Space'])(
     'the start overlay is one button, and %s on it starts the app once and does nothing else',
@@ -2627,6 +2677,27 @@ describe('keyboard only', () => {
     },
   )
 
+  // And the same in Songs, whose "Play" buttons close the panel as well.
+  it.each([
+    ['Enter on "Close Songs"', /^Close Songs$/, '[Enter]'],
+    ['Enter on the "Play" button of a song', /^Play Twinkle/, '[Enter]'],
+    ['Escape on a button of the panel', /^Import a MIDI file$/, '[Escape]'],
+  ] as const)(
+    '%s does not drop the focus on the floor either when Songs was opened with the mouse',
+    async (_what, name, keys) => {
+      const user = await startApp()
+      await user.click(songsButton())
+      const songs = found(panelNamed('Songs'), 'The Songs panel')
+      await tabTo(user, within(songs).getByRole('button', { name }))
+
+      await user.keyboard(keys)
+
+      expect(panelNamed('Songs')).toBeNull()
+      expect(document.activeElement).not.toBe(document.body)
+      expect(document.activeElement).toBe(songsButton())
+    },
+  )
+
   // Escape leaves customizing. A piano key that had the focus is then no
   // longer a tab stop, and the focus must not be lost with it either.
   it('Escape on a focused piano key leaves customizing without dropping the keyboard focus on the floor', async () => {
@@ -2645,8 +2716,164 @@ describe('keyboard only', () => {
     // And the piano plays again at once.
     await user.keyboard('[KeyA>]')
     expect(heldNotes()).toEqual([60])
-  })
+  }, LONG_WALK_MS)
 
+  // -------------------------------------------------------------------------
+  // Escape takes back one thing at a time, always in the same order: the
+  // piano key that waits for a computer key, the open song options, the open
+  // panel, and last the keyboard focus when it is inside the menu (which can
+  // then hide). With none of these the key is left to the browser. A key that
+  // is held down sends its press again and again: Escape still does one thing.
+  // -------------------------------------------------------------------------
+
+  const ESCAPE = { code: 'Escape', key: 'Escape' }
+
+  /**
+   * Presses Escape where the keyboard focus is, holds it down for `repeats`
+   * more presses that the keyboard then sends by itself, and lets go. True
+   * when the app used the press up, false when it left it to the browser.
+   */
+  function pressEscape(repeats: number): boolean {
+    const focused = (): Element => document.activeElement ?? document.body
+    // fireEvent returns false when something cancelled the key.
+    const usedUp = !fireEvent.keyDown(focused(), ESCAPE)
+    for (let repeat = 0; repeat < repeats; repeat += 1) {
+      fireEvent.keyDown(focused(), { ...ESCAPE, repeat: true })
+    }
+    fireEvent.keyUp(focused(), ESCAPE)
+    return usedUp
+  }
+
+  const ESCAPE_PRESSES = [
+    ['pressed and let go', 0],
+    ['held down', 5],
+  ] as const
+
+  /** Puts a song in the player and pauses it at once, so that the only notes are the player's own. */
+  async function loadPausedSong(user: User): Promise<HTMLElement> {
+    await user.click(songsButton())
+    await user.click(screen.getByRole('button', { name: /^Play Twinkle/ }))
+    const player = screen.getByRole('region', { name: 'Song player' })
+    await user.click(within(player).getByRole('button', { name: 'Pause' }))
+    return player
+  }
+
+  function songOptions(): HTMLElement | null {
+    return screen.queryByRole('group', { name: 'Song options' })
+  }
+
+  it.each(ESCAPE_PRESSES)(
+    'Escape, %s, takes back one thing: the piano key that waits, then the song options, then the panel',
+    async (_how, repeats) => {
+      const user = await startApp()
+      const player = await loadPausedSong(user)
+      const panel = await openSettings(user, 'Keys')
+      // The piano key of the computer key A, wherever the song has put the keys.
+      const waiting = found(
+        piano().querySelector<HTMLElement>('.piano-key[aria-label$=", key A"]'),
+        'The piano key of A',
+      )
+      await user.click(waiting)
+      await user.click(within(player).getByRole('button', { name: 'Song options' }))
+      expect(waiting.classList.contains('is-selected')).toBe(true)
+      expect(songOptions()).not.toBeNull()
+      const before = settingsStore.get()
+
+      // 1. The piano key no longer waits. Everything else is as it was.
+      expect(pressEscape(repeats)).toBe(true)
+      expect(piano().querySelector('.is-selected')).toBeNull()
+      expect(songOptions()).not.toBeNull()
+      expect(panelNamed('Settings')).toBe(panel)
+      expect(isCustomizing()).toBe(true)
+
+      // 2. The song options close. The panel stays.
+      expect(pressEscape(repeats)).toBe(true)
+      expect(songOptions()).toBeNull()
+      expect(panelNamed('Settings')).toBe(panel)
+      expect(isCustomizing()).toBe(true)
+
+      // 3. The panel closes. The song stays in the player.
+      expect(pressEscape(repeats)).toBe(true)
+      expect(panelNamed('Settings')).toBeNull()
+      expect(isCustomizing()).toBe(false)
+      expect(screen.getByRole('region', { name: 'Song player' })).toBe(player)
+
+      // 4. Nothing is left to take back: the key is the browser's.
+      expect(keyboardHolder()).toBe(NOTHING)
+      expect(pressEscape(repeats)).toBe(false)
+      expect(screen.getByRole('region', { name: 'Song player' })).toBe(player)
+      // Escape changed no key and no setting on the way.
+      expect(settingsStore.get()).toBe(before)
+    },
+    LONG_WALK_MS,
+  )
+
+  it.each(ESCAPE_PRESSES)(
+    'Escape, %s, closes song options used with the keyboard, then lets go of the menu, then is left to the browser',
+    async (_how, repeats) => {
+      const user = await startApp()
+      const player = await loadPausedSong(user)
+      const optionsButton = within(player).getByRole('button', { name: 'Song options' })
+      await tabTo(user, optionsButton)
+      await user.keyboard('[Enter]')
+      expect(optionsButton.getAttribute('aria-expanded')).toBe('true')
+      const options = found(songOptions(), 'The song options')
+      await tabTo(user, within(options).getByRole('switch', { name: 'Melody only' }))
+
+      // 1. The options close. The focus is not lost with them: it is on their button.
+      expect(pressEscape(repeats)).toBe(true)
+      expect(songOptions()).toBeNull()
+      expect(optionsButton.getAttribute('aria-expanded')).toBe('false')
+      expect(document.activeElement).toBe(optionsButton)
+
+      // 2. The menu lets go of the keyboard. The song stays in the player.
+      expect(pressEscape(repeats)).toBe(true)
+      expect(keyboardHolder()).toBe(NOTHING)
+      expect(screen.getByRole('region', { name: 'Song player' })).toBe(player)
+
+      // 3. Nothing is left to take back: the key is the browser's.
+      expect(pressEscape(repeats)).toBe(false)
+      expect(screen.getByRole('region', { name: 'Song player' })).toBe(player)
+      await expectKeysToPlay(user)
+    },
+    LONG_WALK_MS,
+  )
+
+  // Tab brings the hidden menu back and puts the keyboard in it, and the menu
+  // stays for as long as the keyboard is there. Escape is the way out again.
+  it('Escape takes the keyboard out of the menu that Tab brought back, and the menu hides again', () => {
+    vi.useFakeTimers()
+    try {
+      drawApp()
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(START_TEXT) }))
+      const menu = found(topBar().closest('header'), 'The menu')
+      const isHidden = (): boolean => menu.classList.contains('menu--hidden')
+      act(() => {
+        vi.advanceTimersByTime(AUTO_HIDE_DELAY_MS)
+      })
+      fireEvent.keyDown(document.body, { code: 'Tab', key: 'Tab' })
+      fireEvent.keyUp(document.body, { code: 'Tab', key: 'Tab' })
+      expect(isHidden()).toBe(false)
+      expect(menu.contains(document.activeElement)).toBe(true)
+
+      expect(pressEscape(0)).toBe(true)
+      expect(keyboardHolder()).toBe(NOTHING)
+      // The menu is given its usual time, and then goes.
+      expect(isHidden()).toBe(false)
+      act(() => {
+        vi.advanceTimersByTime(AUTO_HIDE_DELAY_MS)
+      })
+      expect(isHidden()).toBe(true)
+
+      // Escape pressed nothing and changed nothing, and the next one is the browser's.
+      expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(pressEscape(0)).toBe(false)
+      expect(isHidden()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -2928,7 +3155,7 @@ describe('ARIA', () => {
       expect(region, textOf(line)).not.toBeNull()
       expect(region !== null && liveRegions.has(region), textOf(line)).toBe(true)
     }
-  })
+  }, LONG_WALK_MS)
 
   it('says of each panel what it is, and which button opened it', async () => {
     const user = await startApp()
@@ -3265,6 +3492,7 @@ describe('no stuck notes and no lost settings', () => {
     expect(volume.getAttribute('aria-valuetext')).toBe('30%')
     expect(screen.getByRole('switch', { name: 'Sustain' }).getAttribute('aria-checked')).toBe('true')
     expect(transposedBadge()?.textContent).toBe('Transposed +4')
+    expect(sustainBadge()?.textContent).toBe('Sustain on')
     // The piano: where the keys sit, what is written on them, how they are drawn, the colour of the light.
     expect(pianoKey('C5, key A')).toBeTruthy()
     expect(piano().querySelectorAll('.piano-key__cap')).toHaveLength(0)

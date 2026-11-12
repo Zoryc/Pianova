@@ -16,7 +16,7 @@ export interface KeyboardInputOptions {
   onToggleSustain?(): void
   /** How hard new notes are played (0..1). Called on key down. Defaults to the bus default. */
   getVelocity?(): number
-  /** Defaults to `window`. Also receives the `blur` listener. */
+  /** Defaults to `window`. Also receives the `blur`, `focusin` and `click` listeners. */
   target?: KeyEventTarget
 }
 
@@ -119,6 +119,19 @@ export function attachKeyboardInput(options: KeyboardInputOptions): () => void {
   }
 
   /*
+   * The list of a drop-down and the colour picker are pop-ups of the
+   * browser's own. While one is open, Chrome and Edge keep every key event
+   * to themselves, key ups included, and the window does not lose focus: a
+   * key let go at that moment would leave its note sounding. So the keyboard
+   * lets go of its notes as soon as such a control takes over: when it gets
+   * the focus, or when it is clicked (a colour picker can be opened by a
+   * click made from code, without ever getting the focus).
+   */
+  function handlePopUpControl(event: Event): void {
+    if (opensBrowserPopUp(event.target)) releaseAll()
+  }
+
+  /*
    * The bus says "off" once nobody holds a note any more. When someone else
    * caused that (for example `bus.allOff()` when the piano moves), the keys
    * that started the note are still down but no longer hold it.
@@ -135,12 +148,17 @@ export function attachKeyboardInput(options: KeyboardInputOptions): () => void {
   target.addEventListener('keyup', handleKeyUp)
   // Key ups that happen while another window has focus never reach the page.
   target.addEventListener('blur', releaseAll)
+  // Nor do key ups that happen while a pop-up of the browser is open.
+  target.addEventListener('focusin', handlePopUpControl)
+  target.addEventListener('click', handlePopUpControl)
   pageDocument?.addEventListener('visibilitychange', handleVisibilityChange)
 
   return () => {
     target.removeEventListener('keydown', handleKeyDown)
     target.removeEventListener('keyup', handleKeyUp)
     target.removeEventListener('blur', releaseAll)
+    target.removeEventListener('focusin', handlePopUpControl)
+    target.removeEventListener('click', handlePopUpControl)
     pageDocument?.removeEventListener('visibilitychange', handleVisibilityChange)
     stopFollowingBus()
     releaseAll()
@@ -158,6 +176,18 @@ export function isTextEntryTarget(target: unknown): boolean {
   if (tag !== 'input') return false
   // An <input> with no type, or one the list does not know, is a text field.
   return !NON_TEXT_INPUT_TYPES.has(lowerCased(element.type))
+}
+
+/**
+ * True for a control that opens a pop-up of the browser's own: a <select>
+ * (its list) or an <input type="color"> (the colour picker). Duck-typed like
+ * `isTextEntryTarget`, so plain objects work in tests.
+ */
+function opensBrowserPopUp(target: unknown): boolean {
+  if (typeof target !== 'object' || target === null) return false
+  const element = target as { tagName?: unknown; type?: unknown }
+  const tag = lowerCased(element.tagName)
+  return tag === 'select' || (tag === 'input' && lowerCased(element.type) === 'color')
 }
 
 function lowerCased(value: unknown): string {

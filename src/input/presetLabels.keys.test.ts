@@ -62,6 +62,12 @@ describe.each(KEY_PRESETS)('the "$name" layout', ({ bindings }) => {
     }
   })
 
+  /*
+   * The next two are true of the three layouts docs/INTERFACE.md 5.5 lists,
+   * and are what makes them easy to learn. The spec gives the layouts as a
+   * table, not as rules: a new layout that is meant to break one of them
+   * changes these tests with it.
+   */
   it('goes up the piano from left to right along every row of the keyboard', () => {
     for (const codes of ROWS) {
       const slots = codes

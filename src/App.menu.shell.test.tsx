@@ -155,6 +155,35 @@ function moveMouse(from: Element | null, to: Element): void {
   fireEvent.mouseMove(to, { screenX: mouseX, screenY: 300 })
 }
 
+/**
+ * What the page hears after the part of the menu under the mouse was taken off
+ * the page. A browser sends no "mouse out" for an element that is gone, so
+ * nothing tells the menu that the mouse has left it. What comes instead
+ * depends on the browser, and on whether the mouse moves: a menu that only
+ * coped with one of these would stay on screen for good after the others.
+ * `from` is the part of the menu the mouse was over.
+ */
+const AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE: readonly [string, (from: Element) => void][] = [
+  [
+    'the mouse moves on over the sky',
+    (from) => {
+      // The menu is left (told to the menu alone), the sky is entered, and the mouse is somewhere new.
+      fireEvent(menu(), new MouseEvent('mouseleave', { bubbles: false, relatedTarget: sky() }))
+      fireEvent.mouseOver(sky(), { relatedTarget: from })
+      mouseX += 7
+      fireEvent.mouseMove(sky(), { screenX: mouseX, screenY: 300 })
+    },
+  ],
+  [
+    'the mouse stands still, and the browser sends a "move" to where it already is',
+    () => fireEvent.mouseMove(sky(), { screenX: mouseX, screenY: 300 }),
+  ],
+  [
+    'the mouse stands still, and the browser only says that it is over the sky now',
+    (from) => fireEvent.mouseOver(sky(), { relatedTarget: from }),
+  ],
+]
+
 describe('the menu stays while the mouse is over it', () => {
   it('over the top bar, and hides 2.5 seconds after the mouse has left it', () => {
     startApp()
@@ -184,29 +213,40 @@ describe('the menu stays while the mouse is over it', () => {
     expect(isHidden()).toBe(true)
   })
 
-  it('hides again after a song was closed with the mouse, once the mouse is over the sky', () => {
-    // "Close" is in the player line, which goes away under the mouse. A
-    // browser sends no "mouse out" for an element that is no longer on the
-    // page: the next thing the page hears is the mouse arriving on what is
-    // now under it (the sky), coming from the menu. From then on the mouse
-    // is not over the menu, and it must hide like any other time.
+  // "Close" is in the player line, which goes away under the mouse: the mouse
+  // is then over the sky, and the menu must hide like any other time.
+  it.each(AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE)(
+    'hides again after a song was closed with the mouse, which is then over the sky (%s)',
+    (_what, browserSays) => {
+      startApp()
+      act(() => {
+        playSong(A_STARTER_SONG)
+      })
+      const close = button('Close')
+      moveMouse(sky(), close)
+      wait(AUTO_HIDE_DELAY_MS * 2)
+      expect(isHidden()).toBe(false)
+
+      clickWithMouse(close)
+      expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
+      browserSays(menu())
+
+      wait(AUTO_HIDE_DELAY_MS - 1)
+      expect(isHidden()).toBe(false)
+      wait(1)
+      expect(isHidden()).toBe(true)
+      expect(root().className).toBe('app cursor-hidden')
+    },
+  )
+
+  it('is seen under a mouse that was already resting on it when the app started', () => {
+    // The start overlay covered the menu: the mouse never "entered" it. The
+    // first thing the page hears is a move over the bar.
     startApp()
-    act(() => {
-      playSong(A_STARTER_SONG)
-    })
-    const close = button('Close')
-    moveMouse(sky(), close)
-    clickWithMouse(close)
-    expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
-
-    // What Chrome sends next: the menu is left (told to the menu alone), the sky is entered.
-    fireEvent(menu(), new MouseEvent('mouseleave', { bubbles: false, relatedTarget: sky() }))
-    fireEvent.mouseOver(sky(), { relatedTarget: menu() })
-    fireEvent.mouseMove(sky(), { screenX: 600, screenY: 420 })
-
-    wait(AUTO_HIDE_DELAY_MS)
-    expect(isHidden()).toBe(true)
-    expect(root().className).toBe('app cursor-hidden')
+    mouseX += 7
+    fireEvent.mouseMove(button('Songs'), { screenX: mouseX, screenY: 300 })
+    wait(AUTO_HIDE_DELAY_MS * 4)
+    expect(isHidden()).toBe(false)
   })
 })
 
@@ -252,23 +292,39 @@ describe('the menu and the full-screen button', () => {
     expect(button('Leave full screen')).toBe(fullScreen)
   })
 
-  it('hides after full screen was started with the mouse, once the mouse is over the sky', () => {
-    // The button changes its picture when the screen is filled, so the
-    // picture the mouse was on is taken off the page. In full screen the page
-    // has moved up under the mouse, which is now over the sky. As after
-    // "Close" above, the browser sends no "mouse out" for the picture that
-    // is gone: it only says that the sky is entered, coming from the button.
+  // The button changes its picture when the screen is filled, so the picture
+  // the mouse was on is taken off the page. In full screen the page has moved
+  // up under the mouse, which is now over the sky. As after "Close" above, the
+  // browser sends no "mouse out" for the picture that is gone.
+  it.each(AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE)(
+    'hides after full screen was started with the mouse, which is then over the sky (%s)',
+    (_what, browserSays) => {
+      startApp()
+      const fullScreen = button('Full screen')
+      const picture = fullScreen.querySelector('path') as SVGPathElement
+      moveMouse(sky(), picture)
+      fireEvent.click(picture, { detail: 1 })
+      browserShows(document.documentElement)
+      expect(picture.isConnected).toBe(false)
+      browserSays(fullScreen)
+
+      wait(AUTO_HIDE_DELAY_MS - 1)
+      expect(isHidden()).toBe(false)
+      wait(1)
+      expect(isHidden()).toBe(true)
+    },
+  )
+
+  it('hides too when the browser looks where the mouse is before the button has changed its picture', () => {
+    // Which of the two comes first was not seen in a real browser. This is the
+    // other order: the picture is still there, so the mouse is seen leaving it.
     startApp()
-    const fullScreen = button('Full screen')
-    const picture = fullScreen.querySelector('path') as SVGPathElement
+    const picture = button('Full screen').querySelector('path') as SVGPathElement
     moveMouse(sky(), picture)
     fireEvent.click(picture, { detail: 1 })
+    fireEvent.mouseOut(picture, { relatedTarget: sky() })
+    fireEvent.mouseOver(sky(), { relatedTarget: picture })
     browserShows(document.documentElement)
-    expect(picture.isConnected).toBe(false)
-
-    fireEvent(menu(), new MouseEvent('mouseleave', { bubbles: false, relatedTarget: sky() }))
-    fireEvent.mouseOver(sky(), { relatedTarget: fullScreen })
-    fireEvent.mouseMove(sky(), { screenX: 1500, screenY: 130 })
 
     wait(AUTO_HIDE_DELAY_MS)
     expect(isHidden()).toBe(true)
@@ -317,6 +373,78 @@ describe('the menu stays while the keyboard focus is inside it', () => {
     wait(AUTO_HIDE_DELAY_MS - 1)
     expect(isHidden()).toBe(false)
     wait(1)
+    expect(isHidden()).toBe(true)
+  })
+
+  it('until Escape lets go of it: the menu then hides like any other time, and Tab brings it back', () => {
+    startApp()
+    wait(AUTO_HIDE_DELAY_MS)
+    // A slip onto Tab while playing: the menu is back, with the focus on "Free Play".
+    tap('Tab', { key: 'Tab' })
+    wait(AUTO_HIDE_DELAY_MS * 4)
+    expect(isHidden()).toBe(false)
+
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    key('keyup', 'Escape')
+    expect(document.activeElement).toBe(document.body)
+    wait(AUTO_HIDE_DELAY_MS - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
+    expect(isHidden()).toBe(true)
+    expect(root().className).toBe('app cursor-hidden')
+
+    // With nothing left to take back, Escape is the browser's. Tab still brings the menu back.
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
+    key('keyup', 'Escape')
+    expect(isHidden()).toBe(true)
+    tap('Tab', { key: 'Tab' })
+    expect(isHidden()).toBe(false)
+    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Free Play' }))
+  })
+
+  it('through an Escape that is held down after it closed a panel: only a new press lets go', () => {
+    startApp()
+    pressEnterOn(button('Settings'))
+    key('keydown', 'Escape')
+    for (let repeat = 0; repeat < 5; repeat++) key('keydown', 'Escape', { repeat: true })
+    key('keyup', 'Escape')
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
+    expect(document.activeElement).toBe(button('Settings'))
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(isHidden()).toBe(false)
+
+    tap('Escape')
+    expect(document.activeElement).toBe(document.body)
+    wait(AUTO_HIDE_DELAY_MS)
+    expect(isHidden()).toBe(true)
+  })
+
+  it('and after Escape let go of it, for as long as something else keeps the menu', () => {
+    startApp()
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    act(() => player.pause())
+    button('Play').focus()
+
+    tap('Escape')
+    expect(document.activeElement).toBe(document.body)
+    // A song that is loaded and not playing keeps the menu; Escape is not a button of the player.
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(isHidden()).toBe(false)
+    expect(player.getState().status).toBe('paused')
+
+    // The mouse over the bar keeps it too, once the song plays again.
+    act(() => player.play())
+    button('Pause').focus()
+    moveMouse(sky(), button('Pause'))
+    tap('Escape')
+    expect(document.activeElement).toBe(document.body)
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(isHidden()).toBe(false)
+
+    moveMouse(button('Pause'), sky())
+    wait(AUTO_HIDE_DELAY_MS)
     expect(isHidden()).toBe(true)
   })
 
@@ -497,22 +625,39 @@ describe('Tab, pressed while the menu is hidden', () => {
   })
 })
 
-describe('an idle screen', () => {
-  it('runs no timer once the menu has hidden, and one countdown at most while it is shown', () => {
+describe('the countdown of the menu', () => {
+  // That the menu never has more than one countdown waiting, and none while it
+  // is hidden or has a reason to stay, is counted on its own clock in
+  // src/ui/useAutoHide.shell.test.ts. Here: what the player sees of it.
+  it('starts again at every move of the mouse, and is not put off by playing the piano', () => {
     startApp()
-    expect(vi.getTimerCount()).toBe(1)
     wait(AUTO_HIDE_DELAY_MS)
     expect(isHidden()).toBe(true)
-    expect(vi.getTimerCount()).toBe(0)
 
+    // Twenty moves, a tenth of a second apart: the menu is back at the first one.
+    for (let move = 0; move < 20; move++) {
+      moveMouse(null, sky())
+      expect(isHidden()).toBe(false)
+      wait(100)
+    }
+    // 2.5 seconds after the first move, which is 0.5 seconds after the last one, it is still there.
+    wait(500)
+    expect(isHidden()).toBe(false)
+
+    // A note and Space: the piano is played, the mouse has not moved.
     tap('KeyA')
     tap('Space')
-    expect(vi.getTimerCount()).toBe(0)
+    wait(AUTO_HIDE_DELAY_MS - 100 - 500 - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
+    expect(isHidden()).toBe(true)
 
-    for (let move = 0; move < 20; move++) moveMouse(null, sky())
-    expect(vi.getTimerCount()).toBe(1)
-    wait(AUTO_HIDE_DELAY_MS)
-    expect(vi.getTimerCount()).toBe(0)
+    // Once hidden it stays hidden, however long nothing moves and whatever is played.
+    tap('KeyA')
+    tap('Space')
+    wait(AUTO_HIDE_DELAY_MS * 4)
+    expect(isHidden()).toBe(true)
+    expect(root().className).toBe('app cursor-hidden')
   })
 })
 
@@ -531,7 +676,9 @@ describe('the mouse cursor', () => {
     wait(AUTO_HIDE_DELAY_MS)
     tap('KeyA')
     tap('KeyK')
-    tap('Escape')
+    // Nothing is open and the focus is not in the menu: Escape is left to the browser.
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
+    key('keyup', 'Escape')
     expect(root().className).toBe('app cursor-hidden')
     expect(isHidden()).toBe(true)
   })

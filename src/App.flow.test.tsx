@@ -970,9 +970,11 @@ describe('Space, the sustain key', () => {
   })
 
   // INTERFACE.md 5.4: Settings "is not modal: the piano keeps playing from
-  // the computer keyboard while it is open".
+  // the computer keyboard while it is open". The "Labels on the keys" list
+  // of the Piano tab is not among these controls: a list keeps the keys to
+  // itself while it has the focus (see 'focus goes back to the piano' below).
   it.each(SETTINGS_TABS)(
-    'toggles once and plays, whatever has the focus on the %s tab of Settings',
+    'toggles once and plays, whichever button, slider or link of Settings has the focus on its %s tab',
     async (tab) => {
       const user = await startApp()
       const settings = await openSettingsOn(user, tab)
@@ -1400,9 +1402,10 @@ describe('choosing your own keys', () => {
     expect(editorLead()).toBe(EDITOR_INSTRUCTION)
   })
 
-  // INTERFACE.md 5.0: Escape first lets go of the piano key that is waiting,
-  // then closes Settings. The spec does not cover an Escape that is held
-  // down. The app's choice: its repeats do not go on to close the panel.
+  // INTERFACE.md 5.0: Escape takes back one thing at a time: first the piano
+  // key that is waiting, then the open panel. An Escape that is held down
+  // never does more than one of these: its repeats do not go on to close the
+  // panel, and are used up, so that the browser does nothing with them either.
   it('cancels on Escape, and closes on the next Escape only once the first was let go', async () => {
     const user = await startApp()
     await selectPianoKey(user, 'C4, key A', 'C4')
@@ -1411,7 +1414,8 @@ describe('choosing your own keys', () => {
     expect(editorLead()).toBe(EDITOR_INSTRUCTION)
     expect(pianoKey('C4, key A').getAttribute('aria-pressed')).toBe('false')
 
-    repeatKey('Escape', 'Escape')
+    const leftToTheBrowser = repeatKey('Escape', 'Escape')
+    expect(leftToTheBrowser).toBe(false)
     expect(settingsPanel()).not.toBeNull()
     expect(isChoosingKeys()).toBe(true)
 
@@ -1752,6 +1756,33 @@ describe('choosing your own keys', () => {
     expect(editorMessage()).toBe('"Z" now plays C3. "A" no longer plays a note.')
   })
 
+  /*
+   * The line that says what the last change did names a computer key and the
+   * note it plays. Once the computer keys move lower or higher, or another
+   * keyboard type changes the letters on the piano, it is no longer true: it
+   * goes. The key that was chosen stays chosen.
+   */
+  it.each([
+    ['the computer keys are moved higher', /Higher/, 'on:76'],
+    ['another keyboard type is chosen', 'AZERTY', 'on:64'],
+  ] as const)(
+    'takes back what it said about the last change when %s',
+    async (_change, buttonName, noteOfTheNewKey) => {
+      const user = await startApp()
+      await selectPianoKey(user, 'E4, key D', 'E4')
+      await user.keyboard('[KeyM]')
+      expect(editorMessage()).toBe('"M" now plays E4. "D" no longer plays a note.')
+
+      await user.click(screen.getByRole('button', { name: buttonName }))
+      expect(editorMessage()).toBe('')
+      expect(editorLead()).toBe(EDITOR_INSTRUCTION)
+
+      expect(settingsStore.get().bindings).toEqual({ ...withoutKey(DEFAULT_BINDINGS, 'KeyD'), KeyM: 16 })
+      await user.keyboard('[KeyM>]')
+      expect(notes).toEqual([noteOfTheNewKey])
+    },
+  )
+
   it('selects a piano key with Enter for someone using the keyboard alone', async () => {
     const user = await startApp()
     await openEditor(user)
@@ -1890,9 +1921,11 @@ describe('random sessions', () => {
   /*
    * Plays, moves the computer keys, changes them one by one and by layout,
    * resizes the piano, opens and closes the panels, loses the window and
-   * hides the tab at random, with real key downs, repeats and key ups. Once
-   * every key is up again no note may be left sounding, and the keys must
-   * still be one per note.
+   * hides the tab at random, with real key downs, repeats and key ups.
+   *
+   * Nothing may be held right after the window lost the focus, the tab was
+   * hidden or the computer keys moved; once every key is up again no note may
+   * be left sounding; and the keys must still be one per note.
    *
    * A session is some 250 actions on the whole screen: it gets more time
    * than a test usually does, for a machine that is busy with other tests.
@@ -1919,6 +1952,10 @@ describe('random sessions', () => {
       const down = new Set<string>()
       const modifiers = { shiftKey: false, ctrlKey: false, altKey: false }
       const target = (): Element => document.activeElement ?? document.body
+      const pressKey = (code: string): void => {
+        fireEvent.keyDown(target(), { code, repeat: down.has(code), ...modifiers })
+        down.add(code)
+      }
       const click = (element: Element | null | undefined): void => {
         if (element instanceof HTMLButtonElement && !element.disabled) {
           fireEvent.click(element, { detail: 1 })
@@ -1943,73 +1980,90 @@ describe('random sessions', () => {
         if (settingsPanel() === null) click(button('Settings'))
         click(tabOfSettings(tab))
       }
-      let pianosSeen = 0
-      let keysChosen = 0
+      // What the screen showed on the way, to know that the session went where it was meant to.
+      let stepsWithAKeyWaiting = 0
+      let movesUnderAHeldNote = 0
+      const pianosShown = new Set<number>()
 
       try {
         for (let step = 0; step < 250; step += 1) {
           const roll = random()
           if (roll < 0.28) {
-            const code = pick(KEYS)
-            fireEvent.keyDown(target(), { code, repeat: down.has(code), ...modifiers })
-            down.add(code)
+            pressKey(pick(KEYS))
           } else if (roll < 0.52) {
             if (down.size === 0) continue
             const code = pick([...down])
             fireEvent.keyUp(target(), { code, ...modifiers })
             down.delete(code)
-          } else if (roll < 0.58) {
+          } else if (roll < 0.57) {
             const modifier = pick(MODIFIERS)
             modifiers[modifier] = !modifiers[modifier]
-          } else if (roll < 0.63) {
+          } else if (roll < 0.62) {
+            // "Lower" and "Higher" are on the Keys tab, and showing it lets go
+            // of every note. So a key goes down under the tab first, with Ctrl
+            // and Alt let go (a key pressed with them plays nothing): the
+            // computer keys then move while a note is held.
             showTab('Keys')
+            modifiers.ctrlKey = false
+            modifiers.altKey = false
+            pressKey(pick(KEYS))
+            const octave = settingsStore.get().baseOctave
+            const heldBefore = held().length
             click(button(random() < 0.5 ? /Higher/ : /Lower/))
-          } else if (roll < 0.68) {
-            click(button('Settings'))
-          } else if (roll < 0.72) {
-            click(tabOfSettings(pick(SETTINGS_TABS)))
-          } else if (roll < 0.8) {
-            if (isChoosingKeys()) {
-              click(pick([...piano().querySelectorAll('.piano-key')]))
-              keysChosen += 1
+            if (settingsStore.get().baseOctave !== octave) {
+              expect(held()).toEqual([])
+              if (heldBefore > 0) movesUnderAHeldNote += 1
             }
-          } else if (roll < 0.84) {
+          } else if (roll < 0.66) {
+            click(button('Settings'))
+          } else if (roll < 0.7) {
+            click(tabOfSettings(pick(SETTINGS_TABS)))
+          } else if (roll < 0.78) {
+            if (isChoosingKeys()) click(pick([...piano().querySelectorAll('.piano-key')]))
+          } else if (roll < 0.82) {
             for (const code of ['Escape', 'Backspace']) {
               if (random() < 0.5) {
                 fireEvent.keyDown(target(), { code })
                 fireEvent.keyUp(target(), { code })
               }
             }
-          } else if (roll < 0.86) {
+          } else if (roll < 0.84) {
             click(button('Close Settings'))
-          } else if (roll < 0.89) {
+          } else if (roll < 0.87) {
             showTab('Keys')
             click(button(pick(LAYOUTS)))
-          } else if (roll < 0.91) {
+          } else if (roll < 0.89) {
             showTab('Keys')
             click(button('Reset to default keys'))
-          } else if (roll < 0.93) {
+          } else if (roll < 0.91) {
             // Answers whatever question is waiting: about a layout, or about the reset.
             click(button(random() < 0.5 ? 'Yes' : 'No'))
-          } else if (roll < 0.95) {
+          } else if (roll < 0.93) {
+            // Another size than the one that is chosen, so that the piano changes.
             showTab('Piano')
-            click(button(pick(PIANO_SIZES)))
-            pianosSeen += 1
-          } else if (roll < 0.96) {
+            const isChosen = (size: string): boolean =>
+              button(size)?.getAttribute('aria-pressed') === 'true'
+            click(button(pick(PIANO_SIZES.filter((size) => !isChosen(size)))))
+          } else if (roll < 0.94) {
             fireEvent.click(emptySky(), { detail: 1 })
-          } else if (roll < 0.97) {
+          } else if (roll < 0.95) {
             click(button('Songs'))
-          } else if (roll < 0.985) {
-            // Keys let go while another window has the keyboard never reach the page.
+          } else if (roll < 0.98) {
             fireEvent.blur(window)
+            expect(held()).toEqual([])
+            // Keys let go while another window has the keyboard never reach the page.
             if (random() < 0.5) down.clear()
           } else {
             setPageVisibility('hidden')
+            expect(held()).toEqual([])
             setPageVisibility('visible')
           }
 
           const slots = Object.values(settingsStore.get().bindings)
           expect(new Set(slots).size).toBe(slots.length)
+
+          if (piano().querySelector('.piano-key.is-selected') !== null) stepsWithAKeyWaiting += 1
+          pianosShown.add(piano().querySelectorAll('.piano-key').length)
         }
 
         for (const code of [...down]) fireEvent.keyUp(target(), { code })
@@ -2017,9 +2071,12 @@ describe('random sessions', () => {
         setPageVisibility('visible')
       }
 
-      // The session did go through the new screen: keys were chosen and the piano changed.
-      expect(keysChosen).toBeGreaterThan(0)
-      expect(pianosSeen).toBeGreaterThan(0)
+      // The session did go through the screen: a piano key waited for a
+      // computer key, the piano became another one, and the computer keys
+      // moved under a note that was held.
+      expect(stepsWithAKeyWaiting).toBeGreaterThan(0)
+      expect(pianosShown.size).toBeGreaterThan(1)
+      expect(movesUnderAHeldNote).toBeGreaterThan(0)
 
       expect(held()).toEqual([])
       expect(nowPlaying()).toEqual([])

@@ -203,15 +203,19 @@ describe('colours at the edges', () => {
     expect(['#000000', '#ffffff']).toContain(inkOn(shown))
   })
 
-  it('keeps the colour it had when the picker hands over something that is no colour', () => {
+  it('falls back on the red of the start when it is handed something that is no colour', () => {
     render(<LiveTab />)
     fireEvent.change(colourPicker(), { target: { value: MY_PINK } })
 
     // Not possible with a real colour picker; a saved value could still be damaged.
     act(() => settingsStore.set({ customColour: 'pink' }))
 
-    expect(settingsStore.get().customColour).toMatch(/^#[0-9a-f]{6}$/i)
-    expect(ownSwatchColour()).toMatch(/^#[0-9a-f]{6}$/)
+    // The pink is not kept: anything that is not a colour becomes the default one.
+    expect(settingsStore.get().customColour).toBe(DEFAULT_SETTINGS.customColour)
+    expect(settingsStore.get().accent).toBe('custom')
+    expect(ownSwatchColour()).toBe('#ff2a2a')
+    expect(colourPicker().value).toBe('#ff2a2a')
+    expect(checkedSwatches()).toEqual(['Your colour'])
   })
 
   it('shows one chosen swatch whatever the saved colour is', () => {

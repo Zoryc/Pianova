@@ -1,7 +1,9 @@
 /**
  * Checks carried over from the old key geometry (one fixed row of 37 slots),
  * which pianoGeometry.ts replaced with a piano of any size. Most of what the
- * old tests asked for is asked in pianoRange.test.ts; these are the rest.
+ * old tests asked for is asked in pianoRange.test.ts; these are the rest,
+ * and one check of how the keys of a piano are remembered from one call to
+ * the next.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -50,6 +52,37 @@ describe('pianoGeometry: one key per note', () => {
     expect(rects.filter((rect) => rect.black)).toHaveLength(black)
     expect(whiteKeyCount(pianoRange(size, 3))).toBe(white)
   })
+
+  // The keys of the piano asked for last are remembered, and found again by
+  // its first and its last note. Two pianos that share one of the two must
+  // not be taken for each other.
+  it.each<[string, PianoSize, number, PianoSize, number]>([
+    ['their first note', 61, 3, 49, 3],
+    ['their last note', 88, 3, 37, 5],
+  ])(
+    'gives each piano its own keys when two pianos that share %s are asked for in turn',
+    (_shared, size, octave, otherSize, otherOctave) => {
+      const pianos = [pianoRange(size, octave), pianoRange(otherSize, otherOctave)] as const
+      const [one, other] = pianos
+      expect(one.first === other.first || one.last === other.last).toBe(true)
+      expect(one).not.toEqual(other)
+
+      const firstAnswers = pianos.map((range) => keyRects(range))
+      for (let turn = 0; turn < 3; turn++) {
+        pianos.forEach((range, index) => {
+          const rects = keyRects(range)
+          expect(rects).toHaveLength(range.last - range.first + 1)
+          expect(rects[0]?.midi).toBe(range.first)
+          expect(rects.at(-1)?.midi).toBe(range.last)
+          // One white key of the piano is as wide as the next: the width of this piano, not of the other.
+          expect(rects[0]?.width).toBeCloseTo(1 / whiteKeyCount(range), 10)
+          // The same answer as the first time, and a note is found on it.
+          expect(rects).toBe(firstAnswers[index])
+          expect(keyRectOf(range.last, range)).toBe(rects.at(-1))
+        })
+      }
+    },
+  )
 })
 
 describe('pianoGeometry: the keyboard zone', () => {

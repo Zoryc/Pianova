@@ -201,14 +201,20 @@ export function ConfirmButton({ label, onConfirm }: ConfirmButtonProps): JSX.Ele
     setAsking(question)
   }
 
+  function ask(event: MouseEvent): void {
+    if (isSecondClickOfDoubleClick(event)) return
+    show(true, event)
+  }
+
+  function answer(confirmed: boolean, event: MouseEvent): void {
+    if (isSecondClickOfDoubleClick(event)) return
+    show(false, event)
+    if (confirmed) onConfirm()
+  }
+
   if (!asking) {
     return (
-      <button
-        ref={resetButton}
-        type="button"
-        className="button"
-        onClick={(event) => show(true, event)}
-      >
+      <button ref={resetButton} type="button" className="button" onClick={ask}>
         {label}
       </button>
     )
@@ -220,10 +226,7 @@ export function ConfirmButton({ label, onConfirm }: ConfirmButtonProps): JSX.Ele
       <button
         type="button"
         className="button button--danger"
-        onClick={(event) => {
-          show(false, event)
-          onConfirm()
-        }}
+        onClick={(event) => answer(true, event)}
       >
         Yes
       </button>
@@ -231,10 +234,22 @@ export function ConfirmButton({ label, onConfirm }: ConfirmButtonProps): JSX.Ele
         ref={noButton}
         type="button"
         className="button"
-        onClick={(event) => show(false, event)}
+        onClick={(event) => answer(false, event)}
       >
         No
       </button>
     </span>
   )
+}
+
+/**
+ * The reset button and its two answers take each other's place, so the second
+ * click of a double-click lands on whatever has just appeared under the
+ * pointer: on "Yes" where the reset button was, or on the reset button where
+ * "Yes" was. Nobody chose that, so that click does nothing: the question
+ * stays, to be read, and an answer is not followed by the question again.
+ */
+function isSecondClickOfDoubleClick(event: MouseEvent): boolean {
+  // `detail` counts the clicks of a double-click: 1 for the first, 2 for the second.
+  return event.detail > 1
 }

@@ -5,7 +5,8 @@
  * The trails had tests of their own (the model, the canvas, and what they
  * cost). Most of what those asked for is asked of the sky in Sky.test.tsx and
  * skyModel.test.ts. The ones here are the rest: things the trails were held
- * to that no test of the sky said yet.
+ * to that no test of the sky said yet. The last check of the file is not
+ * carried over: it was added when this move was reviewed.
  *
  * As in Sky.test.tsx: the real <Sky /> on a real NoteBus, drawing on a
  * stand-in canvas with a hand-cranked frame clock (see skyTestKit.ts). The sky
@@ -15,7 +16,14 @@ import { StrictMode } from 'react'
 import type { JSX } from 'react'
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MAX_BASE_OCTAVE, MIN_BASE_OCTAVE, PIANO_SIZES, pianoRange } from '../../core/layout'
+import {
+  MAX_BASE_OCTAVE,
+  MIN_AUTO_KEY_WIDTH,
+  MIN_BASE_OCTAVE,
+  PIANO_SIZES,
+  pianoRange,
+  resolvePianoSize,
+} from '../../core/layout'
 import type { PianoRange } from '../../core/layout'
 import { NoteBus } from '../../core/noteBus'
 import { keyRectOf, keyRects, whiteKeyCount } from '../../core/pianoGeometry'
@@ -185,6 +193,14 @@ describe('the model: a bar and its key', () => {
     expect(fadeHeight(HEIGHT * 2)).toBeCloseTo(fadeHeight(HEIGHT) * 2, 10)
     expect(fadeHeight(HEIGHT)).toBeLessThan(HEIGHT)
   })
+
+  it('still gives a bar a whole pixel of width on a key that is hardly there', () => {
+    expect(barWidth(0)).toBeGreaterThanOrEqual(1)
+    // A black key of the full piano in a sky 20 pixels wide: a quarter of a pixel.
+    const narrowKey = keySpan(C_SHARP_4, FULL, 20).width
+    expect(narrowKey).toBeLessThan(1)
+    expect(barWidth(narrowKey)).toBeGreaterThanOrEqual(1)
+  })
 })
 
 describe('free play: where the bars stand', () => {
@@ -247,6 +263,14 @@ describe('free play: where the bars stand', () => {
     sky.bus.noteOff(C4, 'pointer')
     browser.playUntilIdle()
     expect(sky.bars()).toEqual([])
+  })
+
+  it('still draws a bar a whole pixel wide in a sky that is hardly there', () => {
+    browser.size.width = 20
+    const sky = mount()
+    sky.bus.noteOn(C_SHARP_4, 'keyboard')
+    browser.play(0.2)
+    expect(only(sky.bars()).width).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -479,4 +503,35 @@ describe('what the sky reads from the page', () => {
     expect(only(sky.context.texts).text).toBe('A')
     expect(only(sky.context.texts).font).toMatch(/^700 \d+px monospace$/)
   })
+})
+
+// Not carried over: this one came out of the review of the new sky. A key
+// letter is written on a bar that is 13 pixels wide or more, and that number
+// hangs together with another: "Auto" draws white keys down to
+// MIN_AUTO_KEY_WIDTH wide, and where they are exactly that wide the bars of
+// the black keys are at their narrowest, between 13 and 14 pixels. With the
+// full piano that is a window 1352 wide, a little under the common 1366. The
+// sharps and flats of a song must carry their letter there like other notes.
+describe('key letters on the narrowest keys that Auto draws', () => {
+  const hints = new Map<Midi, string>([[C_SHARP_4, 'W']])
+  const song = [note(C_SHARP_4, 1, 1)]
+
+  it.each([88, 61, 49] as const)(
+    'are written on black-key notes too, in the narrowest window where Auto shows %i keys',
+    (size) => {
+      const range = pianoRange(size, 3)
+      const width = whiteKeyCount(range) * MIN_AUTO_KEY_WIDTH
+      // One pixel narrower and Auto shows a smaller piano, whose keys are wider again.
+      expect(resolvePianoSize('auto', width)).toBe(size)
+      expect(resolvePianoSize('auto', width - 1)).not.toBe(size)
+
+      browser.size.width = width
+      const sky = mount({ range, falling: stillSong(song), hints })
+      const bar = only(sky.bars())
+      expect(bar.width).toBeCloseTo(barWidth(keySpan(C_SHARP_4, range, width).width), 6)
+      expect(bar.width).toBeGreaterThanOrEqual(13)
+      expect(bar.width).toBeLessThan(14)
+      expect(only(sky.context.texts).text).toBe('W')
+    },
+  )
 })

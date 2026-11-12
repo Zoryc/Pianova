@@ -320,6 +320,66 @@ describe('attachKeyboardInput: releasing notes', () => {
   })
 })
 
+describe('attachKeyboardInput: a pop-up of the browser takes the keys', () => {
+  /*
+   * While the list of a drop-down or the colour picker is open, the browser
+   * keeps every key event to itself: a key let go then sends no key up.
+   */
+  const DROP_DOWN = { tagName: 'SELECT' }
+  const COLOUR_PICKER = { tagName: 'INPUT', type: 'color' }
+
+  it.each([
+    ['a drop-down gets the focus', 'focusin', DROP_DOWN],
+    ['the colour picker is clicked', 'click', COLOUR_PICKER],
+  ])('releases every held note when %s', (_name, type, control) => {
+    const { bus, events, target, press } = setup()
+
+    press('KeyA')
+    press('KeyS')
+    target.fire(type, { target: control })
+
+    expect(summary(events)).toEqual(['on:60', 'on:62', 'off:60', 'off:62'])
+    expect(events.every((event) => event.source === 'keyboard')).toBe(true)
+    expect(bus.getActiveNotes().size).toBe(0)
+  })
+
+  it.each([
+    ['a drop-down', 'focusin', DROP_DOWN],
+    ['the colour picker', 'click', COLOUR_PICKER],
+  ])('plays at the next press of a key whose key up was kept by %s', (_name, type, control) => {
+    const { events, target, press, release } = setup()
+
+    press('KeyA')
+    target.fire(type, { target: control })
+    press('KeyA')
+    release('KeyA')
+
+    expect(summary(events)).toEqual(['on:60', 'off:60', 'on:60', 'off:60'])
+  })
+
+  it('keeps the notes when anything else gets the focus or is clicked', () => {
+    const { events, target, press } = setup()
+
+    press('KeyA')
+    for (const control of [FOCUSED_BUTTON, TEXT_FIELD, { tagName: 'INPUT', type: 'range' }, PAGE_BODY, null]) {
+      target.fire('focusin', { target: control })
+      target.fire('click', { target: control })
+    }
+
+    expect(summary(events)).toEqual(['on:60'])
+  })
+
+  it('only releases notes that the keyboard is holding', () => {
+    const { bus, target, press } = setup()
+
+    bus.noteOn(67, 'playback')
+    press('KeyA')
+    target.fire('focusin', { target: DROP_DOWN })
+
+    expect([...bus.getActiveNotes()]).toEqual([67])
+  })
+})
+
 describe('attachKeyboardInput: notes released by someone else', () => {
   it('no longer counts a key as holding a note that was released on the bus', () => {
     const { bus, events, notes, press, release } = setup()
@@ -623,10 +683,10 @@ describe('attachKeyboardInput: intercept', () => {
 })
 
 describe('attachKeyboardInput: detach', () => {
-  it('listens for keydown, keyup and blur on the target', () => {
+  it('listens for keydown, keyup, blur, focusin and click on the target', () => {
     const { target } = setup()
 
-    expect(target.listenedTypes()).toEqual(['blur', 'keydown', 'keyup'])
+    expect(target.listenedTypes()).toEqual(['blur', 'click', 'focusin', 'keydown', 'keyup'])
   })
 
   it('releases held notes and removes every listener', () => {

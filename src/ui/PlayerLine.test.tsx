@@ -11,10 +11,13 @@ import { player, songLibrary } from '../app/songsApp'
 import { PlayerLine, SongProgressLine } from './PlayerLine'
 import { SMALL_PIANO, addSong, resetSongs, showPiano } from './songsTestKit'
 import type { PartSpec } from './songsTestKit'
-import { closeSong, playSong } from './useSongs'
+import { LEAD_IN_SECONDS, closeSong, closeSongOptions, playSong } from './useSongs'
 
 const MELODY_HINT = 'Plays one note at a time: the highest one.'
 const FIT_HINT = 'Moves notes that are too low or too high onto the piano you see.'
+
+/** Every song waits two seconds before its first note: this long on the fake clock. */
+const LEAD_IN_MS = LEAD_IN_SECONDS * 1000
 
 /** Adds a song, puts the two lines on the page and plays the song. Returns its id. */
 async function playOnScreen(name: string, ...parts: PartSpec[]): Promise<string> {
@@ -166,7 +169,7 @@ describe('the player line', () => {
   it('shows the Play button again when the song has reached its end', async () => {
     useFakeClock()
     await playOnScreen('Short.mid', { notes: [60, 62] })
-    letTimePass(1100)
+    letTimePass(LEAD_IN_MS + 1100)
 
     expect(player.getState()).toMatchObject({ status: 'stopped', position: 0 })
     expect(button('Play')).toBeTruthy()
@@ -212,12 +215,13 @@ describe('the position in the song', () => {
     await playOnScreen('Moonlight.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
     const position = slider('Position in the song')
 
+    // Four seconds of notes after the two seconds in which the first one falls.
     expect(position.min).toBe('0')
-    expect(Number(position.max)).toBeCloseTo(4)
+    expect(Number(position.max)).toBeCloseTo(6)
     expect(position.value).toBe('0')
-    expect(position.getAttribute('aria-valuetext')).toBe('0:00 of 0:04')
+    expect(position.getAttribute('aria-valuetext')).toBe('0:00 of 0:06')
     const times = [...document.querySelectorAll('.player-line__time')].map((time) => time.textContent)
-    expect(times).toEqual(['0:00', '0:04'])
+    expect(times).toEqual(['0:00', '0:06'])
   })
 
   it('moves the song when it is dragged', async () => {
@@ -227,20 +231,33 @@ describe('the position in the song', () => {
 
     expect(player.getState()).toMatchObject({ status: 'paused', position: 2.5 })
     expect(slider('Position in the song').value).toBe('2.5')
-    expect(slider('Position in the song').getAttribute('aria-valuetext')).toBe('0:02 of 0:04')
+    expect(slider('Position in the song').getAttribute('aria-valuetext')).toBe('0:02 of 0:06')
   })
 
   it('carries on from the new place when the song is playing, with no note left held', async () => {
     useFakeClock()
     await playOnScreen('Moonlight.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
-    letTimePass(200)
+    letTimePass(LEAD_IN_MS + 200)
     expect([...bus.getActiveNotes()]).toEqual([60])
 
-    moveSlider('Position in the song', 3.1)
+    moveSlider('Position in the song', LEAD_IN_SECONDS + 3.1)
     expect(bus.getActiveNotes().size).toBe(0)
     letTimePass(500)
     expect(player.getState().status).toBe('playing')
     expect([...bus.getActiveNotes()]).toEqual([72])
+  })
+
+  it('can be dragged back to before the first note, which then falls and is played again', async () => {
+    useFakeClock()
+    await playOnScreen('Moonlight.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
+    letTimePass(LEAD_IN_MS + 1200)
+    expect([...bus.getActiveNotes()]).toEqual([64])
+
+    moveSlider('Position in the song', 1)
+    letTimePass(900)
+    expect(bus.getActiveNotes().size).toBe(0)
+    letTimePass(200)
+    expect([...bus.getActiveNotes()]).toEqual([60])
   })
 
   it('follows the song as it plays', async () => {
@@ -350,11 +367,73 @@ describe('song options', () => {
     elsewhere.remove()
   })
 
+  it('go away when a file is dropped on the page, which opens the Songs panel under them', async () => {
+    await playOnScreen('Moonlight.mid')
+    openOptions()
+    fireEvent.drop(document.body)
+    expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
+    expect(button('Song options').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('can be closed from outside the line, which is how the app closes them at Escape', async () => {
+    await playOnScreen('Moonlight.mid')
+    openOptions()
+
+    let closed = false
+    act(() => {
+      closed = closeSongOptions()
+    })
+    expect(closed).toBe(true)
+    expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
+    expect(button('Song options').getAttribute('aria-expanded')).toBe('false')
+    // They open again as usual.
+    expect(openOptions()).toBeTruthy()
+  })
+
+  it('give the keyboard focus to their button when they are closed with the focus on one of them', async () => {
+    await playOnScreen('Moonlight.mid')
+    openOptions()
+    act(() => toggle('Fit to the piano').focus())
+
+    act(() => {
+      closeSongOptions()
+    })
+    expect(document.activeElement).toBe(button('Song options'))
+  })
+
+  it('leave the keyboard focus where it is when they are closed with the focus somewhere else', async () => {
+    await playOnScreen('Moonlight.mid')
+    openOptions()
+    act(() => button('Stop').focus())
+    act(() => {
+      closeSongOptions()
+    })
+    expect(document.activeElement).toBe(button('Stop'))
+
+    openOptions()
+    act(() => button('Stop').blur())
+    act(() => {
+      closeSongOptions()
+    })
+    expect(document.activeElement).toBe(document.body)
+  })
+
   it('start closed again for the next song', async () => {
     await playOnScreen('Moonlight.mid')
     openOptions()
     act(() => {
       playSong('starter:jingle-bells')
+    })
+    expect(button('Song options').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
+  })
+
+  it('start closed again when the same song is closed and played once more', async () => {
+    const song = await playOnScreen('Moonlight.mid')
+    openOptions()
+    act(() => closeSong())
+    act(() => {
+      playSong(song)
     })
     expect(button('Song options').getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
@@ -539,12 +618,27 @@ describe('the progress line', () => {
   it('fills up as the song goes on, and empties when it stops', async () => {
     useFakeClock()
     await playOnScreen('Moonlight.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
-    letTimePass(1000)
+    // Six seconds in all: the two in which the first note falls, and four of notes.
+    letTimePass(1500)
     expect(progressShown()).toBeCloseTo(0.25, 1)
 
-    moveSlider('Position in the song', 3)
+    moveSlider('Position in the song', 4.5)
     expect(progressShown()).toBeCloseTo(0.75, 2)
     click(button('Stop'))
+    expect(progressShown()).toBe(0)
+  })
+
+  it('is full where the last note ends, and empty again once the song is over', async () => {
+    useFakeClock()
+    await playOnScreen('Short.mid', { notes: [60, 62] })
+    click(button('Pause'))
+    moveSlider('Position in the song', Number(slider('Position in the song').max))
+    expect(progressShown()).toBe(1)
+
+    moveSlider('Position in the song', LEAD_IN_SECONDS + 0.9)
+    click(button('Play'))
+    letTimePass(200)
+    expect(player.getState()).toMatchObject({ status: 'stopped', position: 0 })
     expect(progressShown()).toBe(0)
   })
 

@@ -57,6 +57,19 @@
 }
 
 /*
+ * Just above the piano the stage writes one line of words: the names of the
+ * notes being played, the sound status and its badges (see src/ui/stage.css).
+ * A window that is high enough keeps a panel off that line, so that what is
+ * changed in Settings can be read there at once. A low window has no room to
+ * spare: there the panel goes down to a small gap above the piano.
+ */
+@media (min-height: 560px) {
+  .app__panels {
+    padding-bottom: 44px;
+  }
+}
+
+/*
  * An open panel lies over the middle of the sky, which is where the stage
  * says how to play. Those words step aside while it is open, instead of
  * showing through the glass of the panel.

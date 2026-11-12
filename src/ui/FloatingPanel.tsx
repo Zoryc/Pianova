@@ -37,7 +37,9 @@ export function FloatingPanel(props: FloatingPanelProps): JSX.Element {
    * After a click with the mouse nothing has the focus (buttons let go of it,
    * so that the keyboard goes back to the piano). Then the panel itself takes
    * it: Tab continues inside the panel, and no control shows a focus ring at
-   * the next note played.
+   * the next note played. There is no button to give the focus back to then;
+   * the app, which knows the button that opens the panel, puts it there when
+   * it closes a panel under a focused control (`closePanel` in src/App.tsx).
    *
    * React runs the clean-up just before it takes the panel off the page,
    * while the focus is still inside it.

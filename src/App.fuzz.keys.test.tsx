@@ -239,12 +239,19 @@ function typed(code: string): string {
   return code.startsWith('Key') ? code.slice('Key'.length).toLowerCase() : code
 }
 
+/**
+ * One run is 600 steps on the whole app: a second or two when it runs alone,
+ * many times that when the machine runs the other test files at the same time.
+ */
+const RUN_TIMEOUT_MS = 60_000
+
 describe('a long random session with the computer keys and the mouse', () => {
   /** The last runs draw the app the way development does: React draws everything twice. */
   const RUNS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((run) => ({ run, strict: run > 9 }))
 
   it.each(RUNS)(
     'leaves no note stuck and keeps one key per note (run $run)',
+    { timeout: RUN_TIMEOUT_MS },
     ({ run, strict }) => {
       let seed = run * 7919
       const next = (limit: number): number => {

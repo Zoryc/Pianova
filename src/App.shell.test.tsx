@@ -68,9 +68,10 @@ vi.mock('./ui/sky/Sky', async () => {
 import { App } from './App'
 import { APP_NAME } from './app/appInfo'
 import { bus } from './app/pianoApp'
+import { player } from './app/songsApp'
 import { settingsStore } from './state/settings'
 import { addSong, resetSongs } from './ui/songsTestKit'
-import { closeSong, playSong } from './ui/useSongs'
+import { LEAD_IN_SECONDS, closeSong, playSong } from './ui/useSongs'
 
 const START_TEXT = 'Click or press any key to start'
 const HINT = 'Press the keys shown on the piano, or click it'
@@ -182,11 +183,15 @@ describe('Escape', () => {
     within(settings).getByRole('slider', { name: 'Volume' }).focus()
     expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
     expect(panel('Settings')).toBeNull()
+    // The slider went away with the panel: the focus is on the button that opens it, not lost.
+    expect(document.activeElement).toBe(button('Settings'))
+    key('keyup', 'Escape')
 
     openSettingsOn('Sound')
     button('Close Settings').focus()
     tap('Escape')
     expect(panel('Settings')).toBeNull()
+    expect(document.activeElement).toBe(button('Settings'))
   })
 
   it('pressed in the Labels drop-down belongs to the drop-down: the panel stays', () => {
@@ -271,6 +276,100 @@ describe('Escape', () => {
     expect(piano().querySelector('.is-selected')).toBeNull()
     expect(panel('Settings')).not.toBeNull()
     expect(document.activeElement).toBe(pianoKey(64))
+  })
+
+  describe('with everything open that it can take back', () => {
+    /** What Escape can take back, as it stands on the page right now. */
+    function open(): string[] {
+      const found: string[] = []
+      if (piano().querySelector('.is-selected')) found.push('a piano key waiting')
+      if (screen.queryByRole('group', { name: 'Song options' })) found.push('the song options')
+      if (panel('Settings')) found.push('the panel')
+      if (menu().contains(document.activeElement)) found.push('the focus in the menu')
+      return found
+    }
+
+    /** The key stays down and repeats. True when every repeat was kept from the browser. */
+    function holdEscape(): boolean {
+      const kept: boolean[] = []
+      for (let repeat = 0; repeat < 4; repeat++) {
+        kept.push(key('keydown', 'Escape', { repeat: true }).defaultPrevented)
+      }
+      return kept.every(Boolean)
+    }
+
+    /** A song loaded, Settings on its Keys tab, a piano key waiting, the song options opened with Enter. */
+    function openEverything(): void {
+      startApp()
+      act(() => {
+        playSong(A_STARTER_SONG)
+      })
+      openSettingsOn('Keys')
+      fireEvent.click(pianoKey(64))
+      pressEnterOn(button('Song options'))
+      expect(open()).toEqual([
+        'a piano key waiting',
+        'the song options',
+        'the panel',
+        'the focus in the menu',
+      ])
+    }
+
+    it('takes back one thing at each press, always in the same order, then leaves the key to the browser', () => {
+      openEverything()
+      const before = settingsStore.get()
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(open()).toEqual(['the song options', 'the panel', 'the focus in the menu'])
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(open()).toEqual(['the panel', 'the focus in the menu'])
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(open()).toEqual(['the focus in the menu'])
+      expect(isChoosingKeys()).toBe(false)
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(open()).toEqual([])
+      expect(document.activeElement).toBe(document.body)
+      key('keyup', 'Escape')
+
+      // Nothing is left: the key is the browser's (it leaves full screen with it).
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
+      key('keyup', 'Escape')
+
+      // Escape is not a button of the player, and it plays and changes nothing.
+      expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
+      expect(heldNotes()).toEqual([])
+      expect(settingsStore.get()).toBe(before)
+    })
+
+    it('held down, never takes back a second thing, at whichever step it is held', () => {
+      openEverything()
+
+      key('keydown', 'Escape')
+      expect(holdEscape()).toBe(true)
+      expect(open()).toEqual(['the song options', 'the panel', 'the focus in the menu'])
+      key('keyup', 'Escape')
+
+      key('keydown', 'Escape')
+      expect(holdEscape()).toBe(true)
+      expect(open()).toEqual(['the panel', 'the focus in the menu'])
+      key('keyup', 'Escape')
+
+      key('keydown', 'Escape')
+      expect(holdEscape()).toBe(true)
+      expect(open()).toEqual(['the focus in the menu'])
+      key('keyup', 'Escape')
+
+      key('keydown', 'Escape')
+      // Nothing is left for a new press to take back: the repeats are the browser's.
+      expect(holdEscape()).toBe(false)
+      expect(open()).toEqual([])
+    })
   })
 })
 
@@ -851,58 +950,64 @@ describe('someone with the keyboard alone', () => {
     expect(panel('Settings')).not.toBeNull()
   })
 
-  it('goes with Tab through the menu, then the open panel, then the piano keys being chosen', async () => {
-    const user = userEvent.setup()
-    startApp()
-    act(() => {
-      playSong(A_STARTER_SONG)
-    })
+  // Dozens of presses of Tab, each of which works out what can take the focus: slow when
+  // many test files run side by side, so it gets more time than the usual five seconds.
+  it(
+    'goes with Tab through the menu, then the open panel, then the piano keys being chosen',
+    { timeout: 20_000 },
+    async () => {
+      const user = userEvent.setup()
+      startApp()
+      act(() => {
+        playSong(A_STARTER_SONG)
+      })
 
-    /** What the next presses of Tab stop at, until the focus leaves the page. */
-    async function tabStops(): Promise<HTMLElement[]> {
-      const stops: HTMLElement[] = []
-      for (let press = 0; press < 80; press++) {
-        await user.tab()
-        if (document.activeElement === document.body) break
-        stops.push(document.activeElement as HTMLElement)
+      /** What the next presses of Tab stop at, until the focus leaves the page. */
+      async function tabStops(): Promise<HTMLElement[]> {
+        const stops: HTMLElement[] = []
+        for (let press = 0; press < 80; press++) {
+          await user.tab()
+          if (document.activeElement === document.body) break
+          stops.push(document.activeElement as HTMLElement)
+        }
+        return stops
       }
-      return stops
-    }
-    const names = (stops: HTMLElement[]): string[] =>
-      stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent ?? '')
+      const names = (stops: HTMLElement[]): string[] =>
+        stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent ?? '')
 
-    // No panel: the top bar, then the player line under it. The piano is not a stop.
-    expect(names(await tabStops())).toEqual([
-      'Free Play',
-      'Volume',
-      'Sustain',
-      'Songs',
-      'Settings',
-      'Pause',
-      'Stop',
-      'Position in the song',
-      'Speed',
-      'Song options▾',
-      'Close',
-    ])
+      // No panel: the top bar, then the player line under it. The piano is not a stop.
+      expect(names(await tabStops())).toEqual([
+        'Free Play',
+        'Volume',
+        'Sustain',
+        'Songs',
+        'Settings',
+        'Pause',
+        'Stop',
+        'Position in the song',
+        'Speed',
+        'Song options▾',
+        'Close',
+      ])
 
-    // Settings, opened with Enter: the focus is on its chosen tab; Tab carries on inside it.
-    openSettingsOn('Keys')
-    clickWithMouse(button('Close Settings'))
-    button('Settings').focus()
-    await user.keyboard('[Enter]')
-    const settings = screen.getByRole('dialog', { name: 'Settings' })
-    expect(document.activeElement).toBe(within(settings).getByRole('tab', { name: 'Keys' }))
+      // Settings, opened with Enter: the focus is on its chosen tab; Tab carries on inside it.
+      openSettingsOn('Keys')
+      clickWithMouse(button('Close Settings'))
+      button('Settings').focus()
+      await user.keyboard('[Enter]')
+      const settings = screen.getByRole('dialog', { name: 'Settings' })
+      expect(document.activeElement).toBe(within(settings).getByRole('tab', { name: 'Keys' }))
 
-    const stops = await tabStops()
-    const inPanel = stops.filter((stop) => settings.contains(stop))
-    const onPiano = stops.filter((stop) => piano().contains(stop))
-    expect(inPanel.length).toBeGreaterThan(5)
-    expect(onPiano).toHaveLength(37)
-    // The panel first, then the piano, and nothing else.
-    expect(stops).toEqual([...inPanel, ...onPiano])
-    expect(inPanel[0]).toBe(button('Close Settings'))
-  })
+      const stops = await tabStops()
+      const inPanel = stops.filter((stop) => settings.contains(stop))
+      const onPiano = stops.filter((stop) => piano().contains(stop))
+      expect(inPanel.length).toBeGreaterThan(5)
+      expect(onPiano).toHaveLength(37)
+      // The panel first, then the piano, and nothing else.
+      expect(stops).toEqual([...inPanel, ...onPiano])
+      expect(inPanel[0]).toBe(button('Close Settings'))
+    },
+  )
 
   it('is not held up by Tab or Enter while a piano key is waiting: both say so, Escape lets go', async () => {
     const user = userEvent.setup()
@@ -1106,6 +1211,54 @@ describe('the sound status', () => {
     act(() => settingsStore.set({ transpose: 0 }))
     expect(strip.textContent).toBe('Loading piano sound…')
   })
+
+  it('has a "Sustain on" badge after it for as long as sustain is on, whatever switched it on', () => {
+    startApp()
+    const strip = document.querySelector('.stage__sound') as HTMLElement
+    expect(strip.textContent).toBe('')
+
+    // Space, which is how sustain gets switched on without the player meaning to.
+    tap('Space')
+    expect(strip.textContent).toBe('Sustain on')
+    tap('Space')
+    expect(strip.textContent).toBe('')
+
+    // The pill in the menu, and the switch in Settings.
+    clickWithMouse(within(menu()).getByRole('switch', { name: 'Sustain' }))
+    expect(strip.textContent).toBe('Sustain on')
+    const settings = openSettingsOn('Sound')
+    clickWithMouse(within(settings).getByRole('switch', { name: 'Sustain' }))
+    expect(strip.textContent).toBe('')
+    clickWithMouse(within(settings).getByRole('switch', { name: 'Sustain' }))
+    expect(strip.textContent).toBe('Sustain on')
+
+    // It is a quiet badge like "Transposed", which comes first; the sound status is not part of it.
+    act(() => settingsStore.set({ transpose: -3 }))
+    setStatus('loading')
+    expect(strip.textContent).toBe('Loading piano sound…Transposed −3Sustain on')
+    expect([...strip.querySelectorAll('.stage__badge')].map((badge) => badge.textContent)).toEqual([
+      'Transposed −3',
+      'Sustain on',
+    ])
+    expect(status().textContent).toBe('Loading piano sound…')
+
+    // "Reset all settings" switches sustain off: the badge goes with it.
+    openSettingsOn('About')
+    clickWithMouse(button('Reset all settings'))
+    clickWithMouse(button('Yes'))
+    expect(strip.textContent).toBe('Loading piano sound…')
+  })
+
+  it('shows the badge from the first picture when sustain was left on at the last visit', () => {
+    act(() => settingsStore.set({ sustain: true }))
+    startApp()
+    expect((document.querySelector('.stage__sound') as HTMLElement).textContent).toBe('Sustain on')
+    // Also while a song is loaded, when the names of the notes are not shown.
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
+    expect((document.querySelector('.stage__sound') as HTMLElement).textContent).toBe('Sustain on')
+  })
 })
 
 describe('the words over the sky, in the whole app', () => {
@@ -1304,17 +1457,30 @@ describe('when React draws everything twice (StrictMode), as the real page does'
     vi.useFakeTimers()
     drawTwice()
     tap('Enter')
-    key('keydown', 'KeyA')
     act(() => {
       playSong(A_STARTER_SONG)
     })
+    // Past the song's lead-in, into its third note (G4), with a key of the keyboard held too.
     act(() => {
-      vi.advanceTimersByTime(30)
+      vi.advanceTimersByTime(LEAD_IN_SECONDS * 1000 + 1300)
     })
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([67, 60])
     cleanup()
 
-    expect(heldNotes().filter((midi) => midi === 60)).toEqual([])
-    // The song belongs to the page, not to the screen: it is still loaded. Closing it stops its clock.
+    expect(heldNotes()).toEqual([])
+    // The song belongs to the page, not to the screen: it is still loaded, but it
+    // has stopped there. No clock is left running and no note of it starts later.
+    expect(player.getState().status).toBe('paused')
+    expect(vi.getTimerCount()).toBe(0)
+    const started: number[] = []
+    const stop = bus.subscribe((event) => {
+      if (event.type === 'on') started.push(event.midi)
+    })
+    vi.advanceTimersByTime(3000)
+    stop()
+    expect(started).toEqual([])
+
     act(() => closeSong())
     expect(heldNotes()).toEqual([])
     expect(vi.getTimerCount()).toBe(0)

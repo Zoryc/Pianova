@@ -11,7 +11,7 @@ import { NIGHT_COLOUR, withAlpha } from './skyColour'
  * lines that mark the octaves. It is painted once, onto a canvas of its own
  * that is never shown, and the sky then copies that picture on every frame.
  * It is painted again only when its size, the background, the colour or the
- * piano changes.
+ * piano changes, or after the browser took the drawing away and gave it back.
  *
  * The picture is see-through wherever it has nothing to show, so the black
  * stage behind the sky is the black of every background.

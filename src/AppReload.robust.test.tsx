@@ -243,6 +243,7 @@ describe('from one visit to the next', () => {
     expect(screen.getByRole('slider', { name: 'Volume' })).toHaveProperty('value', '50')
     expect(screen.getByRole('switch', { name: 'Sustain' }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('Transposed +2')).toBeTruthy()
+    expect(screen.getByText('Sustain on')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Do4, key Z' })).toBeTruthy()
     const piano = screen.getByRole('group', { name: 'Piano' })
     expect(piano.querySelectorAll('.piano-key')).toHaveLength(61)

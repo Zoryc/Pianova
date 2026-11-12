@@ -281,6 +281,45 @@ describe('what the settings do to the sky', () => {
     expect(stage.context.texts).toEqual([])
   })
 
+  // "Auto" shows a piano as soon as its white keys are 26 pixels wide. A black
+  // key is then 16 wide and its bar of light about 13.5: the narrowest bars
+  // there are. They carry their letters like the white keys' bars do, so that
+  // a player does not see letters on some notes and not on others.
+  it.each([
+    [1366, 88],
+    [1352, 88],
+    [936, 61],
+    [754, 49],
+  ] as const)(
+    'writes the letters of the black keys too in a window %i wide, where Auto shows %i keys',
+    (width, keys) => {
+      browser.size.width = width
+      const song = fakeSong([note(60, 1, 1), note(61, 1.2, 1), note(63, 1.4, 1), note(66, 1.6, 1)])
+      const hints = new Map<Midi, string>([
+        [60, 'A'],
+        [61, 'W'],
+        [63, 'E'],
+        [66, 'T'],
+      ])
+      const stage = drawStage({ falling: song.source, hints })
+      expect(notesOnPiano()).toHaveLength(keys)
+      expect(stage.context.texts.map((text) => text.text)).toEqual(['A', 'W', 'E', 'T'])
+
+      for (const [midi, letter] of [...hints].slice(1)) {
+        const bar = barOver(stage.context, midi) as PaintedBar
+        expect(bar.width, `the bar of ${letter}`).toBeGreaterThanOrEqual(13)
+        expect(bar.width, `the bar of ${letter}`).toBeLessThan(14)
+        const written = stage.context.texts.find((text) => text.text === letter)
+        expect(written?.x).toBeCloseTo(bar.x + bar.width / 2, 6)
+        // Small, but not too small to read, and inside its bar. (On the
+        // stand-in canvas a character is 0.6 times as wide as it is tall.)
+        const size = Number.parseFloat(/(\d+(?:\.\d+)?)px/.exec(written?.font ?? '')?.[1] ?? 'NaN')
+        expect(size).toBeGreaterThanOrEqual(8)
+        expect(size * 0.6).toBeLessThan(bar.width)
+      }
+    },
+  )
+
   it('follows the bar style, the glow, the sparks and the colour without restarting the light in the air', () => {
     const stage = drawStage()
     act(() => stage.bus.noteOn(60, 'keyboard'))

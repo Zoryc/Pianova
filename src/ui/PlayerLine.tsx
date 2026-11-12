@@ -1,11 +1,19 @@
-import { memo, useEffect, useId, useRef, useState } from 'react'
-import type { CSSProperties, FocusEvent, JSX } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useRef } from 'react'
+import type { CSSProperties, FocusEvent, JSX, RefObject } from 'react'
 import { player } from '../app/songsApp'
 import { MAX_SPEED, MIN_SPEED, formatDuration, instrumentName } from '../songs/song'
 import type { SongPlayOptions, SongTrack } from '../songs/song'
 import { Field, Switch } from './controls'
 import { formatPercent, toPercent } from './format'
-import { changeSongOptions, closeSong, useLoadedSong, usePlayerState } from './useSongs'
+import {
+  changeSongOptions,
+  closeSong,
+  closeSongOptions,
+  openSongOptions,
+  useLoadedSong,
+  usePlayerState,
+  useSongOptionsOpen,
+} from './useSongs'
 import type { LoadedSong } from './useSongs'
 import './songs.css'
 
@@ -23,33 +31,43 @@ const STOP_ICON = 'M3.5 3.5h9v9h-9z'
  */
 export function PlayerLine(): JSX.Element | null {
   const loaded = useLoadedSong()
-  // A new song gets a new line: its options start closed.
-  return loaded === null ? null : <LoadedPlayerLine key={loaded.song.id} loaded={loaded} />
+  return loaded === null ? null : <LoadedPlayerLine loaded={loaded} />
 }
 
 function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
   const state = usePlayerState()
-  const [optionsOpen, setOptionsOpen] = useState(false)
+  // Kept with the song, not here: Escape closes the options from the app
+  // shell, and every song starts with them closed (see useSongs.ts).
+  const optionsOpen = useSongOptionsOpen()
   const optionsId = useId()
   const line = useRef<HTMLElement>(null)
+  const optionsButton = useRef<HTMLButtonElement>(null)
 
   // Like a menu, the options go away at a press of the mouse anywhere else, so
-  // that they are never left hanging over a panel that is opened next.
+  // that they are never left hanging over a panel that is opened next. A file
+  // dropped on the page opens the Songs panel without any press: they go then too.
   useEffect(() => {
     if (!optionsOpen) return
     const closeWhenPressedOutside = (event: PointerEvent): void => {
       if (event.target instanceof Node && !line.current?.contains(event.target)) {
-        setOptionsOpen(false)
+        closeSongOptions()
       }
     }
+    const closeWhenDropped = (): void => {
+      closeSongOptions()
+    }
     window.addEventListener('pointerdown', closeWhenPressedOutside)
-    return () => window.removeEventListener('pointerdown', closeWhenPressedOutside)
+    window.addEventListener('drop', closeWhenDropped)
+    return () => {
+      window.removeEventListener('pointerdown', closeWhenPressedOutside)
+      window.removeEventListener('drop', closeWhenDropped)
+    }
   }, [optionsOpen])
 
   /** The same for the keyboard: they go away when Tab moves on to a control outside the line. */
   function closeWhenFocusMovesOut(event: FocusEvent<HTMLElement>): void {
     const movedTo = event.relatedTarget
-    if (movedTo !== null && !event.currentTarget.contains(movedTo)) setOptionsOpen(false)
+    if (movedTo !== null && !event.currentTarget.contains(movedTo)) closeSongOptions()
   }
 
   const playing = state.status === 'playing'
@@ -79,11 +97,12 @@ function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
         <PositionSlider position={state.position} duration={state.duration} />
         <SpeedSlider speed={state.speed} />
         <button
+          ref={optionsButton}
           type="button"
           className="button button--quiet"
           aria-expanded={optionsOpen}
           aria-controls={optionsOpen ? optionsId : undefined}
-          onClick={() => setOptionsOpen(!optionsOpen)}
+          onClick={() => (optionsOpen ? closeSongOptions() : openSongOptions())}
         >
           Song options
           <span className="button__chevron" aria-hidden="true">
@@ -94,7 +113,7 @@ function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
           Close
         </button>
       </div>
-      {optionsOpen && <SongOptions id={optionsId} loaded={loaded} />}
+      {optionsOpen && <SongOptions id={optionsId} loaded={loaded} opener={optionsButton} />}
     </section>
   )
 }
@@ -177,6 +196,8 @@ function SpeedSlider({ speed }: { speed: number }): JSX.Element {
 interface SongOptionsProps {
   id: string
   loaded: LoadedSong
+  /** The "Song options" button, which opened this panel. */
+  opener: RefObject<HTMLButtonElement | null>
 }
 
 /**
@@ -184,12 +205,24 @@ interface SongOptionsProps {
  * the piano. It changes only with the song and its options, so it is not drawn
  * again each time the player says how far the song has got.
  */
-const SongOptions = memo(function SongOptions({ id, loaded }: SongOptionsProps): JSX.Element {
+const SongOptions = memo(function SongOptions(props: SongOptionsProps): JSX.Element {
+  const { id, loaded, opener } = props
   const { song, options, arrangement } = loaded
   const parts = song.tracks.filter((track) => !track.isPercussion)
+  const panel = useRef<HTMLDivElement>(null)
+
+  // Escape closes the options while one of their controls may have the
+  // keyboard focus, which would disappear with it. It goes to the button that
+  // opened them instead: someone working with the keyboard alone keeps their place.
+  useLayoutEffect(() => {
+    const element = panel.current
+    return () => {
+      if (element?.contains(document.activeElement)) opener.current?.focus()
+    }
+  }, [opener])
 
   return (
-    <div id={id} className="song-options" role="group" aria-label="Song options">
+    <div ref={panel} id={id} className="song-options" role="group" aria-label="Song options">
       {parts.length > 1 && <PartsField parts={parts} chosen={options.trackIds} />}
       <div className="song-options__switches">
         <Field label="Melody only" hint="Plays one note at a time: the highest one.">

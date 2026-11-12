@@ -45,8 +45,11 @@ const audio = vi.hoisted(() => {
   return { engine, state }
 })
 
-/** What the stand-in sky was last given, and how many times it was drawn. */
-const sky = vi.hoisted(() => ({ props: null as unknown, draws: 0 }))
+/**
+ * What the stand-in sky was last given, how many times it was drawn, and the
+ * colour of the player it was given each time.
+ */
+const sky = vi.hoisted(() => ({ props: null as unknown, draws: 0, colours: [] as string[] }))
 
 vi.mock('./audio/audioEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('./audio/audioEngine')>()
@@ -56,9 +59,10 @@ vi.mock('./audio/audioEngine', async (importOriginal) => {
 vi.mock('./ui/sky/Sky', async () => {
   const { createElement } = await import('react')
   return {
-    Sky(props: unknown) {
+    Sky(props: { customColour: string }) {
       sky.props = props
       sky.draws += 1
+      sky.colours.push(props.customColour)
       return createElement('canvas', { className: 'sky' })
     },
   }
@@ -207,6 +211,18 @@ function light(name: string): string {
   return root().style.getPropertyValue(name)
 }
 
+/** The small quiet badges the stage shows next to the sound status, left to right. */
+function stageBadges(): string[] {
+  return [...document.querySelectorAll('.stage__badge')].map((badge) => badge.textContent ?? '')
+}
+
+/** What the About tab says about "Reset all settings" once it is done ('' until then). */
+function resetReport(): string {
+  return within(settingsPanel()).getByRole('status').textContent ?? ''
+}
+
+const RESET_DONE = 'Everything is back to how it was at the start.'
+
 /** The whole settings as another tab of the browser would leave them in storage. */
 function saveFromAnotherTab(changes: Partial<Settings> | null): void {
   if (changes === null) window.localStorage.removeItem(STORAGE_KEY)
@@ -247,7 +263,8 @@ describe('the sound follows the settings', () => {
     clickWithMouse(choice('Transpose', 'Transpose up'))
     clickWithMouse(choice('Transpose', 'Transpose up'))
     expect(audio.engine.setTranspose).toHaveBeenLastCalledWith(2)
-    expect(document.querySelector('.stage__badge')?.textContent).toBe('Transposed +2')
+    // The stage says so too, and that sustain is on, for when the panel and the menu are away.
+    expect(stageBadges()).toEqual(['Transposed +2', 'Sustain on'])
   })
 
   it('plays the next note as hard as Touch says, down to its lowest', () => {
@@ -391,6 +408,23 @@ describe('the screen follows the look', () => {
     expect(swatch('Purple').getAttribute('aria-checked')).toBe('true')
     expect(sliderOf('Glow').value).toBe('80')
     expect(isPressed(choice('Background', 'Aurora'))).toBe(true)
+  })
+
+  it('leaves "Your colour" as the player made it when a theme is tried', () => {
+    startApp()
+    openSettingsOn('Look')
+    fireEvent.change(colourPicker(), { target: { value: '#ff66cc' } })
+    expect(light('--light')).toBe('#ff66cc')
+
+    clickWithMouse(themeCard('Midnight'))
+    expect(light('--light')).toBe('#2f8bff')
+    expect(skyProps()).toMatchObject({ accent: 'blue', customColour: '#ff66cc' })
+
+    // Back to the colour of the player: it is the one they made, not the blue of the theme.
+    clickWithMouse(swatch('Your colour'))
+    expect(light('--light')).toBe('#ff66cc')
+    expect(isPressed(themeCard('Midnight'))).toBe(false)
+    expect(option('Theme').textContent).toContain('Custom')
   })
 
   it('marks the theme another tab of the browser chose', () => {
@@ -843,13 +877,30 @@ describe('"Reset all settings"', () => {
     expect(light('--light')).toBe('#ff2a2a')
     expect(light('--glow')).toBe('0.6')
     expect(piano().getAttribute('data-key-style')).toBe('classic')
-    expect(document.querySelector('.stage__badge')).toBeNull()
-    // The panel stays where it was, and the question is gone.
+    expect(stageBadges()).toEqual([])
+    // The panel stays where it was, the question is gone and the tab says it is done.
     expect(shownTab()).toBe('About')
     expect(screen.queryByText('Really reset?')).toBeNull()
+    expect(resetReport()).toBe(RESET_DONE)
 
     tap('KeyA')
     expect(audio.engine.noteOn).toHaveBeenLastCalledWith(60, DEFAULT_SETTINGS.velocity)
+  })
+
+  it('says that it is done, also when nothing on the screen could show it', () => {
+    startApp()
+    // Options of the sound that leave no trace on the piano, the stage or the menu.
+    act(() => settingsStore.set({ velocity: 0.3, reverb: 0.7, release: 'long' }))
+    openSettingsOn('About')
+    expect(resetReport()).toBe('')
+
+    clickWithMouse(screen.getByRole('button', { name: 'Reset all settings' }))
+    // Asking is not doing.
+    expect(resetReport()).toBe('')
+    clickWithMouse(screen.getByRole('button', { name: 'Yes' }))
+
+    expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+    expect(resetReport()).toBe(RESET_DONE)
   })
 
   it('lets go of the notes that were held, so that none is left ringing', () => {
@@ -880,6 +931,8 @@ describe('"Reset all settings"', () => {
     expect(settingsStore.get()).toBe(before)
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(saved)
     expect(screen.getByRole('button', { name: 'Reset all settings' })).toBeTruthy()
+    // Nothing was reset, and the tab does not say that anything was.
+    expect(resetReport()).toBe('')
   })
 
   it('forgets the question when the tab is left: coming back does not find a "Yes" waiting', () => {
@@ -1085,15 +1138,40 @@ describe('what another tab of the browser leaves in storage', () => {
     expect(writes).not.toHaveBeenCalled()
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe(garbage)
   })
+
+  it('is what this tab builds on at its next change: neither tab loses what the other chose', () => {
+    startApp()
+    saveFromAnotherTab({ bindings: { KeyQ: 0 }, accent: 'green' })
+
+    // This tab was opened first. Its next change is saved on top of what the other tab saved.
+    act(() => settingsStore.set({ volume: 0.3 }))
+
+    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as Settings
+    expect(saved).toEqual({
+      ...DEFAULT_SETTINGS,
+      bindings: { KeyQ: 0 },
+      accent: 'green',
+      volume: 0.3,
+    })
+  })
 })
 
 describe('a drag through the colour picker', () => {
-  /** Sixty different colours, as a second of dragging sends them. */
-  function drag(steps: number): void {
+  /** Sixty different colours, as a second of dragging sends them. Returns them in order. */
+  function drag(steps: number): string[] {
+    const colours: string[] = []
     for (let step = 0; step < steps; step += 1) {
       const channel = (step * 4).toString(16).padStart(2, '0')
-      fireEvent.change(colourPicker(), { target: { value: `#${channel}80ff` } })
+      const colour = `#${channel}80ff`
+      colours.push(colour)
+      fireEvent.change(colourPicker(), { target: { value: colour } })
     }
+    return colours
+  }
+
+  /** A list without the entries that only repeat the one before them. */
+  function withoutRepeats(list: readonly string[]): string[] {
+    return list.filter((entry, index) => entry !== list[index - 1])
   }
 
   it('shows every colour at once: the light, the swatch and the sky', () => {
@@ -1109,34 +1187,39 @@ describe('a drag through the colour picker', () => {
     expect(option('Theme').textContent).toContain('Custom')
   })
 
-  it('saves and draws once for each colour, never more', () => {
+  it('saves each colour once, and gives the sky every one of them as it comes', () => {
     startApp()
     openSettingsOn('Look')
     const writes = vi.spyOn(Storage.prototype, 'setItem')
-    sky.draws = 0
+    sky.colours.length = 0
 
-    drag(60)
+    const dragged = drag(60)
 
     expect(writes.mock.calls.filter(([name]) => name === STORAGE_KEY)).toHaveLength(60)
-    expect(sky.draws).toBe(60)
+    // However often the app is drawn, the sky gets each colour in turn: none left out, none late.
+    expect(withoutRepeats(sky.colours)).toEqual(dragged)
   })
 
   it('saves nothing and draws nothing when the picker reports the colour it already has', () => {
     startApp()
     openSettingsOn('Look')
-    drag(1)
+    const picker = colourPicker()
+    // The last move of a drag: the picker reports the colour while it is still open...
+    fireEvent.input(picker, { target: { value: '#123456' } })
+    expect(settingsStore.get()).toMatchObject({ accent: 'custom', customColour: '#123456' })
+    const before = settingsStore.get()
     const writes = vi.spyOn(Storage.prototype, 'setItem')
     sky.draws = 0
-    const picker = colourPicker()
 
-    // The same colour again, as when the picker is closed after the last move.
+    // ...and reports the same colour once more when it is closed.
     fireEvent.change(picker, { target: { value: '#123456' } })
-    writes.mockClear()
-    sky.draws = 0
+    // React keeps a report of the value it already has to itself. This is
+    // what the app would do with one that got through: save the same colour.
     act(() => settingsStore.set({ accent: 'custom', customColour: '#123456' }))
 
     expect(writes).not.toHaveBeenCalled()
     expect(sky.draws).toBe(0)
+    expect(settingsStore.get()).toBe(before)
   })
 
   it('leaves the other open controls of the app as they were', () => {

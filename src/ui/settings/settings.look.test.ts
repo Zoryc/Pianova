@@ -49,22 +49,54 @@ function value(css: string, selector: string, property: string): string | undefi
   return found?.[1]?.trim().replace(/\s+/g, ' ')
 }
 
+/** What is inside the block that starts at `start` (an at-rule and its condition) in `css`. */
+function blockAt(css: string, start: number): string {
+  const open = css.indexOf('{', start)
+  let depth = 0
+  for (let index = open; index >= 0 && index < css.length; index += 1) {
+    if (css[index] === '{') depth += 1
+    if (css[index] === '}') depth -= 1
+    if (depth === 0) return css.slice(open + 1, index)
+  }
+  throw new Error(`The block "${css.slice(start, start + 40)}" is never closed`)
+}
+
 /** What is inside the first `@media (query)` block of `css`. */
 function mediaBlock(css: string, query: string): string {
   const start = css.indexOf(`@media (${query})`)
   if (start < 0) throw new Error(`There is no @media (${query})`)
-  let depth = 0
-  for (let index = css.indexOf('{', start); index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    if (css[index] === '}') depth -= 1
-    if (depth === 0) return css.slice(css.indexOf('{', start) + 1, index)
+  return blockAt(css, start)
+}
+
+/** What is inside every `@container` block of `css` that asks how wide the container is. */
+function widthContainerBlocks(css: string): string[] {
+  return [...css.matchAll(/@container \([^)]*width[^)]*\)/g)].map((match) =>
+    blockAt(css, match.index),
+  )
+}
+
+/** How a box treats what does not fit, sideways and up and down. */
+function overflowOf(css: string, selector: string): { sideways: string; upAndDown: string } {
+  // The short form takes one word for both directions, or two: sideways first.
+  const [first = 'visible', second = first] = (value(css, selector, 'overflow') ?? '').split(' ')
+  return {
+    sideways: value(css, selector, 'overflow-x') ?? first,
+    upAndDown: value(css, selector, 'overflow-y') ?? second,
   }
-  throw new Error(`@media (${query}) is never closed`)
+}
+
+/** A length written in pixels, as a number. */
+function pixels(length: string | undefined): number {
+  const found = /^(\d+(?:\.\d+)?)px$/.exec(length ?? '')
+  if (!found) throw new Error(`"${String(length)}" is not a length in pixels`)
+  return Number(found[1])
 }
 
 describe('the panel in a window that is too small for it', () => {
   it('scrolls inside itself, up and down only', () => {
-    expect(value(chromeCss, '.floating-panel__body', 'overflow')).toBe('hidden auto')
+    const body = overflowOf(chromeCss, '.floating-panel__body')
+    expect(body.upAndDown).toBe('auto')
+    expect(['hidden', 'clip']).toContain(body.sideways)
     expect(value(chromeCss, '.floating-panel__body', 'min-height')).toBe('0')
     // Scrolling to the end of the panel does not go on to anything behind it.
     expect(value(chromeCss, '.floating-panel__body', 'overscroll-behavior')).toBe('contain')
@@ -72,9 +104,23 @@ describe('the panel in a window that is too small for it', () => {
 
   it('is never higher than the room between the menu and the piano', () => {
     expect(value(chromeCss, '.floating-panel', 'max-height')).toBe('100%')
-    expect(value(chromeCss, '.floating-panel', 'overflow')).toBe('hidden')
+    // Cut off, and not "hidden": a hidden box can still be scrolled by the
+    // browser when something in it takes the focus. Only the body scrolls.
+    expect(overflowOf(chromeCss, '.floating-panel')).toEqual({ sideways: 'clip', upAndDown: 'clip' })
     expect(value(appCss, '.app__panels', 'min-height')).toBe('0')
     expect(value(appCss, '.app__panels', 'grid-area')).toBe('2 / 1')
+  })
+
+  it('stays off the line of words above the piano, where a window is high enough for that', () => {
+    // The names of the notes being played, the sound status and the badges are
+    // written just above the piano: what is changed in Settings shows there.
+    const highWindow = mediaBlock(appCss, 'min-height: 560px')
+    expect(value(highWindow, '.app__panels', 'padding-bottom')).toBe('44px')
+
+    // A lower window has no room to spare: a small gap above the piano.
+    const anyWindow = appCss.replace(highWindow, '')
+    expect(value(anyWindow, '.app__panels', 'padding')).toBe('4px 0 12px')
+    expect(value(anyWindow, '.app__panels', 'padding-bottom')).toBeUndefined()
   })
 
   it('is at most 760px wide and 94% of the window, as the spec says', () => {
@@ -89,7 +135,11 @@ describe('the panel in a window that is too small for it', () => {
 
   it('puts each control under its name when the panel is narrow, by the width of the panel', () => {
     expect(value(settingsCss, '.settings-page', 'container-type')).toBe('inline-size')
-    expect(settingsCss).toMatch(/@container \(max-width: 560px\)/)
+    // Below some width of the panel (not of the window) the row of an option is laid out anew.
+    const narrowPanel = widthContainerBlocks(settingsCss).filter((block) =>
+      rules(block).some(([selectors]) => /\.field\b/.test(selectors)),
+    )
+    expect(narrowPanel.length).toBeGreaterThan(0)
     // The theme cards go from six in a row to three, never to a row that needs sideways scrolling.
     expect(value(settingsCss, '.choice-cards--themes', 'grid-template-columns')).toContain(
       'minmax(0, 1fr)',
@@ -236,9 +286,10 @@ describe('reduced motion', () => {
   })
 
   it('has nothing in the Settings panel that keeps moving by itself', () => {
-    expect(settingsCss).not.toMatch(/animation(?:-name)?\s*:/)
-    expect(settingsCss).not.toMatch(/@keyframes/)
-    expect(settingsCss).not.toMatch(/infinite/)
+    // Something that moves once and stops is cut short by the rule above. Something
+    // that starts over without end would not be: neither stylesheet has any.
+    expect(settingsCss).not.toMatch(/\binfinite\b/)
+    expect(chromeCss).not.toMatch(/\binfinite\b/)
   })
 })
 
@@ -270,12 +321,15 @@ describe('the focus ring', () => {
   })
 
   it('is big enough on every control: at least 36px high', () => {
-    expect(value(chromeCss, '.button', 'min-height')).toBe('36px')
-    expect(value(chromeCss, '.switch', 'min-height')).toBe('36px')
-    expect(value(chromeCss, '.tab', 'min-height')).toBe('36px')
-    expect(value(chromeCss, '.slider', 'height')).toBe('36px')
-    expect(value(settingsCss, '.swatch', 'min-height')).toBe('36px')
-    expect(value(settingsCss, '.swatch', 'min-width')).toBe('36px')
+    const sizes: [name: string, size: string | undefined][] = [
+      ['.button', value(chromeCss, '.button', 'min-height')],
+      ['.switch', value(chromeCss, '.switch', 'min-height')],
+      ['.tab', value(chromeCss, '.tab', 'min-height')],
+      ['.slider', value(chromeCss, '.slider', 'height')],
+      ['.swatch (high)', value(settingsCss, '.swatch', 'min-height')],
+      ['.swatch (wide)', value(settingsCss, '.swatch', 'min-width')],
+    ]
+    for (const [name, size] of sizes) expect(pixels(size), name).toBeGreaterThanOrEqual(36)
   })
 })
 

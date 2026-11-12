@@ -57,7 +57,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
     setTab(next)
   }
 
-  useKeyEditing(tab === 'keys', keyEditor, onClose)
+  useKeyEditing(tab === 'keys', keyEditor)
 
   // A tab is shown from its top, wherever the tab before it had been scrolled
   // to. What scrolls is the body of the floating panel, which the page sits in.
@@ -104,26 +104,15 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
  * while the Keys tab is showing: it starts when the tab becomes the active
  * one, and ends when another tab is chosen or the panel goes away.
  */
-function useKeyEditing(onKeysTab: boolean, keyEditor: KeyEditor, onClose: () => void): void {
-  const { editing } = keyEditor
-  const wasEditing = useRef(false)
-  // The editor's actions are new functions at every render: the effects below
+function useKeyEditing(onKeysTab: boolean, keyEditor: KeyEditor): void {
+  // The editor's actions are new functions at every render: the effect below
   // must run when the tab changes, not each time those functions do.
   const open = useEffectEvent(() => keyEditor.open())
   const close = useEffectEvent(() => keyEditor.close())
-  const closePanel = useEffectEvent(onClose)
 
   useEffect(() => {
     if (!onKeysTab) return
     open()
     return () => close()
   }, [onKeysTab])
-
-  // The editor can also end by its own rule: Escape with no piano key selected.
-  // The Keys tab cannot stay open without it, so the panel closes, which is
-  // what Escape does on every other tab.
-  useEffect(() => {
-    if (onKeysTab && wasEditing.current && !editing) closePanel()
-    wasEditing.current = editing
-  }, [onKeysTab, editing])
 }

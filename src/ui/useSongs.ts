@@ -9,7 +9,7 @@ import type { PianoRange } from '../core/layout'
 import { MIDI_MAX, MIDI_MIN } from '../core/notes'
 import { arrange, bestBaseOctave, selectedTracks } from '../songs/arrange'
 import { MAX_MIDI_BYTES, SongImportError, parseMidiFile } from '../songs/midiImport'
-import type { Arrangement, Song, SongPlayOptions } from '../songs/song'
+import type { Arrangement, Song, SongNote, SongPlayOptions } from '../songs/song'
 import { SongStorageError } from '../songs/songLibrary'
 import type { PlayerState } from '../songs/songPlayer'
 import { STARTER_SONGS, isStarterSong } from '../songs/starterSongs'
@@ -25,7 +25,11 @@ export interface LoadedSong {
   song: Song
   /** Which parts are played, melody only, fit to the piano, and how fast. */
   options: SongPlayOptions
-  /** The notes that are played, arranged for the piano on screen. */
+  /**
+   * The notes that are played, arranged for the piano on screen. They come
+   * later than the song has them when it starts with less than LEAD_IN_SECONDS
+   * of silence, and `duration` is longer by as much.
+   */
   arrangement: Arrangement
 }
 
@@ -46,34 +50,64 @@ export interface SongMessage {
   isProblem: boolean
 }
 
+/**
+ * How long a song is in the player before its first note sounds, at least, in
+ * seconds: the time that note needs to be seen falling, so that the player
+ * can find its key and play along from the start.
+ */
+export const LEAD_IN_SECONDS = 2
+
 /** Shown when a listed song cannot be played because its saved notes are gone or damaged. */
 export const UNREADABLE_SONG_MESSAGE =
   'That song could not be read. Delete it and import the MIDI file again.'
+
+/** Shown for what the browser cannot hand over: a folder, or a file that was moved meanwhile. */
+export const UNREADABLE_FILE_MESSAGE =
+  'That could not be read. If it is a folder, open it and drop the MIDI files that are in it.'
 
 const NO_MESSAGES: readonly SongMessage[] = Object.freeze([])
 
 const loadedSong = createStore<LoadedSong | null>(null)
 const messages = createStore(NO_MESSAGES)
+/** Whether the options of the loaded song are open under the player line. */
+const songOptionsOpen = createStore(false)
 
 /** The piano on screen. A full piano until the stage says which one it shows. */
 let pianoOnScreen: PianoRange = { first: MIDI_MIN, last: MIDI_MAX }
 /** How many Songs panels are on the page (one, or none). */
 let panelsShowingMessages = 0
+/**
+ * Set while the computer keys are where a song put them: where the player had
+ * them before that (`from`) and where the song moved them (`to`).
+ */
+let keysMovedForSong: { from: number; to: number } | null = null
+/** How many calls of `importSongFiles` are still reading their files. */
+let importsRunning = 0
+/** What became of each file of the imports that are running: they share one report. */
+let importResults: ImportResult[] = []
 
 const stopFollowingLibrary = songLibrary.subscribe(followLibrary)
 
 /**
  * For the app shell, called once with the piano that is on screen. It keeps
  * the loaded song arranged for that piano, pauses the song while the page is
- * hidden, and says what the rest of the screen needs to know about the song.
+ * hidden and when the app goes away, gives the computer keys back when the
+ * page is left, and says what the rest of the screen needs to know about the
+ * song.
  */
 export function useSongSession(range: PianoRange): SongSession {
   const { first, last } = range
   useEffect(() => arrangeFor({ first, last }), [first, last])
   useEffect(pauseWhenPageIsHidden, [])
+  useEffect(giveKeysBackWhenPageIsLeft, [])
+  // Once the app is off the page nothing is left to stop the song with: it must not play on.
+  useEffect(() => () => player.pause(), [])
 
   const arrangement = useLoadedSong()?.arrangement ?? null
   const playing = useSyncExternalStore(player.subscribe, isPlaying, isPlaying)
+  // A song that stands still is put somewhere else (the position slider,
+  // "Stop"): the screen is drawn again, which shows the sky the new place at once.
+  useSyncExternalStore(player.subscribe, placeWhileStill, placeWhileStill)
   const falling = useMemo(
     () => (arrangement === null ? null : fallingNotesOf(arrangement)),
     [arrangement],
@@ -100,10 +134,34 @@ export function useSongMessages(): readonly SongMessage[] {
   return useSyncExternalStore(messages.subscribe, messages.get, messages.get)
 }
 
+/** For the player line: whether the options of the loaded song are open under it. */
+export function useSongOptionsOpen(): boolean {
+  return useSyncExternalStore(
+    songOptionsOpen.subscribe,
+    songOptionsOpen.get,
+    songOptionsOpen.get,
+  )
+}
+
+/** Opens the options of the loaded song under the player line. Nothing opens without a song. */
+export function openSongOptions(): void {
+  if (loadedSong.get() !== null) songOptionsOpen.set(true)
+}
+
+/**
+ * Closes the song options. Returns true when they were open, which is how the
+ * app shell knows that a press of Escape has been used up here.
+ */
+export function closeSongOptions(): boolean {
+  const wereOpen = songOptionsOpen.get()
+  songOptionsOpen.set(false)
+  return wereOpen
+}
+
 /**
  * Loads a song into the player and starts it. The computer keys move to where
- * they can play the most of the song. Returns false, and says why in the
- * message line, when the song cannot be read.
+ * they can play the most of the song, until the song is closed. Returns
+ * false, and says why in the message line, when the song cannot be read.
  */
 export function playSong(id: string): boolean {
   const song = findSong(id)
@@ -113,20 +171,36 @@ export function playSong(id: string): boolean {
   }
   const options = usableOptions(song)
   moveKeysToSong(song, options)
-  const arrangement = arrange(song, options, pianoOnScreen)
+  const arrangement = arrangeForPlayer(song, options, pianoOnScreen)
 
   player.load(song, arrangement)
   // The player keeps its speed from one song to the next: each song brings its own.
   player.setSpeed(options.speed)
   player.play()
+  // Every song starts with its options closed.
+  songOptionsOpen.set(false)
   loadedSong.set({ song, options, arrangement })
   return true
 }
 
-/** Takes the song out of the player. */
+/**
+ * Takes the song out of the player. The computer keys go back to where they
+ * were before the song moved them.
+ */
 export function closeSong(): void {
   player.unload()
+  songOptionsOpen.set(false)
   loadedSong.set(null)
+  putKeysBack()
+}
+
+/**
+ * Forgets where the computer keys were before the loaded song moved them, so
+ * that they stay where they are when the song is closed. For "Reset all
+ * settings": nothing from before it may come back afterwards.
+ */
+export function forgetKeysBeforeSong(): void {
+  keysMovedForSong = null
 }
 
 /** Changes how the loaded song is played. The choice is saved with that song. */
@@ -139,13 +213,19 @@ export function changeSongOptions(patch: Partial<SongPlayOptions>): void {
 /**
  * Adds each file to the library as a song and reports in the message line.
  * Never rejects: a file that cannot be added becomes a line of the report.
+ * Files added while others are still being read join the same report.
  */
 export async function importSongFiles(files: readonly File[]): Promise<void> {
   if (files.length === 0) return
-  // Emptied first, so that the same report twice in a row is still announced as news.
-  messages.set(NO_MESSAGES)
-  const results: ImportResult[] = []
+  if (importsRunning === 0) {
+    importResults = []
+    // Emptied first, so that the same report twice in a row is still announced as news.
+    messages.set(NO_MESSAGES)
+  }
+  const results = importResults
+  importsRunning += 1
   for (const file of files) results.push(await addSongFromFile(file))
+  importsRunning -= 1
   messages.set(reportOf(results))
 }
 
@@ -168,8 +248,8 @@ function sentenceFor(error: unknown): string {
   if (error instanceof SongImportError || error instanceof SongStorageError) {
     return error.userMessage
   }
-  // The browser could not read the file at all (it was moved meanwhile, or it is a folder).
-  return new SongImportError('damaged').userMessage
+  // The browser could not read it at all (the file was moved meanwhile, or it is a folder).
+  return UNREADABLE_FILE_MESSAGE
 }
 
 /** How many songs were added, then one line for each file that was not. */
@@ -204,10 +284,72 @@ function usableOptions(song: Song): SongPlayOptions {
   return songLibrary.getOptions(song.id)
 }
 
+/**
+ * Moves the computer keys to where they can play the most of the song, and
+ * remembers where the player had them, for when the song is closed.
+ */
 function moveKeysToSong(song: Song, options: SongPlayOptions): void {
-  const notes = selectedTracks(song, options).flatMap((track) => track.notes)
-  const slotsWithAKey = new Set(Object.values(settingsStore.get().bindings))
-  settingsStore.set({ baseOctave: bestBaseOctave(notes, slotsWithAKey) })
+  const { bindings, baseOctave } = settingsStore.get()
+  const best = bestBaseOctave(notesToReach(song, options), new Set(Object.values(bindings)))
+  // Keys that are still where the song before this one put them go back to
+  // where the player had them, not to where that song wanted them.
+  const from = keysMovedForSong?.to === baseOctave ? keysMovedForSong.from : baseOctave
+  keysMovedForSong = best === from ? null : { from, to: best }
+  settingsStore.set({ baseOctave: best })
+}
+
+/** The notes the computer keys should be able to play: those of the chosen parts. */
+function notesToReach(song: Song, options: SongPlayOptions): readonly SongNote[] {
+  if (!options.melodyOnly) return selectedTracks(song, options).flatMap((track) => track.notes)
+  // "Melody only" plays one note of each chord, and the keys go where those
+  // notes are. "Fit to the piano" is left out: the piano on screen follows the
+  // keys, so the keys cannot be chosen by it.
+  return arrange(song, { ...options, fitToPiano: false }, pianoOnScreen).notes
+}
+
+/**
+ * Puts the computer keys back where the player had them, unless they were
+ * moved since. Returns true when that moved them.
+ */
+function putKeysBack(): boolean {
+  const moved = keysMovedForSong
+  keysMovedForSong = null
+  if (moved === null || settingsStore.get().baseOctave !== moved.to) return false
+  settingsStore.set({ baseOctave: moved.from })
+  return true
+}
+
+/** The notes to play for a song on the piano on screen, after the song's lead-in. */
+function arrangeForPlayer(song: Song, options: SongPlayOptions, range: PianoRange): Arrangement {
+  return arrange(startingLater(song, leadInOf(song)), options, range)
+}
+
+/**
+ * How much later than written a song is played, in seconds: what it takes for
+ * its first note to come LEAD_IN_SECONDS after the start. Every part the piano
+ * can play counts, chosen or not, so that the notes do not jump in time when
+ * parts are switched on and off.
+ */
+function leadInOf(song: Song): number {
+  let firstNoteAt = Infinity
+  for (const track of song.tracks) {
+    // The notes of a part are in time order: the first one is the earliest.
+    const earliest = track.notes[0]
+    if (!track.isPercussion && earliest !== undefined) {
+      firstNoteAt = Math.min(firstNoteAt, earliest.time)
+    }
+  }
+  return Math.max(0, LEAD_IN_SECONDS - firstNoteAt)
+}
+
+/** A copy of the song with every note `seconds` later. The song itself is not changed. */
+function startingLater(song: Song, seconds: number): Song {
+  if (seconds === 0) return song
+  const tracks = song.tracks.map((track) => ({
+    ...track,
+    notes: track.notes.map((note) => ({ ...note, time: note.time + seconds })),
+  }))
+  return { ...song, tracks }
 }
 
 /**
@@ -226,7 +368,7 @@ function followLibrary(): void {
   if (song === current.song && options === current.options) return
   const arrangement = playSameNotes(options, current.options)
     ? current.arrangement
-    : arrange(song, options, pianoOnScreen)
+    : arrangeForPlayer(song, options, pianoOnScreen)
   carryOnWith({ song, options, arrangement })
 }
 
@@ -258,7 +400,8 @@ function arrangeFor(range: PianoRange): void {
   pianoOnScreen = range
   const current = loadedSong.get()
   if (current === null) return
-  carryOnWith({ ...current, arrangement: arrange(current.song, current.options, range) })
+  const arrangement = arrangeForPlayer(current.song, current.options, range)
+  carryOnWith({ ...current, arrangement })
 }
 
 /** Replaces what is loaded with a newer version of the same song, which keeps its place. */
@@ -279,13 +422,59 @@ function isPlaying(): boolean {
   return player.getState().status === 'playing'
 }
 
-/** Browsers slow down the timers of a hidden page, which would make the song crawl. */
+/** What `placeWhileStill` gives for a song that plays. No song is ever at this place. */
+const ON_THE_MOVE = -1
+
+/**
+ * Where the song stands while it is paused or stopped. A song that plays
+ * moves all the time and draws itself in the sky frame by frame: it gets one
+ * value for every place, so that the screen is not drawn again as it goes.
+ */
+function placeWhileStill(): number {
+  const { status, position } = player.getState()
+  return status === 'playing' ? ON_THE_MOVE : position
+}
+
+/**
+ * Browsers slow down the timers of a hidden page, which would make the song
+ * crawl. A page that is being left is treated the same way.
+ */
 function pauseWhenPageIsHidden(): () => void {
+  const pause = (): void => player.pause()
   const pauseIfHidden = (): void => {
     if (document.visibilityState === 'hidden') player.pause()
   }
+  window.addEventListener('pagehide', pause)
   document.addEventListener('visibilitychange', pauseIfHidden)
-  return () => document.removeEventListener('visibilitychange', pauseIfHidden)
+  return () => {
+    window.removeEventListener('pagehide', pause)
+    document.removeEventListener('visibilitychange', pauseIfHidden)
+  }
+}
+
+/**
+ * The next visit starts with no song, so it must not find the computer keys
+ * where a song had put them: a page that is being left (reloaded, closed)
+ * gives them back, as closing the song would. A page that the browser kept
+ * and shows again still has its song, and the keys go to that song again.
+ */
+function giveKeysBackWhenPageIsLeft(): () => void {
+  /** True from the moment the page is left with the keys given back, until it is shown again. */
+  let givenBack = false
+  const giveBack = (): void => {
+    givenBack = putKeysBack()
+  }
+  const takeAgain = (): void => {
+    const current = loadedSong.get()
+    if (givenBack && current !== null) moveKeysToSong(current.song, current.options)
+    givenBack = false
+  }
+  window.addEventListener('pagehide', giveBack)
+  window.addEventListener('pageshow', takeAgain)
+  return () => {
+    window.removeEventListener('pagehide', giveBack)
+    window.removeEventListener('pageshow', takeAgain)
+  }
 }
 
 function keepMessagesWhileShown(): () => void {

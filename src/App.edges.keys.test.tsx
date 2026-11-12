@@ -737,23 +737,40 @@ describe('choosing keys with the keyboard alone', () => {
 })
 
 describe('what the Keys tab says after a change', () => {
-  it('names the note the key plays now, also after the keys were moved higher', () => {
+  /*
+   * The line names a computer key and the note it plays: '"M" now plays E4.'
+   * It is taken away as soon as that stops being true: when the keys move
+   * lower or higher, and when another keyboard type changes the letters.
+   */
+  it('stays while it is true, and goes when the keys are moved lower or higher', () => {
     startApp()
     openSettingsOn('Keys')
     fireEvent.click(pianoKey(64))
     tap('KeyM', { key: 'm' })
     expect(message()).toBe('"M" now plays E4. "D" no longer plays a note.')
 
+    // Trying the new key changes nothing of what the line says.
+    key('keydown', 'KeyM', { key: 'm' })
+    expect(heldNotes()).toEqual([64])
+    key('keyup', 'KeyM', { key: 'm' })
+    expect(message()).toBe('"M" now plays E4. "D" no longer plays a note.')
+
     clickWithMouse(button(/Higher/))
+    // M plays E5 now: the line that said "now plays E4" is gone.
+    expect(message()).toBe('')
     key('keydown', 'KeyM', { key: 'm' })
     expect(heldNotes()).toEqual([76])
     key('keyup', 'KeyM', { key: 'm' })
 
-    // M plays E5 now. A line that still says "now plays E4" is no longer true.
-    expect(message()).not.toContain('now plays E4')
+    // The same on the way down, with the line of another change.
+    fireEvent.click(pianoKey(72))
+    tap('Backspace', { key: 'Backspace' })
+    expect(message()).toBe('C5 has no key now.')
+    clickWithMouse(button(/Lower/))
+    expect(message()).toBe('')
   })
 
-  it('names the key as the piano draws it, also after the keyboard type was changed', () => {
+  it('goes when another keyboard type is chosen: the piano draws other letters now', () => {
     startApp()
     openSettingsOn('Keys')
     fireEvent.click(pianoKey(48))
@@ -761,19 +778,63 @@ describe('what the Keys tab says after a change', () => {
     expect(message()).toBe('"Q" now plays C3.')
 
     clickWithMouse(button('AZERTY'))
+    // The piano writes A on that key now, and Q on the key of C4.
     expect(keycap(48)).toBe('A')
-    // The piano now calls that key A: a line that still calls it Q points at another key (C4).
     expect(keycap(60)).toBe('Q')
-    expect(message()).not.toContain('"Q" now plays C3')
+    expect(message()).toBe('')
+  })
+
+  it('leaves the piano key that is waiting for a computer key waiting, whatever was moved', () => {
+    act(() => settingsStore.set({ pianoSize: 88 }))
+    startApp()
+    openSettingsOn('Keys')
+    fireEvent.click(pianoKey(60))
+    tap('Enter', { key: 'Enter' })
+    expect(message()).toBe(UNUSABLE)
+
+    clickWithMouse(button('QWERTZ'))
+    expect(message()).toBe('')
+    expect(selectedKeys()).toEqual([60])
+    expect(lead()).toBe('Press a key for C4…')
+
+    // The same key of the keyboard zone, one octave higher now.
+    clickWithMouse(button(/Higher/))
+    expect(selectedKeys()).toEqual([72])
+    expect(lead()).toBe('Press a key for C5…')
+
+    // It is still waiting: the next key pressed is taken for it, and the line
+    // that says so names that key as a German keyboard prints it.
+    tap('KeyZ', { key: 'y' })
+    expect(settingsStore.get().bindings.KeyZ).toBe(12)
+    expect(message()).toBe('"Y" now plays C5. "A" no longer plays a note.')
+  })
+
+  it('keeps "The default keys are back." after the keys were reset: that line is still true', () => {
+    act(() => settingsStore.set({ baseOctave: 4, keyboardType: 'azerty', bindings: { KeyM: 12 } }))
+    startApp()
+    openSettingsOn('Keys')
+
+    clickWithMouse(button('Reset to default keys'))
+    clickWithMouse(button('Yes'))
+
+    expect(message()).toBe('The default keys are back.')
+    // The reset is about which key plays which note, not about where the keys sit or their letters.
+    expect(settingsStore.get()).toMatchObject({ baseOctave: 4, keyboardType: 'azerty' })
   })
 })
 
-describe('a note held while a drop-down takes the keyboard', () => {
+describe('a note held while a pop-up of the browser takes the keyboard', () => {
   /*
-   * While the list of a drop-down is open, Chrome and Edge keep every key
-   * event to themselves, key releases included (the Labels drop-down says so
-   * in its own comments). A computer key let go at that moment never reaches
-   * the page: without help, its note has no way to stop.
+   * While the list of a drop-down or the colour picker is open, Chrome and
+   * Edge keep every key event to themselves, key releases included (the
+   * Labels drop-down says so in its own comments). A computer key let go at
+   * that moment never reaches the page: without help, its note has no way to
+   * stop.
+   *
+   * These tests send no key release, which is all the page ever sees. The page
+   * cannot tell a key that was let go from one that is still down, so a note
+   * whose key is in fact still held is cut short too. That is the price of
+   * never leaving one stuck.
    */
   it('does not go on sounding once the drop-down has given the keyboard back', () => {
     startApp()
@@ -811,6 +872,52 @@ describe('a note held while a drop-down takes the keyboard', () => {
     // A was let go while the list was open. Pressed again, it must sound.
     key('keydown', 'KeyA')
     expect(audio.heard).toContain('on 60')
+    key('keyup', 'KeyA')
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('stops when "Your colour" opens the colour picker, and plays again at the very next press', () => {
+    startApp()
+    const settings = openSettingsOn('Look')
+
+    // A note held to watch the light while a colour is picked.
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
+
+    // The picker opens; A is let go while it is open (the page is not told).
+    clickWithMouse(within(settings).getByRole('radio', { name: 'Your colour' }))
+    expect(settingsStore.get().accent).toBe('custom')
+    expect(heldNotes()).toEqual([])
+    expect(litKeys()).toEqual([])
+    audio.heard.length = 0
+
+    key('keydown', 'KeyA')
+    expect(audio.heard).toEqual(['on 60'])
+    key('keyup', 'KeyA')
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('stops too when the colour picker is opened with Enter on "Your colour"', () => {
+    startApp()
+    const settings = openSettingsOn('Look')
+    key('keydown', 'KeyA')
+
+    pressEnterOn(within(settings).getByRole('radio', { name: 'Your colour' }))
+
+    expect(settingsStore.get().accent).toBe('custom')
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('goes on sounding when a colour is chosen that opens nothing', () => {
+    startApp()
+    const settings = openSettingsOn('Look')
+    key('keydown', 'KeyA')
+
+    clickWithMouse(within(settings).getByRole('radio', { name: 'Blue' }))
+
+    expect(settingsStore.get().accent).toBe('blue')
+    expect(heldNotes()).toEqual([60])
+    expect(litKeys()).toEqual([60])
     key('keyup', 'KeyA')
     expect(heldNotes()).toEqual([])
   })

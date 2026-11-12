@@ -48,6 +48,17 @@ function themeNamed(name: string): LookTheme {
   return theme
 }
 
+/**
+ * What a click on the card of a theme saves: the look of the theme. "Your
+ * colour" is not part of it, and stays the colour the player had.
+ */
+function lookSavedBy(
+  name: string,
+  ownColour = DEFAULT_SETTINGS.customColour,
+): LookTheme['values'] {
+  return { ...themeNamed(name).values, customColour: ownColour }
+}
+
 function swatch(name: string): HTMLElement {
   return screen.getByRole('radio', { name })
 }
@@ -95,7 +106,7 @@ describe('the Look tab', () => {
       Colour: 'Rainbow gives every note its own colour.',
       Glow: 'How strongly the light glows.',
       Background: 'What is behind the notes.',
-      'Light bars': 'Bars of light for the notes being played.',
+      'Light bars': 'Bars of light for the notes you play and the falling notes of a song.',
       'Bar style': 'Solid bars are filled with light. Neon bars are glowing outlines.',
       Sparks: 'Small sparks where the light meets the keys.',
       'Key letters on falling notes': 'Shows which computer key to press on each note of a song.',
@@ -133,14 +144,14 @@ describe('Theme', () => {
   })
 
   it.each(LOOK_THEMES.map((theme) => theme.name))(
-    'applies everything %s sets with one click, and marks its card',
+    'applies the look of %s with one click, and marks its card',
     async (name) => {
       const user = userEvent.setup()
       render(<LiveTab />)
 
       await user.click(themeCard(name))
 
-      expectSettings(themeNamed(name).values)
+      expectSettings(lookSavedBy(name))
       expect(within(option('Theme')).getAllByRole('button').filter(isChosen)).toEqual([
         themeCard(name),
       ])
@@ -155,7 +166,22 @@ describe('Theme', () => {
 
     await user.click(themeCard('Gold'))
 
-    expectSettings({ ...mine, ...themeNamed('Gold').values })
+    expectSettings({ ...mine, ...lookSavedBy('Gold') })
+  })
+
+  it('leaves "Your colour" as the player made it, whichever theme is picked', async () => {
+    const user = userEvent.setup()
+    settingsStore.set({ accent: 'custom', customColour: '#00c2a8' })
+    render(<LiveTab />)
+
+    for (const theme of LOOK_THEMES) {
+      await user.click(themeCard(theme.name))
+      expectSettings(lookSavedBy(theme.name, '#00c2a8'))
+    }
+
+    // The colour is one click away, as it was before the themes were tried.
+    await user.click(swatch('Your colour'))
+    expectSettings({ ...lookSavedBy('Prism', '#00c2a8'), accent: 'custom' })
   })
 
   it('says "Custom" once the look matches no theme, until a theme is picked again', async () => {
@@ -178,7 +204,7 @@ describe('Theme', () => {
 
     await user.click(choice('Background', 'Aurora'))
 
-    expectSettings({ ...themeNamed('Midnight').values, background: 'aurora' })
+    expectSettings({ ...lookSavedBy('Midnight'), background: 'aurora' })
   })
 
   it.each(LOOK_THEMES)('draws the picture of $name in its own colours', (theme) => {

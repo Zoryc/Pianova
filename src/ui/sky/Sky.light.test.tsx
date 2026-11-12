@@ -35,6 +35,9 @@ const D4 = 62
 const E4 = 64
 const F4 = 65
 const NO_HINTS: ReadonlyMap<Midi, string> = new Map()
+/** The smallest and the largest letter the sky writes on a bar, in pixels: its own choice of what can be read. */
+const SMALLEST_LETTER = 8
+const LARGEST_LETTER = 20
 
 let browser: FakeBrowser
 
@@ -183,10 +186,10 @@ describe('key letters on falling notes', () => {
     const song = fakeSong(scale)
     const sky = mount({ falling: song.source, hints })
     expect(sky.context.texts.map((text) => text.text)).toEqual(['A', 'S', 'D', 'F'])
-    // A white-key bar is 21 wide here: its letter is about 13 tall, and never more than 20.
+    // A white-key bar is 21 wide here: its letter is about 13 tall.
     for (const text of sky.context.texts) {
-      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeGreaterThanOrEqual(8)
-      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(20)
+      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeGreaterThanOrEqual(SMALLEST_LETTER)
+      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(LARGEST_LETTER)
     }
   })
 
@@ -217,18 +220,45 @@ describe('key letters on falling notes', () => {
     sky.update({})
     expect(sky.context.texts.map((text) => text.text)).toEqual(['D', 'F'])
     for (const text of sky.context.texts) {
-      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(20)
+      expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(LARGEST_LETTER)
     }
   })
 
-  it('writes the same letters in the same places once they have all been seen', () => {
+  it('writes the same letters in the same places in every picture, from the very first one', () => {
     const song = fakeSong(scale)
     const sky = mount({ falling: song.source, hints })
-    sky.update({ glow: 0.7 })
     const first = sky.context.texts.map(({ text, x, y, font }) => ({ text, x, y, font }))
-    sky.update({ glow: 0.8 })
-    expect(sky.context.texts.map(({ text, x, y, font }) => ({ text, x, y, font }))).toEqual(first)
-    for (const text of first) expect(sizeOf(text.font)).toBeLessThanOrEqual(20)
+    expect(first.map(({ text }) => text)).toEqual(['A', 'S', 'D', 'F'])
+    for (const glow of [0.7, 0.8]) {
+      sky.update({ glow })
+      expect(sky.context.texts.map(({ text, x, y, font }) => ({ text, x, y, font }))).toEqual(first)
+    }
+    for (const text of first) expect(sizeOf(text.font)).toBeLessThanOrEqual(LARGEST_LETTER)
+  })
+
+  it('writes a small letter on a bar 13 pixels wide, and none on a narrower bar', () => {
+    // The black keys of a full piano are the narrowest there are. In a sky 1300
+    // wide their bars are 13.02 wide; in a sky 1280 wide, 12.82.
+    const letters = new Map<Midi, string>([
+      [C4, 'A'],
+      [C_SHARP_4, 'W'],
+    ])
+    const song = fakeSong([note(C4, 1, 1), note(C_SHARP_4, 1.2, 1)])
+    const sky = mount({ falling: song.source, hints: letters })
+    const narrowest = only(barsOn(sky, C_SHARP_4))
+    expect(narrowest.width).toBeGreaterThanOrEqual(13)
+    expect(narrowest.width).toBeLessThan(13.1)
+    expect(sky.context.texts.map((text) => text.text)).toEqual(['A', 'W'])
+    const letter = sky.context.texts[1]
+    expect(letter?.x).toBeCloseTo(centreOf(narrowest), 6)
+    expect(sizeOf(letter?.font ?? '')).toBeGreaterThanOrEqual(SMALLEST_LETTER)
+    // The stand-in canvas makes every character 0.6 times as wide as the font is tall.
+    expect(sizeOf(letter?.font ?? '') * 0.6).toBeLessThan(narrowest.width)
+
+    browser.resizeTo(1280, 600)
+    expect(only(barsOn(sky, C_SHARP_4)).width).toBeLessThan(13)
+    // Only the width keeps the letter out: the bar is as tall as before, and the white key still has its own.
+    expect(sky.context.texts.map((text) => text.text)).toEqual(['A'])
   })
 
   it('follows the letters when they change, and writes none once they are switched off', () => {
@@ -251,11 +281,10 @@ describe('key letters on falling notes', () => {
     const song = fakeSong(scale)
     for (const range of [FULL, SMALL]) {
       const sky = mount({ falling: song.source, hints: odd, range })
-      sky.update({ glow: 0.7 })
       for (const text of sky.context.texts) {
         const size = sizeOf(text.font)
         const bar = only(sky.bars().filter((candidate) => Math.abs(centreOf(candidate) - text.x) < 0.01))
-        expect(size).toBeGreaterThanOrEqual(8)
+        expect(size).toBeGreaterThanOrEqual(SMALLEST_LETTER)
         // The stand-in canvas makes every character 0.6 times as wide as the font is tall.
         expect(text.text.length * size * 0.6).toBeLessThanOrEqual(bar.width)
         expect(text.text).not.toBe('')
@@ -264,6 +293,9 @@ describe('key letters on falling notes', () => {
     }
   })
 
+  // The lower end of a note that sounds has sunk into the line. The sky then
+  // rests the letter on the line, where it can still be read: its builders'
+  // reading of "at its lower end", which src/ui/sky/Sky.test.tsx pins too.
   it('writes the letter of a very long note on the line while it sounds, for as long as it sounds', () => {
     const song = fakeSong([note(C4, 1, 5000)])
     const sky = mount({ falling: song.source, hints })
@@ -359,10 +391,14 @@ describe('falling notes: very long and very short notes', () => {
     short.state.position = 50
     sky.update({ falling: short.source })
     expect(sky.bars()).toEqual([])
+    // The player never gives a place that is not a number. Should one ever
+    // come, the sky does not fail on it, and asks the canvas for nothing impossible.
     short.state.position = Number.NaN
-    sky.update({})
-    // A place that is not a number counts as the start.
-    expect(sky.bars()).toHaveLength(1)
+    expect(() => sky.update({})).not.toThrow()
+    for (const bar of sky.bars()) {
+      expect(Number.isFinite(bar.y)).toBe(true)
+      expect(Number.isFinite(bar.height)).toBe(true)
+    }
     expect(browser.frames.requested).toBe(0)
   })
 })
@@ -460,23 +496,47 @@ describe('falling notes: moving about the song', () => {
 })
 
 describe('falling notes: thousands at once', () => {
-  it('draws the nearest notes of a wall of thousands, and each frame stays the same size', () => {
+  /**
+   * The most bars of a song the sky draws in one picture. The number is the
+   * sky's own (the spec names no limit; it asks that drawing stays fast): if
+   * it is changed there, it changes here.
+   */
+  const MOST_FALLING_BARS = 400
+
+  /** Six thousand notes in three seconds, on every key of the piano in turn. */
+  function wallOfNotes(): PlayableNote[] {
     const wall: PlayableNote[] = []
     for (let i = 0; i < 6000; i++) wall.push(note(21 + (i % 88), 1 + i * 0.0005, 0.2))
-    const song = fakeSong(wall)
+    return wall
+  }
+
+  it('draws the nearest notes of a wall of thousands, and each frame stays the same size', () => {
+    const song = fakeSong(wallOfNotes())
     const sky = mount({ falling: song.source, hints: new Map([[C4, 'A']]) })
     song.state.playing = true
     sky.update({})
     song.play(0.2)
     const drawn = sky.bars().length
     expect(drawn).toBeGreaterThan(300)
-    expect(drawn).toBeLessThanOrEqual(400)
+    expect(drawn).toBeLessThanOrEqual(MOST_FALLING_BARS)
     // The bars that are drawn are the ones that land first.
     const highest = Math.max(...sky.bars().map(bottomAboveLine))
     expect(highest).toBeLessThan(1.1 * skySpeed(600))
     song.play(0.2)
-    expect(sky.bars().length).toBeLessThanOrEqual(400)
+    expect(sky.bars().length).toBeLessThanOrEqual(MOST_FALLING_BARS)
     expect(browser.frames.pending.size).toBe(1)
+  })
+
+  it('is as full in the middle of the wall, while one note is held under all of it', () => {
+    // The held note began before everything else. The thousands of notes that
+    // have ended since must not count toward what the sky draws at most.
+    const held = note(108, 0, 600)
+    const song = fakeSong([held, ...wallOfNotes()])
+    song.state.position = 2.5
+    const sky = mount({ falling: song.source })
+    expect(barsOn(sky, held.midi).some((bar) => bar.height > 600)).toBe(true)
+    expect(sky.bars().length).toBeGreaterThan(300)
+    expect(sky.bars().length).toBeLessThanOrEqual(MOST_FALLING_BARS)
   })
 })
 
@@ -567,7 +627,8 @@ describe('the animation loop', () => {
     expect(sky.bars()).toEqual([])
     expect(sky.stamps('bloom')).toEqual([])
     expect(sky.stamps('spark')).toEqual([])
-    expect(sky.context.images).toHaveLength(1)
+    // Whatever is still copied onto the idle sky is its background, nothing of the notes.
+    expect(sky.context.images).toHaveLength(sky.stamps('backdrop').length)
   })
 
   it('stops for a playing song when light bars are switched off, and starts again when they come back', () => {
@@ -803,14 +864,19 @@ describe("the player's own colour, changing on every frame", () => {
 
   it('paints the background once for each colour while nothing is played, and asks for no frame', () => {
     const sky = mount({ accent: 'custom', customColour: '#336699', background: 'aurora' })
-    const backdrop = (): FakeContext | undefined =>
-      browser.contexts().find((context) => context !== sky.context && context.canvas.width === 1300)
-    const wipesBefore = backdrop()?.wipes ?? 0
+    // Nothing is played, so the only canvas besides the sky's own is the one the
+    // background is painted on: one canvas, however many colours go by.
+    const backdrop = (): FakeContext =>
+      only(browser.contexts().filter((context) => context !== sky.context))
+    // How the stand-in canvas sees a picture being painted again: it is wiped whole first.
+    const paintedBefore = backdrop().wipes
     for (let i = 0; i < 200; i++) sky.update({ customColour: colourNumber(i) })
-    expect((backdrop()?.wipes ?? 0) - wipesBefore).toBe(200)
+    expect(backdrop().wipes - paintedBefore).toBe(200)
     expect(browser.frames.requested).toBe(0)
-    // One backdrop canvas, however many colours went by.
-    expect(browser.contexts().filter((context) => context !== sky.context)).toHaveLength(1)
+
+    // The same colour again and again paints nothing more.
+    for (let i = 0; i < 20; i++) sky.update({ customColour: colourNumber(199) })
+    expect(backdrop().wipes - paintedBefore).toBe(200)
   })
 })
 
@@ -1049,14 +1115,18 @@ describe('the drawing context', () => {
     HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: unknown[]) {
       return this === sky.canvas ? (real as (...rest: unknown[]) => unknown).apply(this, args) : null
     } as unknown as HTMLCanvasElement['getContext']
-    sky.update({ accent: 'blue', background: 'aurora' })
-    sky.bus.noteOn(C4, 'keyboard')
-    browser.play(0.5)
-    // The bar itself is drawn by the sky's own context; glows, sparks and the background are left out.
-    expect(sky.bars()).toHaveLength(1)
-    expect(sky.context.images).toEqual([])
-    sky.bus.allOff()
-    browser.playUntilIdle()
-    expect(sky.bars()).toEqual([])
+    try {
+      sky.update({ accent: 'blue', background: 'aurora' })
+      sky.bus.noteOn(C4, 'keyboard')
+      browser.play(0.5)
+      // The bar itself is drawn by the sky's own context; glows, sparks and the background are left out.
+      expect(sky.bars()).toHaveLength(1)
+      expect(sky.context.images).toEqual([])
+      sky.bus.allOff()
+      browser.playUntilIdle()
+      expect(sky.bars()).toEqual([])
+    } finally {
+      HTMLCanvasElement.prototype.getContext = real
+    }
   })
 })

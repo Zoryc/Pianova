@@ -300,7 +300,8 @@ describe('controls', () => {
   })
 
   // The ring is a shadow, drawn by a rule of theme.css that any rule naming a
-  // class outranks. A shadow given to a control would therefore take its place.
+  // class outranks. A shadow given to a control would therefore take its
+  // place, unless that shadow is the ring itself, or has the ring in it.
   it('gives no control a shadow of its own, which would take the place of the focus ring', () => {
     const controls = [
       'button',
@@ -320,7 +321,8 @@ describe('controls', () => {
     const shadowed: string[] = []
     for (const css of Object.values(CHROME_SHEETS)) {
       for (const { selectors, declarations } of rules(css)) {
-        if (!/(?:^|;)\s*box-shadow\s*:/.test(declarations)) continue
+        const shadow = /(?:^|;)\s*box-shadow\s*:\s*([^;]+)/.exec(declarations)?.[1]
+        if (shadow === undefined || shadow.includes('var(--focus-ring)')) continue
         for (const selector of selectors) {
           // A part drawn inside the control (::after, a slider's thumb) is not the control.
           if (selector.includes('::')) continue
@@ -379,12 +381,12 @@ describe('controls', () => {
 })
 
 describe('the visual rules of the spec', () => {
-  // stage.css, app.css, songs.css and piano.css are held to this by their own tests.
-  it.each(['chrome.css', 'settings.css', 'sky.css'])(
+  it.each(Object.keys(SHEETS))(
     '%s takes every colour from the theme: no colour is written out',
     (name) => {
       const css = SHEETS[name] ?? ''
       expect(css).not.toBe('')
+      // Not as a number, not as a colour function, and not by name.
       expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
       expect(css).not.toMatch(/\b(?:rgba?|hsla?|hwb|oklch|oklab|lab|lch)\(/)
       const named = /:\s*(?:white|black|red|blue|green|gray|grey|orange|yellow|purple|pink)\s*[;}]/
@@ -438,9 +440,13 @@ describe('the visual rules of the spec', () => {
     }
   })
 
-  // The piano and the stage have timings of their own, which their tests hold
-  // them to: a key dips in 50 ms and its light fades over 250 ms, and the
-  // words "how to play" fade over 400 ms.
+  // Like the 4 px grid below, this is a rule for the controls: chrome.css
+  // promises at its top that every control answers within 80 to 160 ms, and
+  // the sheets of the two panels are full of controls. The piano and the stage
+  // are left out on purpose. They have timings of their own, which their own
+  // tests hold them to: a key dips in 50 ms and its light fades over 250 ms
+  // (src/ui/Piano.pointer.test.tsx), and the words "how to play" fade over
+  // 400 ms (src/ui/stage.css.test.ts).
   it.each(Object.keys(CHROME_SHEETS))('%s keeps every transition between 80 and 160 ms', (name) => {
     const durations = [...(CHROME_SHEETS[name] ?? '').matchAll(/(\d+(?:\.\d+)?)ms/g)].map((match) =>
       Number(match[1]),
@@ -456,19 +462,42 @@ describe('the visual rules of the spec', () => {
   })
 
   it('slides the menu away in 160 ms, and only then takes it out of reach of the Tab key', () => {
-    const shown = value('.menu', 'transition', chromeCss)
-    expect(shown).toBe('opacity 160ms ease-out, transform 160ms ease-out, visibility 0s')
+    // What changes gradually, in the order the stylesheet lists it, and how long each takes.
+    const timed = value('.menu', 'transition', chromeCss)
+      .split(',')
+      .map((part) => part.trim().split(/\s+/))
+    const properties = timed.map(([property]) => property)
+    const durationOf = (property: string): string | undefined =>
+      timed.find(([name]) => name === property)?.[1]
+    // It fades and it slides, both in 160 ms. How the movement eases is not prescribed.
+    expect(durationOf('opacity')).toBe('160ms')
+    expect(durationOf('transform')).toBe('160ms')
     expect(value('.menu--hidden', 'opacity', chromeCss)).toBe('0')
+    expect(declared('.menu--hidden', 'transform', chromeCss)).not.toBeNull()
+
+    // Out of reach is not gradual: it happens in one go…
+    expect(durationOf('visibility')).toBe('0s')
     expect(value('.menu--hidden', 'visibility', chromeCss)).toBe('hidden')
-    // Gone when the slide is over; back at once, because the menu itself has no wait.
-    expect(value('.menu--hidden', 'transition-delay', chromeCss)).toBe('0s, 0s, 160ms')
+    // …when the slide is over. The fade and the slide themselves start at once.
+    const waits = value('.menu--hidden', 'transition-delay', chromeCss)
+      .split(',')
+      .map((wait) => wait.trim())
+    expect(waits).toHaveLength(properties.length)
+    expect(waits[properties.indexOf('visibility')]).toBe('160ms')
+    expect(waits[properties.indexOf('opacity')]).toBe('0s')
+    expect(waits[properties.indexOf('transform')]).toBe('0s')
+    // And it is back at once, because the menu itself has no wait.
     expect(declared('.menu', 'transition-delay', chromeCss)).toBeNull()
     // The mouse pointer hides with it.
     expect(value('.cursor-hidden', 'cursor', chromeCss)).toBe('none !important')
     expect(value('.cursor-hidden *', 'cursor', chromeCss)).toBe('none !important')
   })
 
-  // chrome.css draws everything the panels share; app.css and stage.css lay out the window.
+  // The 4 px grid is a rule for the shared controls, which chrome.css draws
+  // (it says so at its top), and for how the window is shared (app.css and
+  // stage.css). settings.css and songs.css are left out on purpose: the
+  // layout a panel adds for itself is not held to the grid, where a small
+  // drawing or a tight row may need a gap of 2px.
   it('spaces things in multiples of 4px', () => {
     const sheets = [chromeCss, appCss, stageCss].join('\n')
     const spacing = [
@@ -548,11 +577,15 @@ describe('the visual rules of the spec', () => {
       expect(value(chosen, 'background', chromeCss), chosen).toBe('var(--light)')
       expect(value(chosen, 'color', chromeCss), chosen).toBe('var(--light-ink)')
     }
-    // A slider, from its start up to the thumb.
-    expect(value('.slider::-webkit-slider-thumb', 'border-image', chromeCss)).toContain(
-      'var(--light) 50%',
+    // A slider, from its start up to the thumb. Firefox has a part for exactly
+    // that. Chrome and Edge have none, so how it is drawn there is left to the
+    // stylesheet: one of the slider's parts carries the light.
+    const usesTheLight = /var\(--light\)/
+    expect(rule('.slider::-moz-range-progress', chromeCss)).toMatch(usesTheLight)
+    const partsInChrome = rules(chromeCss).filter(({ selectors }) =>
+      selectors.some((selector) => selector.startsWith('.slider::-webkit-')),
     )
-    expect(value('.slider::-moz-range-progress', 'background', chromeCss)).toBe('var(--light)')
+    expect(partsInChrome.some(({ declarations }) => usesTheLight.test(declarations))).toBe(true)
 
     // Never the light itself as the colour of text: a dark colour of the
     // player's own could not be read on the dark panels.

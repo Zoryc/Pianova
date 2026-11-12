@@ -121,6 +121,11 @@ function playing(arrangement: Arrangement): Rig {
   return made
 }
 
+/** The same music in a list of notes of its own, as arranging the song again gives. */
+function copyOf(arrangement: Arrangement): Arrangement {
+  return { ...arrangement, notes: [...arrangement.notes] }
+}
+
 function log(heard: readonly Heard[]): string[] {
   return heard.map((event) => `${event.type} ${event.midi}`)
 }
@@ -453,7 +458,13 @@ describe('no stuck notes', () => {
     ['seek', (made) => made.player.seek(3.5), 1],
     ['load of another song', (made) => made.player.load(OTHER, OTHER_TUNE), 0],
     ['load of the same song again', (made) => made.player.load(SONG, CHORD), 0],
-    ['load that keeps the place', (made) => made.player.load(SONG, CHORD, { keepPlace: true }), 1],
+    // A copy of the notes, as when the options of the song change: other notes to the player.
+    // (The very notes it already has are only a new name: see 'a new name for the song'.)
+    [
+      'load that keeps the place',
+      (made) => made.player.load(SONG, copyOf(CHORD), { keepPlace: true }),
+      1,
+    ],
   ]
 
   for (const [name, act, timerAfter] of endings) {
@@ -532,6 +543,82 @@ describe('no stuck notes', () => {
     ).toEqual([60, 64, 67, 72])
     expect([...made.bus.getActiveNotes()]).toEqual([])
     expect(made.player.getState().status).toBe('stopped')
+  })
+})
+
+/*
+ * When the song in the player is renamed, the app loads the very notes the
+ * player already has, keeping the place, with the new name. Nothing about the
+ * music changed, so nothing may be heard of it.
+ */
+describe('a new name for the song', () => {
+  /** Three notes that sound together for a while, then one more. */
+  const CHORD = arrangementOf([note(60, 0, 3), note(64, 0.1, 3), note(67, 0.2, 3), note(72, 4, 1)])
+  const RENAMED = { id: SONG.id, title: 'A better name' }
+
+  it('leaves the notes that are sounding alone, and the song plays on to its end', () => {
+    const made = playing(CHORD)
+    made.clock.run(500)
+    made.heard.length = 0
+
+    made.player.load(RENAMED, CHORD, { keepPlace: true })
+    expect(made.heard).toEqual([])
+    expect([...made.bus.playbackHolds].sort()).toEqual([60, 64, 67])
+    expect(made.clock.running()).toBe(1)
+    expect(made.player.getState()).toMatchObject({
+      status: 'playing',
+      songId: 'one',
+      title: 'A better name',
+      duration: 5,
+    })
+
+    // Each note still ends when the song says so: the first one three seconds in, not before.
+    made.clock.run(2450)
+    expect(made.heard).toEqual([])
+    made.clock.run(100)
+    expect(log(made.heard)).toEqual(['off 60'])
+    made.clock.run(2050)
+    expect(log(made.heard)).toEqual(['off 60', 'off 64', 'off 67', 'on 72', 'off 72'])
+    expect(made.player.getState()).toMatchObject({ status: 'stopped', position: 0 })
+    expect(made.bus.presses).toBe(4)
+    expect(made.bus.releases).toBe(4)
+    expect(made.clock.running()).toBe(0)
+  })
+
+  it('is taken by a paused song too, which stays where it was, and is told once', () => {
+    const made = playing(CHORD)
+    made.clock.run(500)
+    made.player.pause()
+    const told = vi.fn()
+    made.player.subscribe(told)
+    made.heard.length = 0
+
+    made.player.load(RENAMED, CHORD, { keepPlace: true })
+    expect(told).toHaveBeenCalledTimes(1)
+    expect(made.player.getState()).toMatchObject({ status: 'paused', title: 'A better name' })
+    expect(made.player.getState().position).toBeCloseTo(0.5, 6)
+    expect(made.heard).toEqual([])
+    expect(made.clock.running()).toBe(0)
+
+    // "Play" carries on from there: the notes that were sounding are not struck again.
+    made.player.play()
+    made.clock.run(4600)
+    expect(log(made.heard)).toEqual(['on 72', 'off 72'])
+    expect(made.player.getState().status).toBe('stopped')
+  })
+
+  it('needs the place to be kept: the same notes loaded afresh stop the song, as any load does', () => {
+    const made = playing(CHORD)
+    made.clock.run(500)
+
+    made.player.load(RENAMED, CHORD)
+    expect(made.bus.playbackHolds.size).toBe(0)
+    expect(made.player.getState()).toMatchObject({
+      status: 'stopped',
+      title: 'A better name',
+      position: 0,
+    })
+    expect(made.clock.running()).toBe(0)
   })
 })
 
@@ -641,7 +728,7 @@ describe('listeners that misbehave', () => {
     ],
     [
       'loads and keeps the place',
-      (player) => player.load(SONG, TUNE, { keepPlace: true }),
+      (player) => player.load(SONG, copyOf(TUNE), { keepPlace: true }),
       'playing',
       1,
     ],

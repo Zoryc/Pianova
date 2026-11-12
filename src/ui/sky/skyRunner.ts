@@ -100,6 +100,7 @@ export class SkyRunner {
     // Zooming the page changes devicePixelRatio, often without changing the size of the box.
     window.addEventListener('resize', this.onResize)
     this.motion.addEventListener('change', this.onMotionChange)
+    canvas.addEventListener('contextrestored', this.onContextRestored)
     this.surface = fitCanvas(canvas)
   }
 
@@ -123,6 +124,7 @@ export class SkyRunner {
     this.resizeObserver.disconnect()
     window.removeEventListener('resize', this.onResize)
     this.motion.removeEventListener('change', this.onMotionChange)
+    this.canvas.removeEventListener('contextrestored', this.onContextRestored)
     this.stopLoop()
     this.watchSong(false)
     this.painter.clear()
@@ -165,6 +167,17 @@ export class SkyRunner {
 
   private readonly onMotionChange = (): void => {
     this.wake(true)
+  }
+
+  /*
+   * The browser had taken the drawing away (a graphics driver that restarted,
+   * a laptop that woke up) and now gives it back, with an empty canvas. An
+   * idle sky would stay empty until the next note, and the ready-made
+   * pictures may have been emptied too: they are made anew for this picture.
+   */
+  private readonly onContextRestored = (): void => {
+    this.painter.forget()
+    this.draw()
   }
 
   private readonly onSongWatch = (): void => {

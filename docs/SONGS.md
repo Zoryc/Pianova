@@ -1,12 +1,12 @@
 # Songs: MIDI import and listening (Phase 1b)
 
-Read `docs/ARCHITECTURE.md` first: its product rules (section 1), the note bus (section 3) and the visual direction (section 6) all apply here. This document adds the song feature on top of the finished Phase 1 app.
+Read `docs/ARCHITECTURE.md` first: its product rules (section 1) and the note bus (section 3) apply here. The screen, songs included, is described in `docs/INTERFACE.md`. This document adds the song feature on top of the finished Phase 1 app.
 
 ## 1. What the player gets
 
 1. **Import a MIDI file** with a button or by dropping the file anywhere on the page.
-2. **A list of imported songs**, saved in the browser. Rename and delete.
-3. **Listening**: the app plays a song on the piano. Keys light up and light trails rise exactly as when the player plays. Play, pause, stop, a progress bar that can be dragged, and a speed control. The player can play along on the keyboard at the same time.
+2. **A list of imported songs**, saved in the browser. Rename and delete. Six starter songs are built in (section 4.6).
+3. **Listening**: the app plays a song on the piano. Keys light up exactly as when the player plays, and the notes fall toward the keys as bars of light. Play, pause, stop, a progress bar that can be dragged, and a speed control. The player can play along on the keyboard at the same time.
 4. **Song options**, closed by default ("simple first, advanced on demand"): which parts of the song to play, melody only, and fit to the piano.
 
 Practice and Real-time modes (later phases) will use the same songs, the same arranging functions and the same player clock. Nothing here may assume that listening is the only use.
@@ -23,27 +23,27 @@ Rules specific to songs:
 ```
 MIDI file ──▶ parseMidiFile ──▶ Song ──▶ songLibrary (browser storage)
                                  │
-              arrange(song, options, baseOctave) ──▶ Arrangement (playable notes)
+              arrange(song, options, range) ──▶ Arrangement (playable notes)
                                  │
-                            songPlayer ──▶ NoteBus (source 'playback') ──▶ sound, lit keys, trails
+                            songPlayer ──▶ NoteBus (source 'playback') ──▶ sound, lit keys, sparks
 ```
 
-The player is just another **input** on the note bus, with source `'playback'`. It never talks to the sound engine or the UI directly. Because of that, the piano lights up and sounds with no changes to the piano, the trails or the engine.
+The player is just another **input** on the note bus, with source `'playback'`. It never talks to the sound engine or the UI directly. Because of that, the piano lights up and sounds with no changes to the piano or the engine. The falling notes are the one thing drawn from the arrangement itself, not from the bus (`docs/INTERFACE.md` 5.2): they have to be seen before they sound.
 
 ## 3. File map
 
 | File | What it is |
 |---|---|
-| `src/songs/song.ts` (+ test) | `Song` types (already written: `SongNote`, `SongTrack`, `Song`, `SongSummary`, `ArrangeOptions`, `PlayableNote`, `Arrangement`) and small helpers. |
+| `src/songs/song.ts` (+ test) | The song types (`SongNote`, `SongTrack`, `Song`, `SongSummary`, `ArrangeOptions`, `PlayableNote`, `Arrangement`, `SongPlayOptions`) and small helpers. `arrange.ts` and `songLibrary.ts` export again the ones that section 4 lists under them. |
 | `src/songs/starterSongs.ts` (+ test) | The built-in public-domain tunes. |
 | `src/songs/midiImport.ts` (+ test) | Bytes of a MIDI file → `Song`. |
 | `src/songs/arrange.ts` (+ test) | `Song` + options → the notes to play. Pure. |
 | `src/songs/songLibrary.ts` (+ test) | The saved songs and their options, over browser storage. |
 | `src/songs/songPlayer.ts` (+ test) | Plays an arrangement onto the note bus. |
-| `src/app/pianoApp.ts` | Gains the `player` and `songLibrary` singletons. |
+| `src/app/songsApp.ts` | The `player` and `songLibrary` singletons (the bus comes from `src/app/pianoApp.ts`). |
 | `src/ui/SongsPanel.tsx` | Import button and the song list (see `docs/INTERFACE.md` section 9). |
-| `src/ui/PlayerLine.tsx` | Play / pause / stop / progress / speed / song options. |
-| `src/ui/useSongs.ts` | Hooks and the glue: importing files, loading a song into the player, re-arranging when options change. |
+| `src/ui/PlayerLine.tsx` | Play / pause / stop / progress / speed / song options, and the progress line along the top of the window. |
+| `src/ui/useSongs.ts` | Hooks and the glue: importing files, loading a song into the player (with its lead-in), moving the computer keys to the song and back, re-arranging when options change, whether the song options are open. |
 | `src/ui/DropOverlay.tsx` | "Drop the MIDI file to add it". |
 | `src/ui/songs.css` | Styles for these components, using `theme.css` tokens only. |
 
@@ -150,17 +150,20 @@ User messages (exact):
 | `unsupported` | `That kind of MIDI file is not supported yet.` |
 | `damaged` | `That MIDI file seems to be damaged and could not be read.` |
 
+Something the browser cannot read at all (a folder, a file that was moved away) never reaches `parseMidiFile`. It gets a sentence of its own from the glue in `src/ui/useSongs.ts` (section 5.2).
+
 Behaviour:
 
 - Check the size first, then that the bytes start with `MThd` (also accept a RIFF/`RMID` wrapper by finding the embedded `MThd` chunk). Anything else is `not-midi`.
-- Formats 0 and 1 are supported. Format 2 and SMPTE time division are `unsupported`. Whatever `midi-file` throws, or any result that does not have the expected shape, is `damaged`.
+- Formats 0 and 1 are supported. Format 2 and SMPTE time division are `unsupported`. Whatever `midi-file` throws, or any result that does not have the expected shape, is `damaged`. One exception: a track that begins with a sequence-number event written without its number (bytes `00 FF 00 00`), which some programs write and `midi-file` refuses, is read. The importer turns that event into an empty text event on its own copy of the bytes before `midi-file` sees them; the bytes passed in are never changed. The same event further into a track is still `damaged`.
+- **Files that were cut off** are read leniently, on purpose. `midi-file` reads what is there: when a file ends early at a place that falls between two events (a download that stopped, or a last track that states too long a length), the song is imported with the notes before the cut and is reported as added. A cut inside an event is `damaged`.
 - **Timing**: ticks → seconds with the tempo map. Tempo changes may appear in any track and apply to all tracks (format 1). Default tempo is 120 BPM when the file sets none. Guard against a tempo of 0 and against absurd values.
-- **Notes**: a note-on with velocity 0 is a note-off. A note-off with no matching note-on is ignored. A second note-on for a pitch that is already on (same track and channel) ends the first one there. Notes still on at the end of the track end at the track's end. Zero-length notes get a small minimum duration (0.03 s). Pitches outside 21..108 are dropped.
+- **Notes**: a note-on with velocity 0 is a note-off. A note-off with no matching note-on is ignored. A second note-on for a pitch that is already on (same track and channel) ends the first one there. A note-off written at the same tick as that second note-on, after it, belongs to the first note (some programs write a repeated note in this order): the second note sounds until its own note-off. Notes still on at the end of the track end at the track's end. Zero-length notes get a small minimum duration (0.03 s). Pitches outside 21..108 are dropped.
 - **Sustain pedal** (controller 64, per channel): while the pedal is down, a note that is released keeps sounding until the pedal comes up or the same pitch is played again on that channel, whichever is first. This is applied to the note durations at import, so the song sounds as the performance intended without any pedal logic in the player.
 - **Parts**: format 1 → one `SongTrack` per MIDI track that has notes (id = track index). Format 0, or a track that mixes several channels → one `SongTrack` per channel (ids stay unique). Channel 10 (index 9) is percussion. Track name from the track-name meta event; program from the first program change. Parts with no notes are dropped. No pitched notes at all → `no-notes`.
 - More than `MAX_SONG_NOTES` notes in total → `unsupported`.
-- **Title**: the sequence name of the first track if it is not empty and not a generic placeholder, otherwise `titleFromFileName(fileName)`.
-- The whole song is shifted so that its first note is at most 1 second after time 0 (long silent lead-ins are trimmed to 1 s; nothing is trimmed if the first note is already within 1 s).
+- **Title**: the name of the first track, when that track has no notes or is the only track of the file, and the name is not empty and not a generic placeholder; otherwise `titleFromFileName(fileName)`. (A first track that plays notes next to other tracks is a part of the song: its name, such as "Right hand" or "Flute", is not the song's.)
+- The whole song is shifted so that its first note that is not percussion is at most 1 second after time 0 (long silent lead-ins are trimmed to 1 s; nothing is trimmed if that note is already within 1 s). Percussion notes from before the new start are left out. (When a song is played, the screen adds a lead-in of its own, so that the first note is seen falling: `docs/INTERFACE.md` section 9.)
 - `duration` is the end of the last note. All notes sorted as the type says.
 
 ### 4.3 `src/songs/arrange.ts`
@@ -290,7 +293,12 @@ export interface PlayerDeps {
 }
 
 export interface SongPlayer {
-  /** Replaces what is loaded. Stops first, unless `keepPlace` is true: then position and playing/paused state are kept (used when the options of the current song change). */
+  /**
+   * Replaces what is loaded. Stops first, unless `keepPlace` is true: then position and playing/paused state
+   * are kept (used when the options of the current song change). With `keepPlace` and the arrangement that is
+   * already loaded (the same `notes` array, the same duration), only the id and the title are taken over: the
+   * notes that are sounding are left alone (used when the current song is renamed).
+   */
   load(song: { id: string; title: string }, arrangement: Arrangement, options?: { keepPlace?: boolean }): void
   /** Back to 'empty'. */
   unload(): void
@@ -316,14 +324,15 @@ Behaviour:
 - Notes go to the bus with source `'playback'` and the note's own velocity.
 - While playing, a timer ticks every 5 ms. Each tick advances the position by the real time elapsed × speed, then releases every note whose end has passed and starts every note whose start has passed, **releases before presses**, in time order.
 - A long gap between ticks (more than 250 ms of real time, for example a throttled background tab or a debugger pause) advances the position by 250 ms only: the song waits rather than dumping a burst of notes.
-- **No stuck notes**: `pause`, `stop`, `seek`, `load`, `unload`, `dispose` and reaching the end all release every note the player is holding (`bus.allOff('playback')` plus its own bookkeeping). The player must also cope with someone else calling `bus.allOff()` while it is playing (its later releases of those notes are simply ignored by the bus).
+- **No stuck notes**: `pause`, `stop`, `seek`, `load`, `unload`, `dispose` and reaching the end all release every note the player is holding (`bus.allOff('playback')` plus its own bookkeeping). The player must also cope with someone else calling `bus.allOff()` while it is playing (its later releases of those notes are simply ignored by the bus). The one exception is a `load` with `keepPlace` of the arrangement that is already loaded (the same `notes` array and the same duration): nothing about the music changes, so nothing is released and the song plays on.
 - Reaching the end: status `'stopped'`, position 0.
 - `seek` clamps to 0..duration. Notes already sounding at the new position are not restarted; playing continues with the next note that starts. Seeking while paused or stopped moves the position without playing.
 - `play` when empty does nothing. `play` at the very end starts from 0.
 - The timer exists only while the status is `'playing'`.
 - `setSpeed` clamps to MIN_SPEED..MAX_SPEED and takes effect at once.
 - Subscribers are told at once about status, song, speed and seek changes, and about position at most about 10 times a second.
-- The page becoming hidden pauses the player (browsers slow timers in hidden tabs, which would make the song crawl): this is wired by the app, not inside the player.
+- The page becoming hidden pauses the player (browsers slow timers in hidden tabs, which would make the song crawl), and so do leaving the page (`pagehide`) and the app being taken off the page: this is wired by the app (`useSongSession` in `src/ui/useSongs.ts`), not inside the player.
+- The player is also paused when the computer keys start being chosen (the Keys tab of Settings opens, or a piano key is selected there): wired in `src/ui/useKeyEditor.ts`, not inside the player.
 
 ### 4.6 `src/songs/starterSongs.ts`
 
@@ -331,6 +340,11 @@ Behaviour:
 /** Built-in songs: old tunes in the public domain, written out here as notes. Their ids start with 'starter:'. */
 export const STARTER_SONGS: readonly Song[]
 export function isStarterSong(id: string): boolean
+
+/** One built-in tune as it is written down: id, title, beatsPerMinute, tune. */
+export interface StarterTune
+/** The tunes of the table below. Exported for the unit test that checks the bars of every tune. */
+export const STARTER_TUNES: readonly StarterTune[]
 
 /**
  * Turns a tune written as text into a Song with one part.
@@ -355,43 +369,45 @@ The tunes (exact notes; "|" marks bars):
 | Jingle Bells | 120 | `E4/1 E4/1 E4/2 | E4/1 E4/1 E4/2 | E4/1 G4/1 C4/1.5 D4/.5 | E4/4 | F4/1 F4/1 F4/1.5 F4/.5 | F4/1 E4/1 E4/1 E4/.5 E4/.5 | E4/1 D4/1 D4/1 E4/1 | D4/2 G4/2 | E4/1 E4/1 E4/2 | E4/1 E4/1 E4/2 | E4/1 G4/1 C4/1.5 D4/.5 | E4/4 | F4/1 F4/1 F4/1.5 F4/.5 | F4/1 E4/1 E4/1 E4/.5 E4/.5 | G4/1 G4/1 F4/1 D4/1 | C4/4` |
 | Für Elise (opening) | 66 | `E5/.25 D#5/.25 | E5/.25 D#5/.25 E5/.25 B4/.25 D5/.25 C5/.25 | A4/.5 R/.25 C4/.25 E4/.25 A4/.25 | B4/.5 R/.25 E4/.25 G#4/.25 B4/.25 | C5/.5 R/.25 E4/.25 E5/.25 D#5/.25 | E5/.25 D#5/.25 E5/.25 B4/.25 D5/.25 C5/.25 | A4/.5 R/.25 C4/.25 E4/.25 A4/.25 | B4/.5 R/.25 E4/.25 C5/.25 B4/.25 | A4/1` |
 
-All six are traditional tunes or works by composers who died more than 150 years ago.
+All six are traditional tunes or were written before 1860; all are in the public domain.
 
 ## 5. Screen
 
-> The screen for songs is now described in `docs/INTERFACE.md` section 9, which replaces this section. What follows is kept for its exact wording (messages, labels, rules), which still applies.
+> Where these pieces sit on the screen is described in `docs/INTERFACE.md` section 9, which replaces the layout first planned here. This section is kept for its exact wording (messages, labels, rules), which still applies.
 
-Follow sections 1 and 6 of `docs/ARCHITECTURE.md`. Exact wording below.
+Follow section 1 of `docs/ARCHITECTURE.md` and the look of `docs/INTERFACE.md`. Exact wording below.
 
-### 5.1 Toolbar
+### 5.1 The Songs button
 
-A **"Songs"** button, between "Customize keys" and "Advanced", same quiet style as Advanced, `aria-expanded`. It opens and closes the Songs panel, which appears directly under the toolbar in the same place as the Advanced panel. Only one of the two panels is open at a time: opening one closes the other.
+A **"Songs"** button in the top bar, next to "Settings", in the same quiet style, with `aria-expanded`. It opens and closes the Songs panel, which floats over the sky as the Settings panel does (`docs/INTERFACE.md` 5.3 and 5.4). Only one of the two panels is open at a time: opening one closes the other.
 
 ### 5.2 Songs panel (`SongsPanel`)
 
 - Heading "Songs".
 - **"Import a MIDI file"** button (primary). Opens the file picker (`accept=".mid,.midi,audio/midi,audio/x-midi"`, several files allowed). Next to it: "or drop a MIDI file anywhere on this page".
-- The list, newest first. Each row: the title, the length (`formatDuration`), a **"Play"** button, **"Rename"** and **"Delete"**.
-  - Play: loads the song into the player, starts it, and closes the Songs panel so the piano is in view.
-  - Rename: the title becomes a text field in place, with "Save" and "Cancel". Enter saves, Escape cancels. (While the field has focus the keyboard types text and does not play notes: this is already how the app treats text fields.)
-  - Delete: asks inline ("Delete?" with Yes / No), like the other confirmations in the app. Deleting the song that is loaded in the player unloads it.
-- Empty list: "No songs yet. Import a MIDI file to hear it played on the piano."
+- Two groups: "Your songs" (the player's own, newest first) and under it "Starter songs" (section 4.6), which have a "Play" button only. Each row of the player's own songs: the title, the length (`formatDuration`), a **"Play"** button, **"Rename"** and **"Delete"**.
+  - Play: loads the song into the player, starts it, and closes the Songs panel so the piano is in view. A song whose saved notes cannot be read is not played: the panel stays, and the message line says `That song could not be read. Delete it and import the MIDI file again.`
+  - Rename: the title becomes a text field in place, with "Save" and "Cancel". Enter saves, Escape cancels. (While the field has focus the keyboard types text and does not play notes: this is already how the app treats text fields.) Renaming the song that is playing does not interrupt it.
+  - Delete: asks inline ("Delete?" with Yes / No), like the other confirmations in the app. Deleting the song that is loaded in the player closes it.
+- Empty list (the "Your songs" group): "No songs of your own yet. Import a MIDI file to add one."
 - A message line (role="status") for results: `"<title>" was added.` (for several files: `3 songs were added.`), or the `userMessage` of the error, prefixed with the file name when several files were imported at once.
+  - Anything the browser cannot read at all (a folder, a file that was moved away) gets a sentence of its own, which is not one of the `SongImportError` messages: `That could not be read. If it is a folder, open it and drop the MIDI files that are in it.`
+  - Files added while earlier files are still being read join the same report: the message line then says how every file of both lots went.
 - Importing the same file twice simply adds it twice.
 
-**Drop anywhere**: while a file is dragged over the page, a full-page overlay says "Drop the MIDI file to add it". Dropping imports it and opens the Songs panel to show the result. Dragging things that are not files (text, links) shows nothing and is not blocked. The browser must never navigate away to the dropped file.
+**Drop anywhere**: while a file is dragged over the page, a full-page overlay says "Drop the MIDI file to add it". Dropping imports it and opens the Songs panel to show the result. A file dropped on the page before the first click also takes the start overlay away, so that the Songs panel does not open behind it; the sound still starts at the next click or key press. Dragging things that are not files (text, links) shows nothing and is not blocked. The browser must never navigate away to the dropped file.
 
-### 5.3 Player bar (`PlayerBar`)
+### 5.3 Player line (`PlayerLine`)
 
-Shown between the Now playing line and the stage whenever a song is loaded:
+Shown under the top bar whenever a song is loaded:
 
 - **Play / Pause** (one button whose label and icon change), **Stop**.
 - The song title (cut with an ellipsis when long).
-- The progress slider (`aria-label="Position in the song"`), with the elapsed and total time on either side (`formatDuration`). Dragging it seeks.
+- The progress slider (`aria-label="Position in the song"`), with the elapsed and total time on either side (`formatDuration`). Dragging it seeks. The total is the length of what is played, lead-in included (`docs/INTERFACE.md` section 9).
 - **Speed**: a slider from 50% to 150% in steps of 5, showing the value ("100%").
-- **"Song options"** (quiet button, `aria-expanded`) and **"Close"** (unloads the song and hides the bar).
+- **"Song options"** (quiet button, `aria-expanded`) and **"Close"** (unloads the song and hides the line).
 
-Song options, shown under the bar when open:
+Song options, shown under the line when open:
 
 - **Parts**: one checkbox per non-percussion part, labelled with its name when it has one, then the instrument and the note count, e.g. "Right hand · Piano · 532 notes" or "Part 2 · Strings · 120 notes". At least one part stays checked (the last checked one cannot be unchecked). Shown only when the song has more than one such part.
 - **Melody only** (switch): "Plays one note at a time: the highest one."
@@ -400,12 +416,13 @@ Song options, shown under the bar when open:
 
 Behaviour:
 
-- Loading a song moves the piano (`settings.baseOctave`) to `bestBaseOctave` of the notes of its selected parts, so most of the song is visible. After that the player may move the piano as usual.
-- The arrangement is recomputed (and the player reloaded with `keepPlace`) whenever the song's options or the piano position change.
+- Loading a song moves the computer keys (`settings.baseOctave`) to `bestBaseOctave` of the notes of its selected parts (with "Melody only" on: of the notes that will be played) and the slots that have a key, so the player can play along with most of the song. After that the player may move the keys as usual. Closing or deleting the song puts the keys back where the player had them, unless the player moved them meanwhile; so does leaving the page with the song loaded (`pagehide`). After "Reset all settings" they stay where the reset put them (`docs/INTERFACE.md` section 9).
+- A song is played with a lead-in, so that its first note is seen falling before it sounds (`LEAD_IN_SECONDS`, 2 seconds: `docs/INTERFACE.md` section 9). The Songs list keeps showing the song's own length.
+- The arrangement is recomputed (and the player reloaded with `keepPlace`) whenever the song's options or the piano on screen change. A change of speed alone keeps the arrangement.
 - Options and speed are saved per song (`songLibrary.setOptions`) and restored the next time the song is loaded.
-- The player pauses when the page is hidden.
-- Changing the piano position releases all notes on the bus (existing behaviour); the song simply carries on with its next notes.
-- The Now playing line must stay one line high however many notes a song plays at once: show at most 8 names, then "+3".
+- The player pauses when the page is hidden or left (`pagehide`), and when the app is taken off the page. It is also paused when the computer keys start being chosen (section 4.5).
+- Moving the computer keys or changing the piano on screen releases all notes on the bus (existing behaviour); the song simply carries on with its next notes.
+- The names of the notes being played are hidden while a song is loaded (`docs/INTERFACE.md` 5.6).
 - The player's own keyboard and mouse playing work as always while a song plays.
 
 ## 6. Quality bar

@@ -7,7 +7,7 @@
  * mouse, the Tab key and the focus reach those rules.
  */
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { StrictMode, createElement } from 'react'
+import { StrictMode, createElement, useLayoutEffect } from 'react'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AUTO_HIDE_DELAY_MS, controlsIn, createAutoHide, useAutoHide } from './useAutoHide'
@@ -283,10 +283,12 @@ describe('createAutoHide: the end', () => {
 
 interface PageProps extends Partial<AutoHideOptions> {
   secondButton?: boolean
+  /** Whether the page has a panel that gives the focus to the menu when it goes away. */
+  panel?: boolean
 }
 
 /** A page with a menu of two buttons, and one button that is not part of the menu. */
-function Page({ secondButton = true, ...options }: PageProps): ReactElement {
+function Page({ secondButton = true, panel = false, ...options }: PageProps): ReactElement {
   const menu = useAutoHide({ enabled: true, pinned: false, ...options })
   return createElement(
     'div',
@@ -298,7 +300,18 @@ function Page({ secondButton = true, ...options }: PageProps): ReactElement {
       secondButton && createElement('button', { type: 'button' }, 'Second'),
     ),
     createElement('button', { type: 'button' }, 'Outside'),
+    panel && createElement(PanelThatGivesTheFocusBack),
   )
+}
+
+/**
+ * Like a panel of the app: as it is taken off the page it puts the keyboard
+ * focus on a button of the menu. It does so from a clean-up that React runs
+ * while it is changing the page, which is when React passes no events on.
+ */
+function PanelThatGivesTheFocusBack(): null {
+  useLayoutEffect(() => () => button('First').focus(), [])
+  return null
 }
 
 function isShown(): boolean {
@@ -399,6 +412,132 @@ describe('useAutoHide', () => {
     expect(isShown()).toBe(false)
   })
 
+  it('sees that the mouse has left when what was under it is taken off the page', () => {
+    const { rerender } = render(createElement(Page))
+    fireEvent.mouseEnter(screen.getByTestId('menu'))
+    fireEvent.mouseMove(button('Second'), { screenX: 40, screenY: 20 })
+    // The button under the mouse goes away. Nothing tells the menu that the mouse has left it.
+    rerender(createElement(Page, { secondButton: false }))
+
+    // The mouse moves on, over the rest of the page.
+    fireEvent.mouseMove(button('Outside'), { screenX: 41, screenY: 60 })
+    wait(DELAY - 1)
+    expect(isShown()).toBe(true)
+    wait(1)
+    expect(isShown()).toBe(false)
+  })
+
+  it('sees it also when the mouse stands still from then on', () => {
+    const { rerender } = render(createElement(Page))
+    fireEvent.mouseEnter(screen.getByTestId('menu'))
+    fireEvent.mouseMove(button('Second'), { screenX: 40, screenY: 20 })
+    rerender(createElement(Page, { secondButton: false }))
+
+    // What a browser sends when the page changes under the mouse: a "move" to
+    // where it already is, for what is under it now.
+    fireEvent.mouseMove(button('Outside'), { screenX: 40, screenY: 20 })
+    wait(DELAY - 1)
+    expect(isShown()).toBe(true)
+    wait(1)
+    expect(isShown()).toBe(false)
+  })
+
+  it('sees it when the browser only says what the mouse is over now', () => {
+    const { rerender } = render(createElement(Page))
+    fireEvent.mouseEnter(screen.getByTestId('menu'))
+    fireEvent.mouseMove(button('Second'), { screenX: 40, screenY: 20 })
+    rerender(createElement(Page, { secondButton: false }))
+
+    // Some browsers send no "move" at all for a mouse that stands still: only
+    // that it is over something else, having come from the menu.
+    fireEvent.mouseOver(button('Outside'), { relatedTarget: screen.getByTestId('menu') })
+    wait(DELAY - 1)
+    expect(isShown()).toBe(true)
+    wait(1)
+    expect(isShown()).toBe(false)
+  })
+
+  describe('when the browser names the menu itself as what the mouse is over', () => {
+    /** The simulated page cannot say what is at a place. A browser can: here the test answers for it. */
+    function pageSaysMouseIsOver(element: Element | null) {
+      const lookUp = vi.fn((_x: number, _y: number) => element)
+      document.elementFromPoint = lookUp
+      return lookUp
+    }
+
+    afterEach(() => {
+      Reflect.deleteProperty(document, 'elementFromPoint')
+    })
+
+    it('asks the page, and sees that the mouse is somewhere the menu no longer reaches', () => {
+      const { rerender } = render(createElement(Page))
+      const menu = screen.getByTestId('menu')
+      fireEvent.mouseEnter(menu)
+      fireEvent.mouseMove(button('Second'), { screenX: 40, screenY: 60 })
+      // The button under the mouse goes away, and the menu gets shorter.
+      rerender(createElement(Page, { secondButton: false }))
+
+      // Chrome then names the menu in place of what went away, although the
+      // mouse is now over the rest of the page; it may never say anything else.
+      const lookUp = pageSaysMouseIsOver(button('Outside'))
+      fireEvent.mouseOver(menu, { clientX: 40, clientY: 60, relatedTarget: menu })
+      wait(DELAY - 1)
+      expect(isShown()).toBe(true)
+      wait(1)
+      expect(isShown()).toBe(false)
+      // The page was asked about the place the browser gave for the mouse.
+      expect(lookUp).toHaveBeenCalledWith(40, 60)
+    })
+
+    it('keeps the menu when the page says so too: the mouse is between two of its controls', () => {
+      render(createElement(Page))
+      const menu = screen.getByTestId('menu')
+      pageSaysMouseIsOver(menu)
+      fireEvent.mouseOver(menu, { clientX: 200, clientY: 10 })
+      wait(60_000)
+      expect(isShown()).toBe(true)
+    })
+
+    it('does not ask the page about anything else: a control of the menu is the menu', () => {
+      render(createElement(Page))
+      const lookUp = pageSaysMouseIsOver(button('Outside'))
+      fireEvent.mouseOver(button('First'), { clientX: 20, clientY: 10 })
+      expect(lookUp).not.toHaveBeenCalled()
+      wait(60_000)
+      expect(isShown()).toBe(true)
+    })
+
+    it('takes the browser at its word where the page cannot be asked', () => {
+      render(createElement(Page))
+      fireEvent.mouseOver(screen.getByTestId('menu'), { clientX: 200, clientY: 10 })
+      wait(60_000)
+      expect(isShown()).toBe(true)
+    })
+  })
+
+  it('sees a mouse that was on the menu before the page could hear it arrive', () => {
+    render(createElement(Page))
+    fireEvent.mouseMove(button('First'), { screenX: 40, screenY: 20 })
+    wait(60_000)
+    expect(isShown()).toBe(true)
+
+    // A "move" to the same place says so too: the mouse is still over the menu.
+    fireEvent.mouseMove(button('First'), { screenX: 40, screenY: 20 })
+    wait(60_000)
+    expect(isShown()).toBe(true)
+  })
+
+  it('sees where the mouse is when one of its buttons is pressed', () => {
+    render(createElement(Page))
+    fireEvent.mouseDown(button('First'))
+    wait(60_000)
+    expect(isShown()).toBe(true)
+
+    fireEvent.mouseDown(button('Outside'))
+    wait(DELAY)
+    expect(isShown()).toBe(false)
+  })
+
   it('stays while the keyboard focus is inside the menu', () => {
     render(createElement(Page))
     focus(button('First'))
@@ -442,6 +581,23 @@ describe('useAutoHide', () => {
 
     rerender(createElement(Page, { pinned: true }))
     expect(isShown()).toBe(true)
+  })
+
+  it('stays when what pinned it goes away and leaves the keyboard focus inside the menu', () => {
+    // A panel that closes: the menu is no longer pinned, and the panel has put
+    // the focus on a button of the menu without the menu being told.
+    const { rerender } = render(createElement(Page, { pinned: true, panel: true }))
+    rerender(createElement(Page, { pinned: false, panel: false }))
+    expect(document.activeElement).toBe(button('First'))
+
+    wait(60_000)
+    expect(isShown()).toBe(true)
+
+    focus(button('Outside'))
+    wait(DELAY - 1)
+    expect(isShown()).toBe(true)
+    wait(1)
+    expect(isShown()).toBe(false)
   })
 
   it('never hides while the setting is off', () => {
@@ -526,12 +682,18 @@ describe('useAutoHide', () => {
     const stopListening = vi.spyOn(window, 'removeEventListener')
     const { unmount } = render(createElement(Page))
     const added = listen.mock.calls.map((call) => call.slice(0, 3))
-    expect(added.map(([type]) => type).sort()).toEqual(['keydown', 'mousedown', 'mousemove'])
+    expect(added.map(([type]) => type).sort()).toEqual([
+      'keydown',
+      'mousedown',
+      'mousemove',
+      'mouseover',
+    ])
 
     unmount()
     expect(stopListening.mock.calls.map((call) => call.slice(0, 3))).toEqual(added)
     expect(vi.getTimerCount()).toBe(0)
     // Nothing is listening any more: these would warn or throw otherwise.
+    fireEvent.mouseOver(document.body)
     fireEvent.mouseMove(document.body, { screenX: 9, screenY: 9 })
     fireEvent.keyDown(document.body, { key: 'Tab', code: 'Tab' })
     wait(60_000)

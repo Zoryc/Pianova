@@ -678,6 +678,18 @@
   border-top: 1px solid var(--control-line);
 }
 
+/*
+ * What the reset did, written under what the button does. It is always on the
+ * page, with or without its text: only the text needs room above it.
+ */
+.about__reset-done {
+  font-size: 13px;
+}
+
+.about__reset-done:not(:empty) {
+  margin-top: 4px;
+}
+
 /* ---------- Windows contrast themes ---------- */
 
 /*

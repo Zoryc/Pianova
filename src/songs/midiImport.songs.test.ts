@@ -194,12 +194,15 @@ function noteCount(song: Song): number {
 
 /* --------------------------------------------------------------- tests */
 
-/** Two tracks with a name, a speed, an instrument, a pedal, running status and a drum. */
+/**
+ * The name of the song and its speed on a first track that plays nothing, as music programs
+ * write them, then two tracks with an instrument, a pedal, running status and a drum.
+ */
 const RICH_FILE: number[] = [
-  ...header(1, 2, 480),
+  ...header(1, 3, 480),
+  ...track([...trackName('A little tune'), ...tempo(0, 500_000), ...endOfTrack()]),
   ...track([
-    ...trackName('A little tune'),
-    ...tempo(0, 500_000),
+    ...trackName('Right'),
     ...on(0, 72),
     ...off(480, 72),
     ...pedal(0, 127),
@@ -379,6 +382,96 @@ describe('files that are not MIDI at all', () => {
   })
 })
 
+describe('the name of the song', () => {
+  const NOTES = [...on(0, 60), ...off(480, 60), ...endOfTrack()]
+  const named = (name: string): number[] => [...trackName(name), ...NOTES]
+
+  it('is the name of the file when the first track plays notes next to another track', () => {
+    // What notation programs write: each hand, or each instrument, on a track with its name.
+    const twoTracks = (first: string, second: string): number[] => [
+      ...header(1, 2, 480),
+      ...track(named(first)),
+      ...track(named(second)),
+    ]
+    const hands = twoTracks('Right Hand', 'Left Hand')
+    expect(read(hands, 'moonlight.mid').title).toBe('moonlight')
+    expect(read(twoTracks('Flute', 'Guitar'), 'Greensleeves.midi').title).toBe('Greensleeves')
+    // The parts keep their own names.
+    expect(read(hands, 'moonlight.mid').tracks.map((part) => part.name)).toEqual([
+      'Right Hand',
+      'Left Hand',
+    ])
+  })
+
+  it('is the name written in the file when its first track plays nothing', () => {
+    const file = [
+      ...header(1, 3, 480),
+      ...track([...trackName('Moonlight Sonata'), ...tempo(0, 500_000), ...endOfTrack()]),
+      ...track(named('Right Hand')),
+      ...track(named('Left Hand')),
+    ]
+    expect(read(file, 'download (3).mid').title).toBe('Moonlight Sonata')
+  })
+
+  it('is the name written in the file when the file has one track only', () => {
+    expect(read(oneTrack(named('Minuet in G')), 'track01.mid').title).toBe('Minuet in G')
+  })
+
+  it('is the name of the file when the name written in it says nothing', () => {
+    for (const nothing of ['', 'Untitled', 'Track 1', '   ']) {
+      const alone = oneTrack(named(nothing))
+      expect(read(alone, 'lullaby.mid').title, JSON.stringify(nothing)).toBe('lullaby')
+      const withTitleTrack = [
+        ...header(1, 2, 480),
+        ...track([...trackName(nothing), ...endOfTrack()]),
+        ...track(named('Right Hand')),
+      ]
+      expect(read(withTitleTrack, 'lullaby.mid').title, JSON.stringify(nothing)).toBe('lullaby')
+    }
+  })
+})
+
+/*
+ * A track may begin with a "sequence number". Some programs write it without
+ * the number (the bytes 00 FF 00 00), and other readers take such files.
+ */
+describe('a track that begins with a sequence number written without its number', () => {
+  const EMPTY_NUMBER = [0x00, 0xff, 0x00, 0x00]
+  const NOTES = [...on(0, 60), ...off(480, 60), ...on(0, 62), ...off(480, 62), ...endOfTrack()]
+
+  it('is read like any other, with every note where it belongs', () => {
+    const song = read(oneTrack([...EMPTY_NUMBER, ...trackName('Numbered'), ...NOTES]))
+    expect(notesOf(song)).toEqual([
+      [60, 0, 0.5],
+      [62, 0.5, 0.5],
+    ])
+    expect(song.title).toBe('Numbered')
+  })
+
+  it('is read in every track of a file that has several', () => {
+    const song = read([
+      ...header(1, 2, 480),
+      ...track([...EMPTY_NUMBER, ...NOTES]),
+      ...track([...EMPTY_NUMBER, ...on(240, 48), ...off(480, 48), ...endOfTrack()]),
+    ])
+    expect(noteCount(song)).toBe(3)
+    expect(notesOf(song, 1)).toEqual([[48, 0.25, 0.5]])
+  })
+
+  it('is read the same as a track whose sequence number is written in full', () => {
+    const inFull = read(oneTrack([0x00, 0xff, 0x00, 0x02, 0x00, 0x07, ...NOTES]))
+    const without = read(oneTrack([...EMPTY_NUMBER, ...NOTES]))
+    expect(notesOf(without)).toEqual(notesOf(inFull))
+  })
+
+  it('leaves the bytes it was given as they were', () => {
+    const file = Uint8Array.from(oneTrack([...EMPTY_NUMBER, ...NOTES]))
+    const before = [...file]
+    read(file)
+    expect([...file]).toEqual(before)
+  })
+})
+
 describe('what the player is told when a file is refused', () => {
   const ONE_NOTE = [...on(0, 60), ...off(480, 60), ...endOfTrack()]
 
@@ -472,6 +565,8 @@ describe('the speed of the music', () => {
       expect(Number.isFinite(song.duration)).toBe(true)
     }
     // Nothing a file asks for makes a beat shorter than 60 ms: notes never pile up at one moment.
+    // (SONGS.md asks for a guard against absurd speeds; 1000 beats a minute is the one the app
+    // chose, and the slow reading further down uses the same number.)
     const fastest = read(oneTrack([...tempo(0, 1), ...on(0, 60), ...off(480, 60), ...endOfTrack()]))
     expect(notesOf(fastest)).toEqual([[60, 0, 0.06]])
   })
@@ -663,6 +758,8 @@ describe('drums', () => {
     expect(played.notes.map((note) => note.midi)).toEqual([60])
   })
 
+  // The silence before "the first note" is counted to the first note the piano plays: drums are
+  // never played, so to the player a drum introduction is silence. (`problemsOf` counts the same.)
   it('does not make the player wait through a drum introduction', () => {
     const song = read(
       oneTrack(
@@ -780,6 +877,7 @@ describe('files made to hurt', () => {
       parts.push(...track([...on(index % 100, midi), ...off(10, midi)]))
     }
     const { answer, milliseconds } = timed(parts)
+    // The limits are on the size of the file and on its notes; there is none on its parts.
     expect(answer).toBe('song')
     expect(milliseconds).toBeLessThan(10_000)
   })

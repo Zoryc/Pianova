@@ -19,11 +19,11 @@ A browser piano played with the computer keyboard. How it is built: `docs/ARCHIT
 
 ## Phases
 
-1. **Playable piano (Free Play)** (done): on-screen piano, computer keys play notes, sampled piano sound, volume, sustain toggle, lower/higher, customizable keys.
-1b. **The immersive interface and songs** (done): the full-window stage, the Settings panel (sound, keys with layout presets, piano size and key style, look with themes, colour, glow and backgrounds), MIDI import, six built-in starter songs, and listening to a song with falling notes (optionally showing the computer key to press on each note).
-2. **Practice mode** (next): the song waits for the right key, hints, slow down, loop a section. It builds on the songs, falling notes and starter songs of phase 1b.
-3. **Real-time mode**: timing judgement (Perfect / Good / Miss), accuracy, streak, stars, tempo slider 50–100%, saved best scores.
-4. **Free Play extras**: record and replay, metronome.
+- Phase 1. **Playable piano (Free Play)** (done): on-screen piano, computer keys play notes, sampled piano sound, volume, sustain toggle, lower/higher, customizable keys.
+- Phase 1b. **The immersive interface and songs** (done): the full-window stage, the Settings panel (sound, keys with layout presets, piano size and key style, look with themes, colour, glow and backgrounds), MIDI import, six built-in starter songs, and listening to a song with falling notes (optionally showing the computer key to press on each note).
+- Phase 2. **Practice mode** (next): the song waits for the right key, hints, slow down, loop a section. It builds on the songs, falling notes and starter songs of phase 1b.
+- Phase 3. **Real-time mode**: timing judgement (Perfect / Good / Miss), accuracy, streak, stars, tempo slider 50–100%, saved best scores.
+- Phase 4. **Free Play extras**: record and replay, metronome.
 
 ## Getting songs into the app
 

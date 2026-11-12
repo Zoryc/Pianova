@@ -14,7 +14,10 @@ import { STARTER_SONGS } from '../songs/starterSongs'
 import { bus } from './pianoApp'
 import { player, songLibrary } from './songsApp'
 
-/** A small MIDI file made in code: a scale for the right hand, held notes for the left, a drum. */
+/**
+ * A small MIDI file made in code: the name of the song on a first track that
+ * plays nothing, then a scale for the right hand, held notes for the left, a drum.
+ */
 function scaleFile(): Uint8Array {
   const text = (value: string): number[] => Array.from(
     value,
@@ -25,7 +28,8 @@ function scaleFile(): Uint8Array {
   ]
   const end = [0x00, 0xff, 0x2f, 0x00]
 
-  const right: number[] = [0x00, 0xff, 0x03, 5, ...text('Scale')]
+  const name: number[] = [0x00, 0xff, 0x03, 5, ...text('Scale')]
+  const right: number[] = []
   for (const midi of [60, 62, 64, 65, 67, 69, 71, 72]) {
     right.push(0x00, 0x90, midi, 90, 0x78, 0x80, midi, 0)
   }
@@ -35,7 +39,8 @@ function scaleFile(): Uint8Array {
   ]
   return Uint8Array.from(
     [
-      ...chunk('MThd', [0, 1, 0, 2, 0x01, 0xe0]),
+      ...chunk('MThd', [0, 1, 0, 3, 0x01, 0xe0]),
+      ...chunk('MTrk', [...name, ...end]),
       ...chunk('MTrk', [...right, ...end]),
       ...chunk('MTrk', [...left, ...end]),
     ],

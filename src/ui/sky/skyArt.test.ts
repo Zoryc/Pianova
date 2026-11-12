@@ -11,7 +11,7 @@ import { keyRectOf } from '../../core/pianoGeometry'
 import type { BackgroundName } from '../../core/types'
 import { paintBackdrop, sameBackdrop } from './skyBackdrop'
 import type { BackdropSpec } from './skyBackdrop'
-import { NIGHT_COLOUR, withAlpha } from './skyColour'
+import { NIGHT_COLOUR, mixColours, withAlpha } from './skyColour'
 import { BLOOM_PICTURE_SIZE, SPARK_PICTURE_SIZE, createSkyArt } from './skySprites'
 import type { ArtSpec } from './skySprites'
 import { FakeGradient, installFakeBrowser } from './skyTestKit'
@@ -44,6 +44,21 @@ describe('withAlpha', () => {
     expect(withAlpha('#123456', -2)).toBe('#12345600')
     expect(withAlpha('#123456', 9)).toBe('#123456ff')
     expect(withAlpha('#123456', Number.NaN)).toBe('#123456ff')
+  })
+})
+
+describe('mixColours', () => {
+  it('goes from the first colour to the second, channel by channel', () => {
+    expect(mixColours('#000000', '#ffffff', 0)).toBe('#000000')
+    expect(mixColours('#000000', '#ffffff', 1)).toBe('#ffffff')
+    expect(mixColours('#000000', '#ffffff', 0.5)).toBe('#808080')
+    expect(mixColours('#ff2a2a', '#8c0000', 0.25)).toBe('#e22020')
+  })
+
+  it('keeps odd shares inside 0..1', () => {
+    expect(mixColours('#102030', '#405060', -3)).toBe('#102030')
+    expect(mixColours('#102030', '#405060', 7)).toBe('#405060')
+    expect(mixColours('#102030', '#405060', Number.NaN)).toBe('#102030')
   })
 })
 
@@ -189,33 +204,47 @@ describe('the art made for each colour', () => {
     expect(light.stops.at(-1)?.[1]).toBe(withAlpha(RED.light, 0))
   })
 
-  it('makes solid bars hottest down their middle, in the bright tint, and leaves neon bars hollow', () => {
+  it.each(['solid', 'neon'] as const)(
+    'adds no light inside a %s bar: no lighter line down its middle',
+    (barStyle) => {
+      const { art } = newArt()
+      art.prepare({ ...spec, barStyle })
+      const { whiteGlow, blackGlow } = art.of(RED)
+      for (const glow of [whiteGlow, blackGlow]) {
+        const picture = browser.contextOf(glow?.image as HTMLCanvasElement)
+        // The shadows of the bar, and nothing that changes across its width.
+        expect(picture.bars.length).toBeGreaterThan(1)
+        expect(picture.bars.some((bar) => bar.fill instanceof FakeGradient)).toBe(false)
+        // The last thing done to the picture is taking the inside of the bar out of it.
+        expect(picture.bars.at(-1)?.blend).toBe('destination-out')
+      }
+    },
+  )
+
+  it('writes key letters in the ink that reads on a solid bar where they are, and bright inside neon bars', () => {
     const { art } = newArt()
     art.prepare(spec)
-    const solid = browser.contextOf(art.of(RED).whiteGlow?.image as HTMLCanvasElement)
-    const core = solid.bars.at(-1)?.fill as FakeGradient
-    expect(core.kind).toBe('linear')
-    expect(core.stops.every(([, colour]) => colour.startsWith(RED.bright))).toBe(true)
-    // Nothing at the two edges of the bar, the most half-way across.
-    const solidity = core.stops.map(([, colour]) => Number.parseInt(colour.slice(7), 16))
-    const middle = core.stops.findIndex(([across]) => across === 0.5)
-    expect(solidity[0]).toBe(0)
-    expect(solidity.at(-1)).toBe(0)
-    expect(solidity[middle]).toBe(Math.max(...solidity))
-    expect(solidity[middle]).toBeGreaterThan(60)
+    // A red bar is nearly white on the line and a deep red far from it.
+    const red = art.of(RED)
+    expect(red.ink).toBe('#000000')
+    expect(red.farInk).toBe('#ffffff')
+    // The ink changes where the bar turns from its deep shade into its own colour.
+    expect(red.farInkUntil).toBeGreaterThan(600 * 0.04)
+    expect(red.farInkUntil).toBeLessThan(600 * 0.42)
 
-    art.prepare({ ...spec, barStyle: 'neon' })
-    const neon = browser.contextOf(art.of(RED).whiteGlow?.image as HTMLCanvasElement)
-    expect(neon.bars.some((bar) => bar.fill instanceof FakeGradient)).toBe(false)
-  })
+    // A dark colour stays dark until its hot end, just above the line.
+    const blue = art.of(paletteFrom('#0000ff'))
+    expect([blue.ink, blue.farInk]).toEqual(['#000000', '#ffffff'])
+    expect(blue.farInkUntil).toBeGreaterThan(600 * 0.9)
+    expect(blue.farInkUntil).toBeLessThan(600)
 
-  it('writes key letters dark on solid bars and bright inside neon ones', () => {
-    const { art } = newArt()
-    art.prepare(spec)
-    expect(art.of(RED).ink).toBe('#000000')
+    // A pale colour is light enough for dark letters all the way up.
+    const pale = art.of(paletteFor('white', ''))
+    expect([pale.ink, pale.farInk, pale.farInkUntil]).toEqual(['#000000', '#000000', 0])
+
     art.prepare({ ...spec, barStyle: 'neon' })
     const neon = art.of(RED)
-    expect(neon.ink).toBe(RED.bright)
+    expect([neon.ink, neon.farInk, neon.farInkUntil]).toEqual([RED.bright, RED.bright, 0])
     expect(neon.neonLine).toBe(RED.bright)
     expect(neon.neonFill.startsWith(RED.light)).toBe(true)
   })
@@ -229,6 +258,24 @@ describe('the art made for each colour', () => {
     // The first colour was dropped along the way: asking again makes it anew.
     expect(art.of(first)).not.toBe(firstArt)
     expect(browser.contexts().length).toBeGreaterThan(200)
+  })
+
+  it('makes everything anew, for the same size and look, after it was told to forget', () => {
+    const { art } = newArt()
+    art.prepare(spec)
+    const before = art.of(RED)
+    art.forget()
+    // The same size, style and glow as before: nothing but the forgetting asks for new pictures.
+    art.prepare(spec)
+    const after = art.of(RED)
+    expect(after).not.toBe(before)
+    expect(after.barFill).not.toBe(before.barFill)
+    expect(after.whiteGlow?.image).not.toBe(before.whiteGlow?.image)
+    expect(after.spark).not.toBe(before.spark)
+    expect(after.bloom).not.toBe(before.bloom)
+    expect(after.whiteGlow?.width).toBe(before.whiteGlow?.width)
+    // And it is remembered again from then on.
+    expect(art.of(RED)).toBe(after)
   })
 
   it('still gives the fills when the browser gives no drawing context for the pictures', () => {

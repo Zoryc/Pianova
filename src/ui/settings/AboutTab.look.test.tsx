@@ -34,6 +34,13 @@ function answer(name: 'Yes' | 'No'): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/** What the tab says once everything has been reset ('' until then). */
+function report(): string {
+  return screen.getByRole('status').textContent ?? ''
+}
+
+const RESET_DONE = 'Everything is back to how it was at the start.'
+
 startEachTestFromDefaults()
 
 describe('"Reset all settings" and a hand that is too fast', () => {
@@ -50,9 +57,23 @@ describe('"Reset all settings" and a hand that is too fast', () => {
     // The player has not had the time to read the question, let alone answer it.
     expectSettings(MINE)
     expect(screen.getByText('Really reset?')).toBeTruthy()
+    expect(report()).toBe('')
   })
 
-  it('takes a click of its own on "Yes" for the answer', () => {
+  it('does not take the second click of a double-click for the answer "No" either', () => {
+    settingsStore.set(MINE)
+    render(<AboutTab />)
+
+    // The same double-click a little to the right, where "No" appears.
+    fireEvent.click(resetButton(), { detail: 1 })
+    fireEvent.click(answer('No'), { detail: 2 })
+
+    // The question does not flash by: it stays, to be read and answered.
+    expectSettings(MINE)
+    expect(screen.getByText('Really reset?')).toBeTruthy()
+  })
+
+  it('takes a click of its own on "Yes" for the answer, and says that it is done', () => {
     settingsStore.set(MINE)
     render(<AboutTab />)
 
@@ -61,6 +82,21 @@ describe('"Reset all settings" and a hand that is too fast', () => {
 
     expectSettings({})
     expect(screen.queryByText('Really reset?')).toBeNull()
+    expect(report()).toBe(RESET_DONE)
+  })
+
+  it('does not ask again when "Yes" itself is double-clicked', () => {
+    settingsStore.set(MINE)
+    render(<AboutTab />)
+    fireEvent.click(resetButton(), { detail: 1 })
+
+    // The button comes back under the pointer between the two clicks.
+    fireEvent.click(answer('Yes'), { detail: 1 })
+    fireEvent.click(resetButton(), { detail: 2 })
+
+    expectSettings({})
+    expect(screen.queryByText('Really reset?')).toBeNull()
+    expect(report()).toBe(RESET_DONE)
   })
 
   it('takes Enter on "Yes" for the answer', () => {
@@ -72,6 +108,7 @@ describe('"Reset all settings" and a hand that is too fast', () => {
     fireEvent.click(answer('Yes'), { detail: 0 })
 
     expectSettings({})
+    expect(report()).toBe(RESET_DONE)
   })
 
   it('resets nothing when Enter is pressed twice: the second one lands on "No"', () => {
@@ -85,6 +122,7 @@ describe('"Reset all settings" and a hand that is too fast', () => {
 
     expectSettings(MINE)
     expect(document.activeElement).toBe(resetButton())
+    expect(report()).toBe('')
   })
 
   it('asks again each time: an old "Yes" does not count for the next reset', () => {

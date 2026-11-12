@@ -74,7 +74,8 @@ const MAX_NOTE_NAMES = 8
  *
  * A few quiet words float over the sky: how to play (until the first note),
  * the names of the notes being played, and what the sound is doing when that
- * is worth saying.
+ * is worth saying (its status, and a badge while the piano is transposed or
+ * sustain is on, so that the player knows why notes sound different).
  *
  * How the sky and the piano share the window is in stage.css.
  */
@@ -89,7 +90,11 @@ export function Stage(props: StageProps): JSX.Element {
   // The same object for the same piano, so it can be compared with ===.
   const range = pianoRange(size, settings.baseOctave)
   const reportRange = useEffectEvent(props.onRangeChange)
-  useLayoutEffect(() => reportRange(range), [range])
+  // In braces: what the function gives back must not reach React, which
+  // would take it for a clean-up to run later.
+  useLayoutEffect(() => {
+    reportRange(range)
+  }, [range])
 
   const showHint = props.showHint && !hasPlayed
   const showNoteNames = settings.showNoteNames && falling === null && activeNotes.size > 0
@@ -129,6 +134,8 @@ export function Stage(props: StageProps): JSX.Element {
             {settings.transpose !== 0 && (
               <span className="stage__badge">Transposed {formatSigned(settings.transpose)}</span>
             )}
+            {/* Space switches sustain without showing the menu: this is the sign that stays. */}
+            {settings.sustain && <span className="stage__badge">Sustain on</span>}
           </div>
           {showNoteNames && <NoteNames notes={activeNotes} naming={settings.noteNaming} />}
         </div>

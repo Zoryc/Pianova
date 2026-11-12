@@ -93,12 +93,12 @@ function trackName(name: string): number[] {
 /**
  * A two-part MIDI file made in code: `count` notes for the right hand over a
  * slow left hand, a drum on every beat, at 97 beats a minute so that no time
- * is a round number.
+ * is a round number. The name of the song is written the way music programs
+ * write it: on a first track that plays no notes. (The name of a first track
+ * that plays notes next to other tracks is the name of a part, not of the song.)
  */
 function midiBytes(count: number, name = ''): Uint8Array {
-  const right: number[] = [
-    ...trackName(name), 0x00, 0xff, 0x51, 0x03, 0x09, 0x70, 0x2f, 0x00, 0xc0, 0x00,
-  ]
+  const right: number[] = [0x00, 0xff, 0x51, 0x03, 0x09, 0x70, 0x2f, 0x00, 0xc0, 0x00]
   for (let index = 0; index < count; index++) {
     const midi = 60 + ((index * 7) % 25)
     right.push(
@@ -119,9 +119,10 @@ function midiBytes(count: number, name = ''): Uint8Array {
       0x00, 0x91, midi, 70, 0x00, 0x99, 36, 100, ...variable(480), 0x81, midi, 0, 0x00, 0x89, 36, 0,
     )
   }
-  return Uint8Array.from(
-    [...text('MThd'), ...uint32(6), 0, 1, 0, 2, 0x01, 0xe0, ...track(right), ...track(left)],
-  )
+  return Uint8Array.from([
+    ...text('MThd'), ...uint32(6), 0, 1, 0, 3, 0x01, 0xe0,
+    ...track(trackName(name)), ...track(right), ...track(left),
+  ])
 }
 
 let importedSoFar = 0

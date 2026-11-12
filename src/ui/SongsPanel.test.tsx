@@ -13,6 +13,7 @@ import { player, songLibrary } from '../app/songsApp'
 import { formatDuration } from '../songs/song'
 import { STARTER_SONGS } from '../songs/starterSongs'
 import { SongsPanel } from './SongsPanel'
+import { settingsStore } from '../state/settings'
 import {
   addSong,
   damagedMidiBytes,
@@ -21,6 +22,7 @@ import {
   midiBytes,
   resetSongs,
   songFile,
+  unreadableFile,
   unsupportedMidiBytes,
 } from './songsTestKit'
 import { UNREADABLE_SONG_MESSAGE, importSongFiles } from './useSongs'
@@ -30,6 +32,8 @@ const TOO_BIG = 'That file is too big. The limit is 5 MB.'
 const NO_NOTES = 'That MIDI file has no notes in it.'
 const UNSUPPORTED = 'That kind of MIDI file is not supported yet.'
 const DAMAGED = 'That MIDI file seems to be damaged and could not be read.'
+const CANNOT_BE_READ =
+  'That could not be read. If it is a folder, open it and drop the MIDI files that are in it.'
 const EMPTY_LIST = 'No songs of your own yet. Import a MIDI file to add one.'
 
 function openPanel() {
@@ -194,6 +198,23 @@ describe('importing', () => {
     expect(messages()).toEqual([`! ${sentence}`])
     expect(titlesIn(ownSongs())).toEqual([])
     expect(within(ownSongs()).getByText(EMPTY_LIST)).toBeTruthy()
+  })
+
+  it('says what to do about something that cannot be read at all, such as a folder', async () => {
+    openPanel()
+    chooseFiles(unreadableFile('My songs'))
+
+    expect(await screen.findByText(CANNOT_BE_READ)).toBeTruthy()
+    expect(messages()).toEqual([`! ${CANNOT_BE_READ}`])
+    expect(titlesIn(ownSongs())).toEqual([])
+  })
+
+  it('names the folder when it comes with files that are added', async () => {
+    openPanel()
+    chooseFiles(songFile('One.mid'), unreadableFile('My songs'))
+
+    expect(await screen.findByText('"One" was added.')).toBeTruthy()
+    expect(messages()).toEqual(['"One" was added.', `! My songs: ${CANNOT_BE_READ}`])
   })
 
   it('adds several files at once and counts them', async () => {
@@ -485,6 +506,17 @@ describe('deleting a song', () => {
     clickWithMouse(button('Yes'))
     expect(player.getState()).toMatchObject({ status: 'empty', songId: null })
     expect(bus.getActiveNotes().size).toBe(0)
+  })
+
+  it('puts the computer keys back where they were when the song that moved them is deleted', async () => {
+    await addSong('Low.mid', { notes: [36, 38, 40, 41] })
+    openPanel()
+    clickWithMouse(button('Play Low'))
+    expect(settingsStore.get().baseOctave).toBe(1)
+
+    clickWithMouse(button('Delete Low'))
+    clickWithMouse(button('Yes'))
+    expect(settingsStore.get().baseOctave).toBe(3)
   })
 
   it('leaves the player alone when another song is deleted', async () => {

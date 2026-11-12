@@ -12,8 +12,11 @@
  * dark colour of the player's own would not be readable.) Every colour comes
  * from theme.css.
  *
- * Spacing is in multiples of 4px. Every control is at least 36px high and
- * answers hover, press and keyboard focus within 80 to 160 ms.
+ * Spacing is in multiples of 4px. That is a rule for the shared controls
+ * drawn here only: the layout a panel adds in its own stylesheet (settings.css,
+ * songs.css) is not held to it, where a small drawing or a tight row may need
+ * a gap of 2px. Every control is at least 36px high and answers hover, press
+ * and keyboard focus within 80 to 160 ms.
  *
  * The focus ring is drawn by theme.css, as a shadow around whatever has the
  * focus. So a control never gets a shadow of its own here (it would replace
@@ -658,6 +661,11 @@
  * width, 760px at most, and never higher than it. What does not fit scrolls
  * inside. That box may let clicks through to the sky; the panel itself takes
  * them.
+ *
+ * What sticks out of the panel is cut off with "clip", not "hidden": a
+ * hidden box can still be scrolled by the browser when a control in it gets
+ * the focus, which in a very low window pushed the heading out of view. Only
+ * the body of the panel scrolls.
  */
 .floating-panel {
   position: relative;
@@ -666,7 +674,7 @@
   width: min(760px, 94%);
   max-height: 100%;
   margin: 0 auto;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--control-line);
   border-radius: var(--radius-lg);
   background: var(--panel-glass);

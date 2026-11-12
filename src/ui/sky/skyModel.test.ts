@@ -31,6 +31,7 @@ import {
   firstNoteFrom,
   firstUnfinishedNote,
   frameSeconds,
+  hasSunk,
   impactsAreMoving,
   indexFallingNotes,
   keepHeldBars,
@@ -486,6 +487,24 @@ describe('where a falling note is', () => {
 
   it('is never too short to be seen', () => {
     expect(fallingHeight(note(60, 5, 0.001), speed)).toBe(MIN_BAR_HEIGHT)
+  })
+
+  it('has not sunk while it falls or sounds, and has once its upper end is below the line', () => {
+    const long = note(60, 5, 1)
+    expect(hasSunk(long, 0, speed)).toBe(false)
+    expect(hasSunk(long, 5, speed)).toBe(false)
+    expect(hasSunk(long, 5.99, speed)).toBe(false)
+    // It ends at 6: from that moment nothing of it is above the line.
+    expect(hasSunk(long, 6, speed)).toBe(true)
+    expect(hasSunk(long, 1e6, speed)).toBe(true)
+  })
+
+  it('has sunk a moment after its end when it is a very short note, because its bar is taller than it is long', () => {
+    const short = note(60, 5, 0)
+    const sinking = MIN_BAR_HEIGHT / speed
+    expect(hasSunk(short, 5, speed)).toBe(false)
+    expect(hasSunk(short, 5 + sinking * 0.9, speed)).toBe(false)
+    expect(hasSunk(short, 5 + sinking * 1.1, speed)).toBe(true)
   })
 })
 

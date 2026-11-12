@@ -1,4 +1,4 @@
-import type { JSX, MouseEvent, ReactNode, RefObject } from 'react'
+import type { JSX, ReactNode, RefObject } from 'react'
 import { APP_NAME } from '../app/appInfo'
 import { settingsStore } from '../state/settings'
 import type { Settings } from '../state/settings'
@@ -49,7 +49,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
 
   return (
     <header className={menu.visible ? 'menu' : 'menu menu--hidden'} {...menu.menuProps}>
-      <div className="top-bar" onClick={giveKeyboardBackToPiano}>
+      <div className="top-bar">
         <h1 className="top-bar__name">{APP_NAME}</h1>
         <ModeTabs tabId={props.modeTabId} panelId={props.modePanelId} />
         <div className="top-bar__space" />
@@ -141,22 +141,6 @@ function PanelButton({ label, open, panelId, onToggle, buttonRef }: PanelButtonP
       {label}
     </button>
   )
-}
-
-/**
- * A button or slider that was clicked would keep the keyboard: a focus ring
- * appears on it at the next key press, and Enter presses it again. So after a
- * click with the mouse it lets go, and the player can go straight back to
- * playing.
- */
-function giveKeyboardBackToPiano(event: MouseEvent): void {
-  // `detail` is 0 when the "click" was Enter on a focused control: someone
-  // working with the keyboard alone keeps their place in the bar.
-  if (event.detail === 0) return
-  const focused = document.activeElement
-  if (focused instanceof HTMLElement && focused.matches('button, input[type="range"]')) {
-    focused.blur()
-  }
 }
 
 /** A loudspeaker: crossed out at 0, one wave when quiet, two when loud. */

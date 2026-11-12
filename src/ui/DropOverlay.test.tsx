@@ -3,14 +3,25 @@
  * Dropping files on the page (src/ui/DropOverlay.tsx): when the overlay
  * shows, what it leaves alone, and what a drop does.
  */
-import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  createEvent,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { songLibrary } from '../app/songsApp'
 import { DropOverlay } from './DropOverlay'
-import { fakeFile, resetSongs, songFile } from './songsTestKit'
+import { fakeFile, resetSongs, songFile, unreadableFile } from './songsTestKit'
+import { useSongMessages } from './useSongs'
 
 const OVERLAY_TEXT = 'Drop the MIDI file to add it'
+const CANNOT_BE_READ =
+  'That could not be read. If it is a folder, open it and drop the MIDI files that are in it.'
 
 /** What is being dragged, as the browser describes it to the page. */
 interface Dragged {
@@ -46,6 +57,13 @@ function overlay(): HTMLElement | null {
 
 function titles(): string[] {
   return songLibrary.list().map((song) => song.title)
+}
+
+/** The message line of a Songs panel that is open for the whole test, problems marked with "!". */
+function watchMessages(): () => string[] {
+  const { result } = renderHook(() => useSongMessages())
+  return () =>
+    result.current.map((message) => (message.isProblem ? `! ${message.text}` : message.text))
 }
 
 function showOverlay() {
@@ -194,6 +212,29 @@ describe('dropping files', () => {
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledTimes(1)
     await vi.waitFor(() => expect(titles()).toEqual(['One']))
+  })
+
+  it('says what to do when a folder was dropped, which the browser cannot read', async () => {
+    const lines = watchMessages()
+    const { onFilesDropped } = showOverlay()
+    dropFiles(unreadableFile('My songs'))
+
+    await vi.waitFor(() => expect(lines()).toEqual([`! ${CANNOT_BE_READ}`]))
+    // The Songs panel still opens: that is where the sentence is shown.
+    expect(onFilesDropped).toHaveBeenCalledTimes(1)
+    expect(titles()).toEqual([])
+  })
+
+  it('reports two drops that follow each other closely together, losing neither', async () => {
+    const lines = watchMessages()
+    showOverlay()
+    dropFiles(songFile('One.mid'), fakeFile('holiday.jpg', new Uint8Array(12)))
+    dropFiles(songFile('Two.mid'))
+
+    await vi.waitFor(() =>
+      expect(lines()).toEqual(['2 songs were added.', expect.stringMatching(/^! holiday\.jpg: /)]),
+    )
+    expect(titles().sort()).toEqual(['One', 'Two'])
   })
 })
 

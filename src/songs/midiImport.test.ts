@@ -361,6 +361,45 @@ describe('parseMidiFile: files written byte by byte', () => {
     const file = oneTrackFile(bytes(0x00, 0x90, 72, 100, 0x83, 0x60, 0x80, 72, 0, END_OF_TRACK))
     expect(timings(partOf(read(file.slice(0, -END_OF_TRACK.length))))).toEqual([[72, 0, 0.5]])
   })
+
+  describe('a track that begins with a sequence number', () => {
+    const note = bytes(0x00, 0x90, 72, 100, 0x83, 0x60, 0x80, 72, 0, END_OF_TRACK)
+    /** The event as some programs write it: it says it holds no bytes, where two are usual. */
+    const withoutItsNumber = [0x00, 0xff, 0x00, 0x00]
+
+    it('is read when the number is left out', () => {
+      const oneTrack = oneTrackFile(bytes(withoutItsNumber, note))
+      const twoTracks = bytes(
+        headerChunk(1, 2, BEAT),
+        chunk('MTrk', bytes(withoutItsNumber, 0x00, 0xff, 0x03, 5, 'Suite', END_OF_TRACK)),
+        chunk('MTrk', bytes(withoutItsNumber, note)),
+      )
+
+      expect(read(oneTrack)).toEqual(read(oneTrackFile(note)))
+      expect(read(riff(oneTrack))).toEqual(read(oneTrackFile(note)))
+      expect(read(twoTracks).title).toBe('Suite')
+      expect(timings(partOf(read(twoTracks)))).toEqual([[72, 0, 0.5]])
+    })
+
+    it('is read when the number is there', () => {
+      const file = oneTrackFile(bytes(0x00, 0xff, 0x00, 0x02, 0x00, 0x07, note))
+      expect(read(file)).toEqual(read(oneTrackFile(note)))
+    })
+
+    it('leaves the bytes it is given as they were', () => {
+      const file = oneTrackFile(bytes(withoutItsNumber, note))
+      const given = Uint8Array.from(file)
+
+      parseMidiFile(given, 'given.mid')
+
+      expect(Array.from(given)).toEqual(file)
+    })
+
+    it('is still refused without its number further into a track, where it does not belong', () => {
+      const file = oneTrackFile(bytes(note.slice(0, -END_OF_TRACK.length), withoutItsNumber))
+      expect(refusal(file)).toBe('damaged')
+    })
+  })
 })
 
 describe('parseMidiFile: damaged files', () => {
@@ -706,6 +745,48 @@ describe('parseMidiFile: notes', () => {
     ])
   })
 
+  it('gives a note struck again its whole length when the old note-off is written after it', () => {
+    // Some programs write a repeated note as "new note on, old note off", at the same moment.
+    const again = [on(BEAT, 60), off(0, 60)]
+    const twice = [on(0, 60), ...again, off(BEAT, 60)]
+    const threeTimes = [on(0, 60), ...again, ...again, off(BEAT, 60)]
+    const lastOneNeverReleased = [on(0, 60), ...again, end(BEAT)]
+
+    expect(timings(partOf(read(midiFile(0, [twice]))))).toEqual([
+      [60, 0, 0.5],
+      [60, 0.5, 0.5],
+    ])
+    expect(timings(partOf(read(midiFile(0, [threeTimes]))))).toEqual([
+      [60, 0, 0.5],
+      [60, 0.5, 0.5],
+      [60, 1, 0.5],
+    ])
+    expect(timings(partOf(read(midiFile(0, [lastOneNeverReleased]))))).toEqual([
+      [60, 0, 0.5],
+      [60, 0.5, 0.5],
+    ])
+  })
+
+  it('still ends a note struck again at a note-off that is its own', () => {
+    // The release of another key at that moment, and a second release of the same key.
+    const otherKey = [on(0, 60), on(0, 64), on(BEAT, 60), off(0, 64), off(0, 60), off(BEAT, 60)]
+    const releasedTwice = [on(0, 60), on(BEAT, 60), off(0, 60), off(0, 60), end(BEAT)]
+    // A note that is struck for the first time and released at once has no old note to end.
+    const afterARelease = [on(0, 60), off(BEAT, 60), on(0, 60), off(0, 60), end(BEAT)]
+
+    expect(timings(partOf(read(midiFile(0, [otherKey]))))).toEqual([
+      [60, 0, 0.5],
+      [64, 0, 0.5],
+      [60, 0.5, 0.5],
+    ])
+    for (const events of [releasedTwice, afterARelease]) {
+      expect(timings(partOf(read(midiFile(0, [events]))))).toEqual([
+        [60, 0, 0.5],
+        [60, 0.5, 0.03],
+      ])
+    }
+  })
+
   it('ends a note that is never released where its track ends', () => {
     const song = read(midiFile(0, [[on(0, 60), on(BEAT, 64), off(BEAT, 64), end(BEAT)]]))
     expect(timings(partOf(song))).toEqual([
@@ -1040,7 +1121,7 @@ describe('parseMidiFile: the title, the id and the date', () => {
     return read(midiFile(1, [conductor, rightHand]), fileName).title
   }
 
-  it('takes the title from the name of the first track', () => {
+  it('takes the title from the name of a first track that plays no notes', () => {
     expect(titled('Gymnopedie No. 1', 'track01.mid')).toBe('Gymnopedie No. 1')
     expect(titled(utf8('Für Elise'), 'track01.mid')).toBe('Für Elise')
     expect(titled('  Clair \u0000 de   Lune ', 'track01.mid')).toBe('Clair de Lune')
@@ -1052,6 +1133,26 @@ describe('parseMidiFile: the title, the id and the date', () => {
     expect(titled('', 'Moonlight Sonata.MID')).toBe('Moonlight Sonata')
     expect(titled('\u0000', 'nocturne.midi')).toBe('nocturne')
     expect(titled(null, '')).toBe(UNTITLED)
+  })
+
+  it('takes the title from the name of the only track of a one-track file', () => {
+    const oneTrack = (trackName: string) =>
+      midiFile(0, [[name(trackName), on(0, 60), off(BEAT, 60), end()]])
+
+    expect(read(oneTrack('Nocturne in E flat'), 'track01.mid').title).toBe('Nocturne in E flat')
+    expect(read(oneTrack('Piano'), 'nocturne.mid').title).toBe('nocturne')
+  })
+
+  it('takes the title from the file name when the first track is one of the parts', () => {
+    // Its name is then the name of that part: the player would look for "moonlight" in vain.
+    const rightHand = [name('Right Hand'), on(0, 72), off(BEAT, 72), end()]
+    const leftHand = [name('Left Hand'), on(0, 48), off(BEAT, 48), end()]
+    const drums = [name('Drum Kit'), on(0, 36, 100, 9), off(BEAT, 36, 9), end()]
+
+    const twoHands = read(midiFile(1, [rightHand, leftHand]), 'moonlight.mid')
+    expect(twoHands.title).toBe('moonlight')
+    expect(twoHands.tracks.map((part) => part.name)).toEqual(['Right Hand', 'Left Hand'])
+    expect(read(midiFile(1, [drums, leftHand]), 'march.mid').title).toBe('march')
   })
 
   it('takes the title from the file name when the name in the file says nothing', () => {
@@ -1317,6 +1418,8 @@ describe('parseMidiFile: fuzzing', () => {
       96,
     ),
     riff(Array.from(midiFile(0, [[on(0, 72), off(BEAT, 72), end()]]))),
+    // A track that begins with a sequence number written without its number.
+    oneTrackFile(bytes(0x00, 0xff, 0x00, 0x00, 0x00, 0x90, 60, 80, 0x60, 60, 0, END_OF_TRACK), 96),
   ]
 
   it('starts from files that are sound', () => {

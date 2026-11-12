@@ -9,7 +9,7 @@ export type Midi = number
  * - `keyboard`: the computer keyboard
  * - `pointer`:  mouse or touch on the on-screen piano
  * - `midi`, `mic`: a real instrument (future update)
- * - `playback`: the app itself playing a recording or a song (later phases)
+ * - `playback`: the app itself playing a song (and, in a future update, a recording)
  */
 export type NoteSource = 'keyboard' | 'pointer' | 'midi' | 'mic' | 'playback'
 

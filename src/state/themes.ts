@@ -25,9 +25,10 @@ type LookValues = LookTheme['values']
 const NUMBER_TOLERANCE = 0.001
 
 /**
- * `customColour` is not chosen theme by theme: it is the colour of the
- * theme's own light, so that a player who goes on to "Your colour" starts
- * from the colour they are looking at.
+ * `customColour` is not chosen theme by theme, and it is never saved when a
+ * theme is applied: "Your colour" stays the player's own. It is the colour of
+ * the theme's own light, and is only there so that a theme is a complete look
+ * for its preview picture.
  */
 function theme(
   id: ThemeId,

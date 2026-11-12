@@ -445,17 +445,18 @@ describe('choosing the computer keys', () => {
     expect(keyChangeResult()).toBe('"K" now plays C4.')
   })
 
-  it('closes the panel when the editor ends by itself, as Escape does on the other tabs', () => {
+  // Closing the panel is the app's decision (its close button, Escape, a click
+  // on the sky). The panel never closes itself because of what the editor does.
+  it('does not close the panel when the editor stops, whatever stopped it', () => {
     leavePanelOn('Keys')
     const editor = recordingEditor()
     const onClose = vi.fn()
     const view = render(panelWith(editor.in(), onClose))
     view.rerender(panelWith(editor.in({ editing: true }), onClose))
-    expect(onClose).not.toHaveBeenCalled()
 
     view.rerender(panelWith(editor.in({ editing: false }), onClose))
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
   })
 
   it('does not close the panel when the editor is turned off by leaving the tab', async () => {
@@ -475,9 +476,11 @@ describe('choosing the computer keys', () => {
 
 describe('with the real key editor', () => {
   /**
-   * The panel as the app runs it: the settings are live, the key editor is
-   * the app's own and sees every key press first, and a button stands for
-   * the piano key that is clicked to select it.
+   * The panel with the app's own key editor: the settings are live, the
+   * editor is offered every key press, and a button stands for the piano key
+   * that is clicked to select it. The app itself is not here: what it does
+   * with a key the editor leaves alone (Escape closes the panel) is tested
+   * with the app.
    */
   function LivePanel({ onClose }: { onClose(): void }): JSX.Element {
     const settings = useSettings()
@@ -517,8 +520,10 @@ describe('with the real key editor', () => {
     return screen.getByTestId('editing').textContent ?? ''
   }
 
-  function pressEscape(repeat = false): void {
-    fireEvent.keyDown(document.body, { code: 'Escape', key: 'Escape', repeat })
+  /** Presses Escape. True when the editor used the press up. */
+  function pressEscape(repeat = false): boolean {
+    // fireEvent returns false when the default action of the key was stopped.
+    return !fireEvent.keyDown(document.body, { code: 'Escape', key: 'Escape', repeat })
   }
 
   it('lets piano keys be selected exactly while the Keys tab is showing', async () => {
@@ -573,23 +578,27 @@ describe('with the real key editor', () => {
     render(<LivePanel onClose={onClose} />)
     await user.click(screen.getByRole('button', { name: 'the piano key C4' }))
 
-    pressEscape()
-    // Escape is still down: its repeats must not close the panel either.
-    pressEscape(true)
+    expect(pressEscape()).toBe(true)
+    // Escape is still down. The selection is gone, so its repeats are not for the editor.
+    expect(pressEscape(true)).toBe(false)
 
     expect(onClose).not.toHaveBeenCalled()
     expect(editing()).toBe('on')
     expect(within(page()).getByText(/^Click a piano key below/)).toBeTruthy()
   })
 
-  it('closes on Escape when no piano key is selected', () => {
+  // What Escape does then is decided in one place, the app shell
+  // (docs/INTERFACE.md, section 5.0): the editor must not answer it too.
+  it('leaves Escape alone when no piano key is selected, pressed or still held', () => {
     leavePanelOn('Keys')
     const onClose = vi.fn()
     render(<LivePanel onClose={onClose} />)
 
-    pressEscape()
+    expect(pressEscape()).toBe(false)
+    expect(pressEscape(true)).toBe(false)
 
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(editing()).toBe('on')
   })
 
   it('forgets a piano key that was waiting when the tab is left and come back to', async () => {

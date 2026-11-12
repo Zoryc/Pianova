@@ -16,10 +16,17 @@ import type { NoteEvent } from '../core/types'
 import { PlayerLine, SongProgressLine } from './PlayerLine'
 import { FULL_PIANO, SMALL_PIANO, addSong, fakeFile, resetSongs, showPiano } from './songsTestKit'
 import type { PartSpec } from './songsTestKit'
-import { importSongFiles, playSong } from './useSongs'
+import { LEAD_IN_SECONDS, closeSongOptions, importSongFiles, playSong } from './useSongs'
 
 /** Ticks in one beat. A beat lasts half a second in a file that sets no speed. */
 const BEAT = 480
+
+/**
+ * Every song of these tests has its first note at its very start, so the
+ * player gives it the whole lead-in: the first note sounds this long after
+ * "Play", and the song in the player is that much longer than its notes.
+ */
+const LEAD_IN_MS = LEAD_IN_SECONDS * 1000
 
 /** One note of a hand-made file: which one, when it starts and how long it lasts, in beats. */
 interface LongNote {
@@ -126,15 +133,20 @@ function times(): (string | null)[] {
   return [...document.querySelectorAll('.player-line__time')].map((time) => time.textContent)
 }
 
+/** What ends the listening of each `listenToBus`: called after the test that asked for it. */
+const stopListening: (() => void)[] = []
+
+/** Every note event on the bus from now on, until the end of the test. */
 function listenToBus(): NoteEvent[] {
   const events: NoteEvent[] = []
-  bus.subscribe((event) => events.push(event))
+  stopListening.push(bus.subscribe((event) => events.push(event)))
   return events
 }
 
 beforeEach(resetSongs)
 
 afterEach(async () => {
+  for (const stop of stopListening.splice(0)) stop()
   cleanup()
   vi.useRealTimers()
   vi.restoreAllMocks()
@@ -143,6 +155,7 @@ afterEach(async () => {
 })
 
 describe('the position, dragged as far as it goes', () => {
+  /** Four seconds of notes: six seconds in the player, with the two before the first note. */
   const EIGHT_NOTES = { notes: [60, 62, 64, 65, 67, 69, 71, 72] }
 
   it('to the very end while the song plays: the song is over, back at the start, with nothing held', async () => {
@@ -156,7 +169,7 @@ describe('the position, dragged as far as it goes', () => {
     expect(heldNotes()).toEqual([])
     expect(button('Play')).toBeTruthy()
     expect(slider('Position in the song').value).toBe('0')
-    expect(times()).toEqual(['0:00', '0:04'])
+    expect(times()).toEqual(['0:00', '0:06'])
   })
 
   it('to the very end while the song is paused: it waits there, and Play starts it from the top', async () => {
@@ -166,10 +179,11 @@ describe('the position, dragged as far as it goes', () => {
     moveSlider('Position in the song', Number(slider('Position in the song').max))
 
     expect(player.getState().status).toBe('paused')
-    expect(times()).toEqual(['0:04', '0:04'])
+    expect(times()).toEqual(['0:06', '0:06'])
 
     click(button('Play'))
-    letTimePass(100)
+    expect(player.getPosition()).toBeLessThan(0.01)
+    letTimePass(LEAD_IN_MS + 100)
     expect(player.getState().status).toBe('playing')
     expect(heldNotes()).toEqual([60])
   })
@@ -177,12 +191,15 @@ describe('the position, dragged as far as it goes', () => {
   it('back to the very start while the song plays: the first note is played again', async () => {
     useFakeClock()
     await playOnScreen('Tune.mid', EIGHT_NOTES)
-    letTimePass(1700)
+    letTimePass(LEAD_IN_MS + 1700)
     expect(heldNotes()).toEqual([65])
 
     moveSlider('Position in the song', 0)
     expect(heldNotes()).toEqual([])
-    letTimePass(20)
+    // It falls for two seconds again, as when the song was started, and then sounds.
+    letTimePass(LEAD_IN_MS - 100)
+    expect(heldNotes()).toEqual([])
+    letTimePass(120)
     expect(heldNotes()).toEqual([60])
   })
 
@@ -190,7 +207,7 @@ describe('the position, dragged as far as it goes', () => {
     await playOnScreen('Tune.mid', EIGHT_NOTES)
     click(button('Pause'))
     act(() => player.seek(99))
-    expect(player.getState().position).toBeCloseTo(4, 5)
+    expect(player.getState().position).toBeCloseTo(LEAD_IN_SECONDS + 4, 5)
     act(() => player.seek(-5))
     expect(player.getState().position).toBe(0)
     act(() => player.seek(Number.NaN))
@@ -204,12 +221,13 @@ describe('a song that is stopped', () => {
     useFakeClock()
     await playOnScreen('Tune.mid', { notes: [60, 62, 64, 65, 67, 69, 71, 72] })
     click(button('Stop'))
-    moveSlider('Position in the song', 2.1)
+    // To a little over two seconds into the notes of the song.
+    moveSlider('Position in the song', LEAD_IN_SECONDS + 2.1)
 
-    expect(player.getState()).toMatchObject({ status: 'stopped', position: 2.1 })
+    expect(player.getState()).toMatchObject({ status: 'stopped', position: LEAD_IN_SECONDS + 2.1 })
     letTimePass(500)
     expect(heldNotes()).toEqual([])
-    expect(times()).toEqual(['0:02', '0:04'])
+    expect(times()).toEqual(['0:04', '0:06'])
 
     click(button('Play'))
     letTimePass(500)
@@ -220,13 +238,13 @@ describe('a song that is stopped', () => {
     expect(heldNotes()).toEqual([])
   })
 
-  it('has "Stop" there all the time, and pressing it again changes nothing', async () => {
+  it('is left as it is when "Stop" is pressed again', async () => {
     await playOnScreen('Tune.mid')
     click(button('Stop'))
     const before = player.getState()
     click(button('Stop'))
     expect(player.getState()).toBe(before)
-    expect((button('Stop') as HTMLButtonElement).disabled).toBe(false)
+    expect(before).toMatchObject({ status: 'stopped', position: 0 })
   })
 })
 
@@ -234,7 +252,7 @@ describe('in the middle of a long note', () => {
   it('"Melody only" takes effect at once: the low note goes, and the song carries on', async () => {
     useFakeClock()
     await playLongChord()
-    letTimePass(1000)
+    letTimePass(LEAD_IN_MS + 1000)
     expect(heldNotes()).toEqual([48, 55])
 
     click(button('Song options'))
@@ -242,7 +260,7 @@ describe('in the middle of a long note', () => {
     // The chord that was sounding is let go; from here on one note at a time is played.
     expect(heldNotes()).toEqual([])
     expect(player.getState().status).toBe('playing')
-    expect(player.getPosition()).toBeCloseTo(1, 1)
+    expect(player.getPosition()).toBeCloseTo(LEAD_IN_SECONDS + 1, 1)
 
     letTimePass(2100)
     expect(heldNotes()).toEqual([72])
@@ -253,7 +271,8 @@ describe('in the middle of a long note', () => {
   it('a change of speed leaves the notes that are sounding alone', async () => {
     useFakeClock()
     await playLongChord()
-    letTimePass(1000)
+    letTimePass(LEAD_IN_MS + 1000)
+    expect(heldNotes()).toEqual([48, 55])
     const events = listenToBus()
 
     moveSlider('Speed', 150)
@@ -265,7 +284,7 @@ describe('in the middle of a long note', () => {
   it('a new name for the song does not cut off the notes that are sounding', async () => {
     useFakeClock()
     const id = await playLongChord()
-    letTimePass(1000)
+    letTimePass(LEAD_IN_MS + 1000)
     expect(heldNotes()).toEqual([48, 55])
     const events = listenToBus()
 
@@ -277,12 +296,18 @@ describe('in the middle of a long note', () => {
     // …and its sound is not touched: a name is not a note.
     expect(events).toEqual([])
     expect(heldNotes()).toEqual([48, 55])
+    // The chord is let go when the song says so, seven seconds later, and not before.
+    letTimePass(6900)
+    expect(heldNotes()).toEqual([48, 55])
+    letTimePass(200)
+    expect(heldNotes()).toEqual([74])
   })
 
   it('"Pause" lets go of the notes, and "Play" carries on with the notes that start next', async () => {
     useFakeClock()
     await playLongChord()
-    letTimePass(1000)
+    letTimePass(LEAD_IN_MS + 1000)
+    expect(heldNotes()).toEqual([48, 55])
     click(button('Pause'))
     expect(heldNotes()).toEqual([])
 
@@ -293,19 +318,26 @@ describe('in the middle of a long note', () => {
 })
 
 describe('someone with the keyboard alone', () => {
-  it('finds the song options right after the button that opened them', async () => {
+  it('keeps its place in the player line when the song options open, and reaches them with Tab', async () => {
     await playOnScreen('Tune.mid')
     const user = userEvent.setup()
+    const line = screen.getByRole('region', { name: 'Song player' })
     const toggle = button('Song options')
     toggle.focus()
     fireEvent.click(toggle, { detail: 0 })
     const options = screen.getByRole('group', { name: 'Song options' })
 
-    // One press of Tab at most leads into what was just opened: not to "Close",
-    // which would take the whole song away at the next press of Enter.
-    if (!options.contains(document.activeElement)) await user.tab()
-    expect(document.activeElement).not.toBe(button('Close'))
-    expect(options.contains(document.activeElement)).toBe(true)
+    // On the button, which now says that they are open, or on what it opened: not lost.
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(line.contains(document.activeElement)).toBe(true)
+
+    // Tab goes on to them without ever leaving the line, which would close them.
+    for (let presses = 0; !options.contains(document.activeElement); presses += 1) {
+      if (presses === 10) throw new Error('Tab never reached the song options.')
+      await user.tab()
+      expect(line.contains(document.activeElement)).toBe(true)
+    }
+    expect(screen.getByRole('group', { name: 'Song options' })).toBe(options)
   })
 
   it('reaches every control of the line and of the options with Tab, and none twice', async () => {
@@ -317,10 +349,11 @@ describe('someone with the keyboard alone', () => {
 
     button('Pause').focus()
     const visited: string[] = []
-    for (let count = 0; count < 9; count += 1) {
+    // The line has six controls and its options four: ten stops, the first of which has the focus.
+    for (let count = 0; count < 10; count += 1) {
+      if (count > 0) await user.tab()
       const focused = document.activeElement as HTMLElement
       visited.push(focused.getAttribute('aria-label') ?? focused.textContent?.replace('▾', '') ?? '')
-      await user.tab()
     }
     expect([...visited].sort()).toEqual(
       [
@@ -333,12 +366,16 @@ describe('someone with the keyboard alone', () => {
         'Right · Instrument · 2 notes',
         'Left · Instrument · 2 notes',
         'Melody only',
+        'Fit to the piano',
       ].sort(),
     )
+    // The options are still open: Tab never left the line on the way.
+    expect(screen.getByRole('group', { name: 'Song options' })).toBeTruthy()
   })
 
   it('skips the one part that cannot be unchecked, and gets it back when another is checked', async () => {
     await playOnScreen('Hands.mid', { notes: [60, 62], name: 'Right' }, { notes: [48, 50], name: 'Left' })
+    const user = userEvent.setup()
     const toggle = button('Song options')
     toggle.focus()
     fireEvent.click(toggle, { detail: 0 })
@@ -352,10 +389,57 @@ describe('someone with the keyboard alone', () => {
     expect(left.disabled).toBe(false)
     expect(right.disabled).toBe(true)
     expect(right.getAttribute('aria-checked')).toBe('true')
+    // Going back with Tab passes over the part before it, which cannot be unchecked now.
+    await user.tab({ shift: true })
+    expect(document.activeElement).not.toBe(right)
+    expect(document.activeElement).not.toBe(left)
 
+    left.focus()
     fireEvent.click(left, { detail: 0 })
     expect(right.disabled).toBe(false)
     expect(songLibrary.getOptions(player.getState().songId ?? '').trackIds).toBe('auto')
+    // With both parts checked again, the first one is a stop like any other.
+    await user.tab({ shift: true })
+    expect(document.activeElement).toBe(right)
+  })
+
+  it('is put on "Song options" when the options are closed under it, as Escape does', async () => {
+    await playOnScreen('Tune.mid')
+    const toggle = button('Song options')
+    toggle.focus()
+    fireEvent.click(toggle, { detail: 0 })
+    const melodyOnly = screen.getByRole('switch', { name: 'Melody only' })
+    melodyOnly.focus()
+
+    // The app shell closes them at Escape, and is told that there was something to close.
+    let closed = false
+    act(() => {
+      closed = closeSongOptions()
+    })
+    expect(closed).toBe(true)
+    expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(toggle)
+
+    // Nothing is left to close, and the focus stays where it is.
+    act(() => {
+      closed = closeSongOptions()
+    })
+    expect(closed).toBe(false)
+    expect(document.activeElement).toBe(toggle)
+  })
+
+  it('is left where it is when the options are closed while it is somewhere else', async () => {
+    await playOnScreen('Tune.mid')
+    fireEvent.click(button('Song options'), { detail: 1 })
+    const stop = button('Stop')
+    stop.focus()
+
+    act(() => {
+      closeSongOptions()
+    })
+    expect(screen.queryByRole('group', { name: 'Song options' })).toBeNull()
+    expect(document.activeElement).toBe(stop)
   })
 })
 

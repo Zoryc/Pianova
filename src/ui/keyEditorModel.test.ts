@@ -79,7 +79,7 @@ describe('selectSlot', () => {
   })
 })
 
-describe('pressKey outside "Customize keys"', () => {
+describe('pressKey while the computer keys are not being chosen', () => {
   it('leaves every key to the piano', () => {
     for (const keyPress of [press('KeyA', 'a'), press('Escape', 'Escape'), press('Space', ' ')]) {
       const result = pressWithDefaults(EDITOR_CLOSED, keyPress)
@@ -104,15 +104,14 @@ describe('pressKey with no piano key selected', () => {
     expect(pressWithDefaults(state, press('KeyK', 'k')).state).toBe(state)
   })
 
-  it('closes the editor on Escape', () => {
-    const result = pressWithDefaults(EDITOR_OPEN, press('Escape', 'Escape'))
-    expect(result).toEqual({ consumed: true, state: EDITOR_CLOSED, changes: null })
-  })
-
-  it('does not close on the repeats of an Escape that is still held', () => {
-    const result = pressWithDefaults(EDITOR_OPEN, press('Escape', 'Escape', true))
-    expect(result.consumed).toBe(true)
-    expect(result.state).toBe(EDITOR_OPEN)
+  // What Escape does when no piano key is waiting is decided in one place, the
+  // app shell (docs/INTERFACE.md, section 5.0): the editor must not answer it too.
+  it('leaves Escape to the app, pressed or still held', () => {
+    for (const repeat of [false, true]) {
+      const result = pressWithDefaults(EDITOR_OPEN, press('Escape', 'Escape', repeat))
+      expect(result).toEqual({ consumed: false, state: EDITOR_OPEN, changes: null })
+      expect(result.state).toBe(EDITOR_OPEN)
+    }
   })
 })
 

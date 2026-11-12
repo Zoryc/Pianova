@@ -143,9 +143,22 @@ describe('settings saved by the previous version', () => {
     expect(visitAfter.get().bindings).toEqual(PREVIOUS_VERSION_CUSTOMIZED.bindings)
   })
 
-  it('that turned the light trails off now have the light bars off, falling notes included', () => {
-    const { store } = storeOver(PREVIOUS_VERSION_CUSTOMIZED)
+  // The switch "Light trails" is now called "Light bars" and is still saved as
+  // `showTrails`. What it hides while a song plays (the falling notes too) is
+  // checked with the real sky, in src/App.audit.test.tsx.
+  it('that turned the light trails off have the light bars off, and that stays so when saved again', () => {
+    const { store, storage } = storeOver(PREVIOUS_VERSION_CUSTOMIZED)
     expect(store.get().showTrails).toBe(false)
+
+    store.set({ volume: 0.5 })
+    const saved = JSON.parse(storage.entries.get(STORAGE_KEY) ?? '') as Record<string, unknown>
+    expect(saved.showTrails).toBe(false)
+    expect(createSettingsStore(storage).get().showTrails).toBe(false)
+  })
+
+  it('that had the light trails on have the light bars on', () => {
+    const { store } = storeOver({ ...PREVIOUS_VERSION_CUSTOMIZED, showTrails: true })
+    expect(store.get().showTrails).toBe(true)
   })
 })
 

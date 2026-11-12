@@ -65,9 +65,11 @@ import { bus } from './app/pianoApp'
 import { player } from './app/songsApp'
 import { settingsStore } from './state/settings'
 import { addSong, resetSongs } from './ui/songsTestKit'
-import { playSong } from './ui/useSongs'
+import { LEAD_IN_SECONDS, playSong } from './ui/useSongs'
 
 const A_STARTER_SONG = 'starter:twinkle-twinkle-little-star'
+/** How long a song is in the player before its first note sounds, on the test's clock. */
+const LEAD_IN_MS = LEAD_IN_SECONDS * 1000
 
 /** How wide the stage is on the test's make-believe screen. */
 let stageWidth = 1366
@@ -352,17 +354,20 @@ describe('a song and the piano on screen', () => {
     act(() => {
       playSong(A_STARTER_SONG)
     })
+    // Into the third note of the tune, the G above middle C.
     act(() => {
-      vi.advanceTimersByTime(1200)
+      vi.advanceTimersByTime(LEAD_IN_MS + 1400)
     })
     const before = skyProps().falling
     const position = player.getPosition()
-    expect(position).toBeGreaterThan(1)
+    expect(position).toBeGreaterThan(LEAD_IN_SECONDS + 1)
+    expect(heldNotes()).toEqual([67])
 
     resizeTo(700)
     expect(skyProps().falling).not.toBe(before)
     expect(player.getState().status).toBe('playing')
     expect(player.getPosition()).toBeCloseTo(position, 5)
+    // The note that was sounding is let go with the old piano.
     expect(heldNotes()).toEqual([])
 
     act(() => {
@@ -385,16 +390,55 @@ describe('a song and the piano on screen', () => {
     expect(pianoOnScreen()).toEqual({ first: 24, last: 60 })
     expect(player.getState().status).toBe('playing')
 
+    // The first note does not sound at once: for two seconds it is seen falling.
     act(() => {
-      vi.advanceTimersByTime(100)
+      vi.advanceTimersByTime(LEAD_IN_MS - 100)
+    })
+    expect(heldNotes()).toEqual([])
+    act(() => {
+      vi.advanceTimersByTime(200)
     })
     expect(heldNotes()).toEqual([36])
     act(() => {
       vi.advanceTimersByTime(300)
     })
     expect(heldNotes()).toEqual([36])
-    expect(skyProps().falling?.getNotes().map((note) => note.midi)).toEqual([36, 38, 40, 41])
+    // The sky is given the notes at the times the player sounds them: all of them two seconds later.
+    const falling = skyProps().falling?.getNotes() ?? []
+    expect(falling.map((note) => note.midi)).toEqual([36, 38, 40, 41])
+    falling.forEach((note, index) => {
+      expect(note.time).toBeCloseTo(LEAD_IN_SECONDS + index * 0.5, 6)
+    })
     // Every note of the song has the letter of a computer key on it.
     expect([36, 38, 40, 41].every((midi) => skyProps().hints.has(midi))).toBe(true)
+  })
+
+  it('gives the computer keys and the piano back when the song is closed, unless the player moved them', async () => {
+    await addSong('Low.mid', { notes: [36, 38, 40, 41] })
+    stageWidth = 700
+    startApp()
+    clickWithMouse(button('Songs'))
+    clickWithMouse(button('Play Low'))
+    expect(pianoOnScreen()).toEqual({ first: 24, last: 60 })
+
+    // Held on the piano the song brought: let go when the piano the player had comes back.
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([36])
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(3)
+    expect(pianoOnScreen()).toEqual({ first: 48, last: 84 })
+    expect(skyProps().range).toEqual({ first: 48, last: 84 })
+    expect(heldNotes()).toEqual([])
+    key('keyup', 'KeyA')
+
+    // Moved by the player while the song was loaded: the keys stay where the player put them.
+    clickWithMouse(button('Songs'))
+    clickWithMouse(button('Play Low'))
+    const settings = openSettingsOn('Keys')
+    clickWithMouse(within(settings).getByRole('button', { name: /Higher/ }))
+    expect(settingsStore.get().baseOctave).toBe(2)
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(2)
+    expect(pianoOnScreen()).toEqual({ first: 36, last: 72 })
   })
 })

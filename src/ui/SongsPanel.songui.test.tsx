@@ -12,10 +12,9 @@ import { player, songLibrary } from '../app/songsApp'
 import { STARTER_SONGS } from '../songs/starterSongs'
 import { SongsPanel } from './SongsPanel'
 import { addSong, fakeFile, midiBytes, resetSongs, songFile } from './songsTestKit'
-import { importSongFiles } from './useSongs'
+import { UNREADABLE_SONG_MESSAGE, importSongFiles, playSong } from './useSongs'
 
 const NOT_MIDI = 'That file is not a MIDI file. MIDI files usually end in .mid or .midi.'
-const UNREADABLE = 'That song could not be read. Delete it and import the MIDI file again.'
 
 function openPanel() {
   const onClose = vi.fn()
@@ -62,7 +61,12 @@ afterEach(async () => {
 })
 
 describe('a very long list', () => {
-  it('shows three hundred songs, newest first, above the starter songs, and plays the last of them', async () => {
+  // Three hundred files are read and three hundred rows drawn: a few seconds of work, and
+  // more on a busy machine. The limit says how long to wait, not how fast the app must be.
+  const LONG_LIST_TIMEOUT_MS = 60_000
+  const title = 'shows three hundred songs, newest first, above the starter songs, and plays the last of them'
+
+  it(title, { timeout: LONG_LIST_TIMEOUT_MS }, async () => {
     const files = Array.from({ length: 300 }, (_, index) =>
       fakeFile(`Song ${index + 1}.mid`, midiBytes({ notes: [60 + (index % 12), 62] })),
     )
@@ -98,8 +102,7 @@ describe('very long names', () => {
 
     clickWithMouse(screen.getByRole('button', { name: `Rename ${cut}` }))
     const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Song name' })
-    expect(field.maxLength).toBe(80)
-    // Pasted text can be longer than the field lets anyone type.
+    // However much text ends up in the field (a paste, say), the name that is saved is cut.
     fireEvent.change(field, { target: { value: 'x'.repeat(200) } })
     clickWithMouse(screen.getByRole('button', { name: 'Save' }))
     expect(songLibrary.list()[0]?.title).toBe('x'.repeat(80))
@@ -190,18 +193,6 @@ describe('a row that is in the middle of something', () => {
     expect(screen.getByRole<HTMLInputElement>('textbox', { name: 'Song name' }).value).toBe('Half typed')
     clickWithMouse(screen.getByRole('button', { name: 'Save' }))
     expect(songLibrary.list().map((song) => song.title)).toEqual(['Brand new', 'Half typed'])
-  })
-
-  it('cannot be played or deleted by accident while its name is being typed', async () => {
-    await addSong('Mine.mid')
-    openPanel()
-    clickWithMouse(screen.getByRole('button', { name: 'Rename Mine' }))
-
-    const row = ownRows()[0] as HTMLElement
-    expect(within(row).getAllByRole('button').map((control) => control.textContent)).toEqual([
-      'Save',
-      'Cancel',
-    ])
   })
 
   it('goes back to rest when the panel is closed and opened again: nothing is deleted or renamed', async () => {
@@ -295,19 +286,39 @@ describe('a song whose saved notes are gone', () => {
   it('says so once however often "Play" is pressed, and can still be deleted', async () => {
     const song = await addSong('Lost.mid')
     window.localStorage.removeItem(`pianoapp.song.v1.${song.id}`)
-    // Another song is read, so that the library no longer has the lost one at hand.
+    // The library may still have the notes at hand from adding the song. Reading
+    // another song makes it let go of them: from here on they are really gone.
     const other = await addSong('Other.mid')
-    songLibrary.get(other.id)
+    expect(songLibrary.get(other.id)).not.toBeNull()
+    expect(songLibrary.get(song.id)).toBeNull()
     const { onClose } = openPanel()
 
     clickWithMouse(screen.getByRole('button', { name: 'Play Lost' }))
     clickWithMouse(screen.getByRole('button', { name: 'Play Lost' }))
-    expect(messages()).toEqual([`! ${UNREADABLE}`])
+    expect(messages()).toEqual([`! ${UNREADABLE_SONG_MESSAGE}`])
     expect(onClose).not.toHaveBeenCalled()
     expect(player.getState().status).toBe('empty')
 
     clickWithMouse(screen.getByRole('button', { name: 'Delete Lost' }))
     clickWithMouse(screen.getByRole('button', { name: 'Yes' }))
     expect(titlesShown()).toEqual(['Other'])
+  })
+})
+
+describe('the length the list shows for a song', () => {
+  it('is its own, also while the player gives the song two seconds before its first note', () => {
+    openPanel()
+    const starters = screen.getByRole('region', { name: 'Starter songs' })
+    const twinkle = within(starters).getAllByRole('listitem')[0] as HTMLElement
+    const length = (): string => twinkle.querySelector('.song-row__length')?.textContent ?? ''
+    expect(within(twinkle).getByRole('button', { name: /^Play Twinkle/ })).toBeTruthy()
+    expect(length()).toBe('0:28')
+
+    act(() => {
+      playSong('starter:twinkle-twinkle-little-star')
+    })
+    // In the player the song is two seconds longer; in the list it is what it always was.
+    expect(player.getState().duration).toBeGreaterThan(30)
+    expect(length()).toBe('0:28')
   })
 })

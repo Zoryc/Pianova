@@ -580,6 +580,34 @@ describe('the sound status', () => {
     drawStage()
     expect(screen.queryByText(/Transposed/)).toBeNull()
   })
+
+  it('has "Sustain on" next to it while sustain is on, and only then', () => {
+    const { redraw } = drawStage()
+    expect(screen.queryByText(/Sustain/)).toBeNull()
+
+    redraw({ settings: withSettings({ sustain: true }) })
+    const badge = screen.getByText('Sustain on')
+    expect(badge.className).toBe('stage__badge')
+    expect(badge.parentElement).toBe(screen.getByRole('status').parentElement)
+
+    redraw({ settings: withSettings({ sustain: false }) })
+    expect(screen.queryByText(/Sustain/)).toBeNull()
+  })
+
+  it('writes both badges side by side, after the status', () => {
+    drawStage({ audioStatus: 'loading', settings: withSettings({ transpose: -3, sustain: true }) })
+    const strip = screen.getByRole('status').parentElement
+    expect([...(strip?.children ?? [])].map((part) => part.textContent)).toEqual([
+      'Loading piano sound…',
+      'Transposed −3',
+      'Sustain on',
+    ])
+  })
+
+  it('does not read the badges out with the status', () => {
+    drawStage({ settings: withSettings({ transpose: 2, sustain: true }) })
+    expect(screen.getByRole('status').textContent).toBe('')
+  })
 })
 
 describe('the piano on the stage', () => {

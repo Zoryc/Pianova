@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Two audits of the whole app (src/App.tsx with everything under it):
+ * Three audits of the whole app (src/App.tsx with everything under it):
  *
  * 1. No stuck notes. Every way a note can start (the computer keyboard, the
  *    mouse on the piano, a song being played) is tried against every moment
@@ -9,13 +9,21 @@
  *    layout, the keys moving lower or higher, another piano on screen, a reset,
  *    and for a song: pause, stop, a jump, close, delete and its end.
  *
- * 2. Cost. What a note, a tick of a song, a move of the mouse or a step of a
+ * 2. What a song leaves behind, and what it respects: the computer keys it
+ *    moved go back when it is closed, and it draws no falling notes for a
+ *    player who switched the light bars off.
+ *
+ * 3. Cost. What a note, a tick of a song, a move of the mouse or a step of a
  *    slider makes the app do: how often the app shell is drawn again, how
  *    often something is written to the browser's storage, and whether
  *    listeners or timers pile up over a long session.
  *
  * The sound engine is a stand-in that remembers which notes it was told to
  * sound. The sky is the real one, on the stand-in canvas of skyTestKit.ts.
+ *
+ * A song starts with a lead-in: its first note sounds LEAD_IN_SECONDS after
+ * "Play", so that it can be seen falling first. Every wait for a note of a
+ * song counts it in.
  */
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -85,11 +93,13 @@ import { installFakeBrowser } from './ui/sky/skyTestKit'
 import type { FakeBrowser } from './ui/sky/skyTestKit'
 import { addSong, resetSongs } from './ui/songsTestKit'
 import { AUTO_HIDE_DELAY_MS } from './ui/useAutoHide'
-import { playSong } from './ui/useSongs'
+import { LEAD_IN_SECONDS, playSong } from './ui/useSongs'
 
 const TWINKLE = 'starter:twinkle-twinkle-little-star'
-/** Twinkle, Twinkle: 48 beats at 100 a minute. */
+/** Twinkle, Twinkle: 48 beats at 100 a minute, from its first note. */
 const TWINKLE_SECONDS = 28.8
+/** How long after "Play" the first note of a song sounds, in milliseconds. */
+const LEAD_IN_MS = LEAD_IN_SECONDS * 1000
 
 let browser: FakeBrowser
 
@@ -218,6 +228,16 @@ function leavePage(): void {
 function wait(milliseconds: number): void {
   act(() => {
     vi.advanceTimersByTime(milliseconds)
+  })
+}
+
+/**
+ * The page's timers and clock are moved by hand, but the animation frames stay
+ * with the stand-in browser, which counts them and runs them when a test says so.
+ */
+function useFakeClock(): void {
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
   })
 }
 
@@ -470,6 +490,24 @@ describe('a note of the mouse never stays stuck', () => {
     expectSilence()
   })
 
+  it('plays again at the next press on the same key, when no button-up came in between', () => {
+    startApp()
+    // A browser that hides the page under a held button may never send the button-up.
+    for (const lose of [hidePage, leavePage, loseWindowFocus]) {
+      mouseDownOnKey(60)
+      expect(heldNotes()).toEqual([60])
+      lose()
+      expectSilence()
+      showPage()
+
+      mouseDownOnKey(60)
+      expect(heldNotes()).toEqual([60])
+      expect(soundingInEngine()).toEqual([60])
+      mouseUpOnKey(60)
+      expectSilence()
+    }
+  })
+
   it('stops when the app is taken off the page', () => {
     startApp()
     mouseDownOnKey(60)
@@ -524,7 +562,10 @@ describe('a note of a song never stays stuck', () => {
   function playUntilFirstNote(): void {
     startApp()
     startSong(TWINKLE)
-    wait(100)
+    // Nothing sounds during the lead-in: the first note is on its way down.
+    wait(LEAD_IN_MS - 100)
+    expectSilence()
+    wait(200)
     expect(heldNotes()).toEqual([60])
     expect(soundingInEngine()).toEqual([60])
     expect(litKeys()).toEqual([60])
@@ -577,7 +618,7 @@ describe('a note of a song never stays stuck', () => {
     vi.useFakeTimers()
     startApp()
     startSong(song.id)
-    wait(100)
+    wait(LEAD_IN_MS + 100)
     expect(heldNotes()).toEqual([60])
 
     act(() => songLibrary.remove(song.id))
@@ -638,12 +679,45 @@ describe('a note of a song never stays stuck', () => {
     expectSilence()
   })
 
-  it('stops when the computer keys are about to be chosen, and the song carries on', () => {
+  it('stops when the computer keys are about to be chosen: the song is paused there', () => {
     playUntilFirstNote()
     openSettingsOn('Keys')
     expectSilence()
+    expect(player.getState().status).toBe('paused')
+    const pausedAt = player.getState().position
+
+    const { started, stop } = notesStartedFromNow()
+    wait(5000)
+    stop()
+    expect(started).toEqual([])
+    expectSilence()
+    expect(player.getState().position).toBe(pausedAt)
+
+    // "Play" carries on from the same place, to the end of the song.
+    clickWithMouse(button('Play'))
+    wait(100)
+    expect(player.getState().status).toBe('playing')
+    expect(player.getState().position).toBeGreaterThan(pausedAt)
     wait((TWINKLE_SECONDS + 1) * 1000)
     expectSilence()
+    expect(player.getState()).toMatchObject({ status: 'stopped', position: 0 })
+  })
+
+  it('stops when a piano key is selected to get a new computer key: the song is paused again', () => {
+    playUntilFirstNote()
+    openSettingsOn('Keys')
+    clickWithMouse(button('Play'))
+    // The second note of the song, half a second after the first.
+    wait(700)
+    expect(heldNotes()).toEqual([60])
+
+    fireEvent.click(pianoKey(62), { detail: 1 })
+    expectSilence()
+    expect(player.getState().status).toBe('paused')
+    const { started, stop } = notesStartedFromNow()
+    wait(5000)
+    stop()
+    expect(started).toEqual([])
   })
 
   it('played together with the same note on the keyboard: silence once both have let go', () => {
@@ -663,9 +737,11 @@ describe('a note of a song never stays stuck', () => {
   it('stops for good when another song takes its place', () => {
     playUntilFirstNote()
     startSong('starter:ode-to-joy')
-    // The first note of the new song is not due yet: the old one must be gone.
-    expect(heldNotes()).toEqual([])
-    wait(100)
+    // The first note of the new song is not due yet: the old one must be gone, and stay gone.
+    expectSilence()
+    wait(LEAD_IN_MS - 100)
+    expectSilence()
+    wait(200)
     expect(heldNotes()).toEqual([71])
     clickWithMouse(button('Close'))
     expectSilence()
@@ -686,7 +762,115 @@ describe('a note of a song never stays stuck', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2. Cost
+// 2. What a song leaves behind, and what it respects
+// ---------------------------------------------------------------------------
+
+describe('the computer keys that a song moved', () => {
+  /** A song one octave below middle C. With the default keys it moves them one octave lower. */
+  async function addLowSong(): Promise<string> {
+    const song = await addSong('low.mid', { notes: [48, 50, 52, 53, 55, 57, 59] })
+    return song.id
+  }
+
+  function savedBaseOctave(): unknown {
+    const saved = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}') as Record<string, unknown>
+    return saved.baseOctave
+  }
+
+  it('go back to where the player had them when the song is closed', async () => {
+    const low = await addLowSong()
+    startApp()
+    startSong(low)
+    expect(settingsStore.get().baseOctave).toBe(2)
+
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(3)
+    // What is saved is where the player had them: the next visit starts there too.
+    expect(savedBaseOctave()).toBe(3)
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
+    key('keyup', 'KeyA')
+    expectSilence()
+  })
+
+  it('go back when the song is deleted while it is loaded', async () => {
+    const low = await addLowSong()
+    startApp()
+    startSong(low)
+    expect(settingsStore.get().baseOctave).toBe(2)
+
+    act(() => songLibrary.remove(low))
+    expect(player.getState().status).toBe('empty')
+    expect(settingsStore.get().baseOctave).toBe(3)
+    expect(savedBaseOctave()).toBe(3)
+  })
+
+  it('go back to the place the player chose, not to the one a song before it wanted', async () => {
+    const low = await addLowSong()
+    act(() => settingsStore.set({ baseOctave: 4 }))
+    startApp()
+    startSong(low)
+    expect(settingsStore.get().baseOctave).toBe(2)
+    // Twinkle, Twinkle wants the keys from C3.
+    startSong(TWINKLE)
+    expect(settingsStore.get().baseOctave).toBe(3)
+
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(4)
+  })
+
+  it('stay where the player moved them while the song was loaded', async () => {
+    const low = await addLowSong()
+    startApp()
+    startSong(low)
+    expect(settingsStore.get().baseOctave).toBe(2)
+
+    openSettingsOn('Keys')
+    clickWithMouse(button(/Lower/))
+    expect(settingsStore.get().baseOctave).toBe(1)
+    closeSettings()
+
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(1)
+    expect(savedBaseOctave()).toBe(1)
+  })
+})
+
+describe('with the light bars switched off', () => {
+  /** How many bars of light are on the sky's canvas right now. */
+  function barsInTheSky(): number {
+    const sky = document.querySelector<HTMLCanvasElement>('canvas.sky')
+    if (sky === null) throw new Error('The sky is not on the page.')
+    return browser.contextOf(sky).bars.length
+  }
+
+  // The switch is the "Light trails" of the version before, saved under the
+  // same name (see src/state/settings.audit.test.ts): a player who had it off
+  // comes back to a song whose notes do not fall.
+  it('no notes of a song fall, and the song still lights its keys', () => {
+    useFakeClock()
+    startApp()
+    startSong(TWINKLE)
+    // Half-way through the lead-in the first notes are on their way down.
+    wait(LEAD_IN_MS / 2)
+    browser.frame()
+    expect(barsInTheSky()).toBeGreaterThan(0)
+
+    act(() => settingsStore.set({ showTrails: false }))
+    browser.frame()
+    expect(barsInTheSky()).toBe(0)
+
+    wait(LEAD_IN_MS / 2 + 100)
+    browser.frame()
+    expect(barsInTheSky()).toBe(0)
+    expect(heldNotes()).toEqual([60])
+    expect(soundingInEngine()).toEqual([60])
+    expect(litKeys()).toEqual([60])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 3. Cost
 // ---------------------------------------------------------------------------
 
 describe('how often the app shell is drawn again', () => {
@@ -708,15 +892,19 @@ describe('how often the app shell is drawn again', () => {
   it('not once for the notes of a song with a panel open', () => {
     vi.useFakeTimers()
     startApp()
-    startSong(TWINKLE)
+    // Opened before the song starts: Settings may open on the Keys tab it was
+    // left on, and choosing the computer keys pauses a song.
     openSettingsOn('Look')
+    startSong(TWINKLE)
     shell.renders = 0
     const { started, stop } = notesStartedFromNow()
-    // Eight notes start and stop, and the player reports its position about fifty times.
-    wait(5000)
+    // After the lead-in eight notes start and stop, and all the while the
+    // player reports its position ten times a second.
+    wait(LEAD_IN_MS + 5000)
     stop()
     expect(started.length).toBeGreaterThanOrEqual(7)
-    expect(player.getState().position).toBeGreaterThan(4.5)
+    expect(player.getState().status).toBe('playing')
+    expect(player.getState().position).toBeGreaterThan(LEAD_IN_SECONDS + 4.5)
     expect(shell.renders).toBe(0)
   })
 
@@ -745,7 +933,7 @@ describe('how often the app shell is drawn again', () => {
     expect(shell.renders).toBe(0)
   })
 
-  it('once to show a hidden menu, however far the mouse then moves', () => {
+  it('at most once to show a hidden menu, however far the mouse then moves', () => {
     vi.useFakeTimers()
     startApp()
     wait(AUTO_HIDE_DELAY_MS + 10)
@@ -756,17 +944,25 @@ describe('how often the app shell is drawn again', () => {
         fireEvent.mouseMove(window, { screenX: 300 + step, screenY: 200 })
       })
     }
-    expect(shell.renders).toBe(1)
+    expect(document.querySelector('.menu')?.classList.contains('menu--hidden')).toBe(false)
+    expect(shell.renders).toBeLessThanOrEqual(1)
   })
 
-  it('once for each step of a slider, and not at all for a step to the value it has', () => {
+  it('at most once for each step of a slider, and not at all for a step to the value it has', () => {
     startApp()
     const settings = openSettingsOn('Look')
     const glow = within(settings).getByRole('slider', { name: 'Glow' })
     shell.renders = 0
     for (const value of [10, 20, 30, 40, 50]) fireEvent.change(glow, { target: { value } })
     expect(settingsStore.get().glow).toBe(0.5)
-    expect(shell.renders).toBe(5)
+    expect(shell.renders).toBeLessThanOrEqual(5)
+
+    // The value it has already, said again by the slider and then by the store.
+    shell.renders = 0
+    fireEvent.change(glow, { target: { value: 50 } })
+    act(() => settingsStore.set({ glow: 0.5 }))
+    expect(settingsStore.get().glow).toBe(0.5)
+    expect(shell.renders).toBe(0)
   })
 })
 
@@ -809,6 +1005,8 @@ describe("what is written to the browser's storage", () => {
     expect(writes).toEqual([])
   })
 
+  // docs/ARCHITECTURE.md 5.3: every change of a setting is saved as it is
+  // made. A step of a slider is therefore one write, and only one.
   it('one small write of the settings for each step of a slider, never more', () => {
     startApp()
     const { writes } = watchStorage()
@@ -844,16 +1042,6 @@ describe("what is written to the browser's storage", () => {
 })
 
 describe('a long session', () => {
-  /**
-   * The page's timers and clock are moved by hand, as elsewhere in this file,
-   * but the animation frames stay with the stand-in browser, which counts them.
-   */
-  function useFakeClock(): void {
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
-    })
-  }
-
   /** Counts the listeners on the window and on the document, by kind of event. */
   function countListeners(): { counts: Map<string, number>; restore(): void } {
     const counts = new Map<string, number>()
@@ -889,9 +1077,24 @@ describe('a long session', () => {
     }
   }
 
-  /** How many listeners the note bus has (its list is private to the type checker only). */
-  function busListeners(): number {
-    return (bus as unknown as { listeners: Set<unknown> }).listeners.size
+  /**
+   * Counts the listeners of the note bus from now on: how many were added and
+   * not taken away again. The bus itself keeps its list to itself.
+   */
+  function countBusListeners(): { count(): number } {
+    let count = 0
+    const subscribe = bus.subscribe.bind(bus)
+    vi.spyOn(bus, 'subscribe').mockImplementation((listener) => {
+      const unsubscribe = subscribe(listener)
+      let listening = true
+      count += 1
+      return () => {
+        if (listening) count -= 1
+        listening = false
+        unsubscribe()
+      }
+    })
+    return { count: () => count }
   }
 
   function oneRoundOfEverything(): void {
@@ -900,7 +1103,9 @@ describe('a long session', () => {
 
     clickWithMouse(button('Songs'))
     clickWithMouse(button(/^Play Twinkle/))
-    wait(700)
+    // Into the second note of the song, which is the note of the A key.
+    wait(LEAD_IN_MS + 700)
+    expect(heldNotes()).toEqual([60])
     tap('KeyA')
     clickWithMouse(button('Pause'))
     clickWithMouse(button('Play'))
@@ -925,13 +1130,14 @@ describe('a long session', () => {
   it('leaves no listener, timer or animation frame behind, round after round', () => {
     useFakeClock()
     const listeners = countListeners()
+    const onTheBus = countBusListeners()
     try {
       startApp()
       oneRoundOfEverything()
       const after = {
         listeners: new Map(listeners.counts),
         timers: vi.getTimerCount(),
-        busListeners: busListeners(),
+        busListeners: onTheBus.count(),
         observers: browser.observers(),
         motionListeners: browser.motionListeners(),
       }
@@ -940,7 +1146,7 @@ describe('a long session', () => {
 
       expect(Object.fromEntries(listeners.counts)).toEqual(Object.fromEntries(after.listeners))
       expect(vi.getTimerCount()).toBe(after.timers)
-      expect(busListeners()).toBe(after.busListeners)
+      expect(onTheBus.count()).toBe(after.busListeners)
       expect(browser.observers()).toBe(after.observers)
       expect(browser.motionListeners()).toBe(after.motionListeners)
       expect(browser.frames.pending.size).toBe(0)
@@ -964,12 +1170,14 @@ describe('a long session', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('a song that is paused costs one slow timer and no animation frames', () => {
+  it('a song that is paused costs at most one slow timer and no animation frames', () => {
     useFakeClock()
     startApp()
     startSong(TWINKLE)
-    wait(1000)
+    // Paused in the middle of the second note of the song.
+    wait(LEAD_IN_MS + 1000)
     browser.play(1)
+    expect(heldNotes()).toEqual([60])
     clickWithMouse(button('Pause'))
     // The afterglow of the last note, then nothing.
     browser.playUntilIdle()
@@ -979,8 +1187,10 @@ describe('a long session', () => {
     const framesBefore = browser.frames.requested
     wait(60_000)
     expect(browser.frames.requested).toBe(framesBefore)
-    // The sky looks ten times a second whether the song has moved; the menu stays, so no countdown.
-    expect(vi.getTimerCount()).toBe(1)
+    // Nothing but a slow look, now and then, at whether the song was moved. The
+    // player's own timer is gone, and the menu stays, so it counts nothing down.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(1)
+    expect(player.getState().status).toBe('paused')
     expectSilence()
   })
 
@@ -991,31 +1201,37 @@ describe('a long session', () => {
     wait(500)
     // The player's own timer, the sky's look at the song, and the countdown of the menu.
     expect(vi.getTimerCount()).toBeLessThanOrEqual(3)
+    // The sky is moving already: the first notes fall during the lead-in.
     expect(browser.frames.pending.size).toBe(1)
 
-    wait((TWINKLE_SECONDS + 1) * 1000)
+    wait((LEAD_IN_SECONDS + TWINKLE_SECONDS + 1) * 1000)
     browser.playUntilIdle()
     wait(1000)
     browser.playUntilIdle()
     expect(player.getState().status).toBe('stopped')
     expect(browser.frames.pending.size).toBe(0)
-    expect(vi.getTimerCount()).toBe(1)
+    // The player's timer is gone; at most the sky's slow look at the song is left.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(1)
   })
 
   it('takes everything away with the app: listeners, timers and frames', () => {
     useFakeClock()
     const listeners = countListeners()
+    const onTheBus = countBusListeners()
     try {
-      const busBefore = busListeners()
       startApp()
       startSong(TWINKLE)
       wait(500)
       clickWithMouse(button('Close'))
+      // The test page tidies up the keyboard focus a moment after the button
+      // that had it has gone, with a timer of its own. That is over before the
+      // app is taken away, so that every timer counted below is the app's.
+      wait(50)
       cleanup()
 
       const left = [...listeners.counts].filter(([, count]) => count !== 0)
       expect(left).toEqual([])
-      expect(busListeners()).toBe(busBefore)
+      expect(onTheBus.count()).toBe(0)
       expect(browser.observers()).toBe(0)
       expect(browser.motionListeners()).toBe(0)
       expect(browser.frames.pending.size).toBe(0)

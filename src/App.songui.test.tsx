@@ -78,11 +78,18 @@ import { STARTER_SONGS } from './songs/starterSongs'
 import { settingsStore } from './state/settings'
 import { addSong, midiBytes, resetSongs, songFile } from './ui/songsTestKit'
 import { AUTO_HIDE_DELAY_MS } from './ui/useAutoHide'
-import { playSong } from './ui/useSongs'
+import { LEAD_IN_SECONDS, playSong } from './ui/useSongs'
 
 const START_TEXT = 'Click or press any key to start'
 const TWINKLE = 'starter:twinkle-twinkle-little-star'
 const MARY = 'starter:mary-had-a-little-lamb'
+
+/**
+ * How long after "Play" the first note of a song sounds, in milliseconds. The
+ * songs of these tests all have their first note at their very start, so the
+ * player gives them the whole lead-in: the note is seen falling first.
+ */
+const LEAD_IN_MS = LEAD_IN_SECONDS * 1000
 
 function skyProps(): SkyProps {
   return sky.props as SkyProps
@@ -96,6 +103,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  for (const stop of stopListening.splice(0)) stop()
   cleanup()
   vi.useRealTimers()
   vi.restoreAllMocks()
@@ -213,28 +221,50 @@ function setPageHidden(hidden: boolean): void {
   })
 }
 
-/** Every note event on the bus from now on. */
+/** What ends the listening of each `listenToBus`: called after the test that asked for it. */
+const stopListening: (() => void)[] = []
+
+/** Every note event on the bus from now on, until the end of the test. */
 function listenToBus(): NoteEvent[] {
   const events: NoteEvent[] = []
-  bus.subscribe((event) => events.push(event))
+  stopListening.push(bus.subscribe((event) => events.push(event)))
   return events
 }
 
+/** The song as the player has it: its notes later by what is missing of the lead-in. */
+function withLeadIn(song: Song): Song {
+  const starts = song.tracks
+    .filter((track) => !track.isPercussion)
+    .flatMap((track) => track.notes.map((note) => note.time))
+  const leadIn = Math.max(0, LEAD_IN_SECONDS - Math.min(...starts))
+  const tracks = song.tracks.map((track) => ({
+    ...track,
+    notes: track.notes.map((note) => ({ ...note, time: note.time + leadIn })),
+  }))
+  return { ...song, tracks }
+}
+
 describe('files dropped on the page', () => {
-  it('are added even before the app is started, and the result is there once it is', async () => {
+  it('before the first click start the app, and the sound waits for a key or a click', async () => {
     render(<App />)
+    expect(screen.getByText(START_TEXT)).toBeTruthy()
     await dropFiles(songFile('Early.mid'))
     await screen.findByText('"Early" was added.')
 
-    // Still behind the start overlay: nothing can be pressed yet, and no sound was asked for.
-    expect(screen.getByText(START_TEXT)).toBeTruthy()
-    expect(document.querySelector('.app__screen')?.hasAttribute('inert')).toBe(true)
-    expect(songLibrary.list().map((song) => song.title)).toEqual(['Early'])
-
-    tap('KeyA')
+    // The drop took the start overlay away: the Songs panel is there to say how it went.
     expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(document.querySelector('.app__screen')?.hasAttribute('inert')).toBe(false)
     expect(panel('Songs')).not.toBeNull()
     expect(messageLine().textContent).toBe('"Early" was added.')
+    expect(songLibrary.list().map((song) => song.title)).toEqual(['Early'])
+    // A drop is not a click or a key press: the browser would not start the sound for it.
+    expect(audio.state.status).toBe('idle')
+
+    // The first key press asks for the sound, and plays its note like any other.
+    key('keydown', 'KeyA')
+    expect(audio.state.status).toBe('ready')
+    expect(heldNotes()).toEqual([60])
+    key('keyup', 'KeyA')
     expect(heldNotes()).toEqual([])
   })
 
@@ -317,8 +347,6 @@ describe('a file chosen with the "Import a MIDI file" button', () => {
     // A moment passes before the next click, as it always does for a person.
     await act(() => Promise.resolve())
     const again = openPanel('Songs')
-    // The news of last time is gone: the panel opens with nothing to say.
-    expect(messageLine().textContent).toBe('')
     clickWithMouse(within(again).getByRole('button', { name: 'Rename my_first_tune' }))
     const name = within(again).getByRole('textbox', { name: 'Song name' })
     fireEvent.change(name, { target: { value: 'My first tune' } })
@@ -399,7 +427,7 @@ describe('a song started from the list', () => {
     vi.useFakeTimers()
     startApp()
     playFromList(/^Play Twinkle/)
-    wait(200)
+    wait(LEAD_IN_MS + 200)
     expect(heldNotes()).toEqual([60])
     clickWithMouse(button('Song options'))
     expect(songOptions()).not.toBeNull()
@@ -408,10 +436,12 @@ describe('a song started from the list', () => {
     expect(player.getState().songId).toBe(MARY)
     expect(within(playerLine() as HTMLElement).getByText('Mary Had a Little Lamb')).toBeTruthy()
     expect(songOptions()).toBeNull()
-    // The first song's C is let go at once. The second song's E starts at the next step.
+    // The first song's C is let go at once. The second song's E is two seconds away.
     expect(heldNotes()).toEqual([])
     expect(litKeys()).toEqual([])
-    wait(50)
+    wait(LEAD_IN_MS - 100)
+    expect(heldNotes()).toEqual([])
+    wait(150)
     expect(heldNotes()).toEqual([64])
     expect(litKeys()).toEqual([64])
   })
@@ -424,9 +454,67 @@ describe('a song started from the list', () => {
 
     const position = slider('Position in the song')
     expect(Number(position.value)).toBeGreaterThan(9.5)
-    expect(position.getAttribute('aria-valuetext')).toMatch(/^0:(09|10) of 0:2\d$/)
+    // Twinkle lasts 28 seconds and a bit: 30 and a bit with the two before its first note.
+    expect(position.getAttribute('aria-valuetext')).toMatch(/^0:(09|10) of 0:30$/)
     const progress = document.querySelector<HTMLElement>('.song-progress')
     expect(Number(progress?.style.getPropertyValue('--song-progress'))).toBeGreaterThan(0.3)
+  })
+})
+
+describe('the two seconds before the first note of a song', () => {
+  it('show the note falling before it sounds: no key is lit and nothing is heard until then', () => {
+    vi.useFakeTimers()
+    startApp()
+    playFromList(/^Play Twinkle/)
+
+    // In the sky the first note is two seconds up, and every other note as much later.
+    const falling = skyProps().falling?.getNotes() ?? []
+    const written = STARTER_SONGS.find((song) => song.id === TWINKLE)?.tracks[0]?.notes ?? []
+    expect(written.length).toBeGreaterThan(10)
+    expect(falling.map((note) => note.midi)).toEqual(written.map((note) => note.midi))
+    expect(falling.map((note) => note.time)).toEqual(
+      written.map((note) => note.time + LEAD_IN_SECONDS),
+    )
+
+    wait(LEAD_IN_MS - 100)
+    expect(player.getState().status).toBe('playing')
+    expect(heldNotes()).toEqual([])
+    expect(litKeys()).toEqual([])
+    wait(200)
+    expect(heldNotes()).toEqual([60])
+    expect(litKeys()).toEqual([60])
+  })
+
+  it('are in the length the player line shows, and not in the length the list shows', () => {
+    startApp()
+    playFromList(/^Play Twinkle/)
+    expect(slider('Position in the song').getAttribute('aria-valuetext')).toBe('0:00 of 0:30')
+
+    const songs = openPanel('Songs')
+    const row = within(songs).getByRole('button', { name: /^Play Twinkle/ }).closest('li')
+    expect(row?.querySelector('.song-row__length')?.textContent).toBe('0:28')
+  })
+
+  it('come again after "Stop", and when the song is taken back to its start', () => {
+    vi.useFakeTimers()
+    startApp()
+    playFromList(/^Play Twinkle/)
+    wait(LEAD_IN_MS + 200)
+    expect(heldNotes()).toEqual([60])
+
+    clickWithMouse(button('Stop'))
+    clickWithMouse(button('Play'))
+    wait(LEAD_IN_MS - 100)
+    expect(heldNotes()).toEqual([])
+    wait(200)
+    expect(heldNotes()).toEqual([60])
+
+    fireEvent.change(slider('Position in the song'), { target: { value: '0' } })
+    expect(heldNotes()).toEqual([])
+    wait(LEAD_IN_MS - 100)
+    expect(heldNotes()).toEqual([])
+    wait(200)
+    expect(heldNotes()).toEqual([60])
   })
 })
 
@@ -436,7 +524,7 @@ describe('the computer keyboard while a song plays', () => {
     startApp()
     playFromList(/^Play Twinkle/)
     const events = listenToBus()
-    wait(100)
+    wait(LEAD_IN_MS + 100)
     // The song holds its first C. The player presses the same key, then another one.
     expect(heldNotes()).toEqual([60])
     key('keydown', 'KeyA')
@@ -476,6 +564,29 @@ describe('the computer keyboard while a song plays', () => {
     expect(up.defaultPrevented).toBe(true)
     expect(settingsStore.get().sustain).toBe(false)
     expect(player.getState().status).toBe('playing')
+  })
+
+  it('says on the stage that sustain is on, for the player who pressed Space to pause', () => {
+    vi.useFakeTimers()
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    wait(AUTO_HIDE_DELAY_MS)
+    expect(menuIsHidden()).toBe(true)
+    expect(screen.queryByText('Sustain on')).toBeNull()
+
+    // The switch that shows sustain is in the menu, which is hidden and stays hidden.
+    tap('Space', { key: ' ' })
+    const badge = screen.getByText('Sustain on')
+    expect(badge.className).toBe('stage__badge')
+    expect(menu().contains(badge)).toBe(false)
+    expect(screen.getByRole('tabpanel').contains(badge)).toBe(true)
+    expect(menuIsHidden()).toBe(true)
+    expect(player.getState().status).toBe('playing')
+
+    tap('Space', { key: ' ' })
+    expect(screen.queryByText('Sustain on')).toBeNull()
   })
 
   it('leaves Enter to the focused button: that is how "Pause" is pressed without a mouse', () => {
@@ -521,6 +632,137 @@ describe('the computer keyboard while a song plays', () => {
   })
 })
 
+/*
+ * Escape takes back one thing at a time, in this order: the piano key that is
+ * waiting for a computer key, the open song options, the open panel, the
+ * keyboard focus in the menu. With none of them it is the browser's key.
+ */
+describe('Escape, with a song in the player', () => {
+  function escape(init: KeyboardEventInit = {}): KeyboardEvent {
+    const down = key('keydown', 'Escape', { key: 'Escape', ...init })
+    if (!init.repeat) key('keyup', 'Escape', { key: 'Escape' })
+    return down
+  }
+
+  it('closes the song options, however they were opened, and leaves the song alone', () => {
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    // Opened with the mouse: the keyboard focus is nowhere.
+    clickWithMouse(button('Song options'))
+    expect(songOptions()).not.toBeNull()
+    expect(escape().defaultPrevented).toBe(true)
+    expect(songOptions()).toBeNull()
+    expect(button('Song options').getAttribute('aria-expanded')).toBe('false')
+
+    // Opened with Enter, and the focus moved into them.
+    pressEnterOn(button('Song options'))
+    const melodyOnly = screen.getByRole('switch', { name: 'Melody only' })
+    melodyOnly.focus()
+    expect(escape().defaultPrevented).toBe(true)
+    expect(songOptions()).toBeNull()
+    // The focus is not lost with the switch it was on: it is on the button that opens them.
+    expect(document.activeElement).toBe(button('Song options'))
+
+    expect(player.getState().status).toBe('playing')
+    expect(playerLine()).not.toBeNull()
+  })
+
+  it('closes the song options first and the panel at the next press', () => {
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    openPanel('Songs')
+    clickWithMouse(button('Song options'))
+    expect(songOptions()).not.toBeNull()
+
+    escape()
+    expect(songOptions()).toBeNull()
+    expect(panel('Songs')).not.toBeNull()
+
+    escape()
+    expect(panel('Songs')).toBeNull()
+    expect(player.getState().status).toBe('playing')
+  })
+
+  it('does one thing only while it is held down', () => {
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    openPanel('Settings')
+    clickWithMouse(button('Song options'))
+
+    // The key goes down, and stays down: the keyboard sends the press again and again.
+    key('keydown', 'Escape', { key: 'Escape' })
+    for (let count = 0; count < 5; count += 1) {
+      expect(escape({ repeat: true }).defaultPrevented).toBe(true)
+    }
+    key('keyup', 'Escape', { key: 'Escape' })
+    expect(songOptions()).toBeNull()
+    expect(panel('Settings')).not.toBeNull()
+
+    // The next press is a new one.
+    escape()
+    expect(panel('Settings')).toBeNull()
+  })
+
+  it('takes the piano key that is waiting for a computer key before anything else', () => {
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    const settings = openPanel('Settings')
+    clickWithMouse(within(settings).getByRole('tab', { name: 'Keys' }))
+    clickWithMouse(button('Song options'))
+    const piano = screen.getByRole('group', { name: 'Piano' })
+    clickWithMouse(piano.querySelector('.piano-key[data-midi="60"]') as HTMLElement)
+    /** A piano key is marked as the one whose computer key is being chosen. */
+    const waiting = (): boolean => piano.querySelector('.piano-key.is-selected') !== null
+    expect(waiting()).toBe(true)
+    expect(songOptions()).not.toBeNull()
+
+    escape()
+    expect(waiting()).toBe(false)
+    expect(songOptions()).not.toBeNull()
+    expect(panel('Settings')).not.toBeNull()
+
+    escape()
+    expect(songOptions()).toBeNull()
+    expect(panel('Settings')).not.toBeNull()
+
+    escape()
+    expect(panel('Settings')).toBeNull()
+    expect(playerLine()).not.toBeNull()
+  })
+
+  it('lets go of the menu when the focus is in it, and is the browser\'s key after that', () => {
+    vi.useFakeTimers()
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    const stop = button('Stop')
+    stop.focus()
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    // The menu stays for as long as the keyboard is in it.
+    expect(menuIsHidden()).toBe(false)
+
+    expect(escape().defaultPrevented).toBe(true)
+    expect(menu().contains(document.activeElement)).toBe(false)
+    expect(player.getState().status).toBe('playing')
+    wait(AUTO_HIDE_DELAY_MS)
+    expect(menuIsHidden()).toBe(true)
+
+    // Nothing is left to take back: the key is not used up, and the song plays on.
+    expect(escape().defaultPrevented).toBe(false)
+    expect(player.getState().status).toBe('playing')
+    expect(playerLine()).not.toBeNull()
+  })
+})
+
 describe('where the computer keys sit, and a song', () => {
   it('are left alone by Play in the player line, by the options and by the end of the song', async () => {
     await addSong('Low.mid', { notes: [36, 38, 40, 41] }, { notes: [43, 45] })
@@ -543,6 +785,54 @@ describe('where the computer keys sit, and a song', () => {
     wait(60_000)
     expect(player.getState().status).toBe('stopped')
     expect(settingsStore.get().baseOctave).toBe(2)
+
+    // Nor by "Close": the player moved them after the song did, and that is where they stay.
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(2)
+  })
+
+  it('go back to where the player had them when the song is closed', async () => {
+    await addSong('Low.mid', { notes: [36, 38, 40, 41] })
+    startApp()
+    playFromList('Low')
+    // The keys went down two octaves for the song: the A key plays its first note, a low C.
+    expect(settingsStore.get().baseOctave).toBe(1)
+    expect(skyProps().hints.get(36)).toBe('A')
+
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(3)
+    // In free play the A key is middle C again, as before the song.
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
+    expect(litKeys()).toEqual([60])
+    key('keyup', 'KeyA')
+  })
+
+  it('go back to where the player had them when the song that is loaded is deleted', async () => {
+    await addSong('Low.mid', { notes: [36, 38, 40, 41] })
+    act(() => settingsStore.set({ baseOctave: 2 }))
+    startApp()
+    playFromList('Low')
+    expect(settingsStore.get().baseOctave).toBe(1)
+
+    const songs = openPanel('Songs')
+    clickWithMouse(within(songs).getByRole('button', { name: 'Delete Low' }))
+    clickWithMouse(within(songs).getByRole('button', { name: 'Yes' }))
+    expect(playerLine()).toBeNull()
+    expect(settingsStore.get().baseOctave).toBe(2)
+  })
+
+  it('go back only once the last of several songs is closed, to where they were before the first', async () => {
+    await addSong('Low.mid', { notes: [36, 38, 40, 41] })
+    await addSong('High.mid', { notes: [84, 86, 88, 89] })
+    startApp()
+    playFromList('Low')
+    expect(settingsStore.get().baseOctave).toBe(1)
+    playFromList('High')
+    expect(settingsStore.get().baseOctave).toBe(4)
+
+    clickWithMouse(button('Close'))
+    expect(settingsStore.get().baseOctave).toBe(3)
   })
 
   it('write the letter of a computer key only on the falling notes that a key can play', async () => {
@@ -614,10 +904,10 @@ describe('nothing is left playing or lit', () => {
     vi.useFakeTimers()
   })
 
-  /** A song is playing and holds a note, which is lit on the piano. */
+  /** A song is playing and holds its first note, which is lit on the piano. */
   function playUntilANoteSounds(title: string | RegExp): void {
     playFromList(title)
-    wait(200)
+    wait(LEAD_IN_MS + 200)
     expect(heldNotes()).not.toEqual([])
     expect(litKeys()).toEqual(heldNotes())
   }
@@ -679,7 +969,7 @@ describe('nothing is left playing or lit', () => {
     expect(menuIsHidden()).toBe(false)
 
     clickWithMouse(button('Play'))
-    wait(100)
+    wait(LEAD_IN_MS + 100)
     expect(heldNotes()).toEqual([64])
   })
 
@@ -727,10 +1017,25 @@ describe('nothing is left playing or lit', () => {
     expect(button('Play')).toBeTruthy()
   })
 
+  it('from the song when the page is being left, and the song waits there, paused', () => {
+    startApp()
+    playUntilANoteSounds(/^Play Twinkle/)
+    const before = player.getPosition()
+
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'))
+    })
+    expect(heldNotes()).toEqual([])
+    expect(litKeys()).toEqual([])
+    expect(player.getState().status).toBe('paused')
+    expect(player.getState().position).toBeCloseTo(before, 2)
+    expectSilenceFromNowOn()
+  })
+
   it('but a key the player is holding stays down through "Close"', () => {
     startApp()
     playFromList(/^Play Twinkle/)
-    wait(100)
+    wait(LEAD_IN_MS + 100)
     key('keydown', 'KeyD')
     expect(heldNotes()).toEqual([60, 64])
 
@@ -993,8 +1298,9 @@ describe('a long session with songs, in any order', () => {
           expect(song, where).not.toBeNull()
           if (song === null) continue
           const options = songLibrary.getOptions(song.id)
-          const expected = arrange(song, options, skyProps().range)
-          // The notes in the sky are the song's, with its options, for the piano that is drawn.
+          const expected = arrange(withLeadIn(song), options, skyProps().range)
+          // The notes in the sky are the song's, with its options, for the piano that is
+          // drawn, after the two seconds the player gets before the first of them.
           expect(skyProps().falling?.getNotes(), where).toEqual(expected.notes)
           expect(state.duration, where).toBeCloseTo(expected.duration, 9)
           expect(state.speed, where).toBe(options.speed)

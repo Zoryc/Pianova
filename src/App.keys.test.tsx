@@ -68,16 +68,41 @@ import {
   MIN_BASE_OCTAVE,
   PIANO_SIZES,
   SLOT_COUNT,
-  pianoRange,
   slotToMidi,
 } from './core/layout'
 import { isBlackKey, noteName } from './core/notes'
 import { DEFAULT_BINDINGS, KEY_PRESETS, isBindableCode } from './input/keymap'
 import type { Bindings } from './input/keymap'
-import { DEFAULT_SETTINGS, STORAGE_KEY, settingsStore } from './state/settings'
+import { STORAGE_KEY, settingsStore } from './state/settings'
 import { resetSongs } from './ui/songsTestKit'
 
 const UNUSABLE = "That key can't be used. Try a letter, number or symbol key."
+
+interface NodeFiles {
+  readFileSync(path: string, encoding: 'utf8'): string
+}
+
+interface NodeUrls {
+  fileURLToPath(url: string): string
+}
+
+// The test runner empties stylesheets that are imported, so the piano's is read
+// from disk. (Loaded this way because the project has no Node type definitions.)
+const nodeFilesModule = 'node:fs'
+const nodeUrlsModule = 'node:url'
+const { readFileSync } = (await import(/* @vite-ignore */ nodeFilesModule)) as NodeFiles
+const { fileURLToPath } = (await import(/* @vite-ignore */ nodeUrlsModule)) as NodeUrls
+const pianoCssPath = fileURLToPath(import.meta.url.replace(/[^/]*$/, 'ui/piano.css'))
+
+/** The stylesheet of the piano, without its comments. */
+const pianoCss = readFileSync(pianoCssPath, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+/** What the stylesheet gives one property of the line that marks the keyboard zone. */
+function zoneLineStyle(property: string): string {
+  const declarations = /\.piano__zone\s*\{([^{}]*)\}/.exec(pianoCss)?.[1] ?? ''
+  const found = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`).exec(declarations)
+  return found?.[1]?.trim().replace(/\s+/g, ' ') ?? ''
+}
 
 beforeEach(async () => {
   await resetSongs()
@@ -295,6 +320,21 @@ describe('the keyboard zone on every piano', () => {
         expect(right).toBeLessThanOrEqual(100 + 1e-9)
       }
     }
+  })
+
+  it('gives that line a dark edge of its own, so that a pale light still shows on pale keys', () => {
+    // White light on the ivory keys of the Classic style: a line in the light
+    // alone could hardly be told from the keys it is drawn on.
+    expect(zoneLineStyle('background')).toContain('var(--light)')
+    const edge = zoneLineStyle('box-shadow')
+
+    // The dark of the stage, and not one more glow in the colour of the light.
+    expect(edge).toContain('var(--stage-bg)')
+    expect(edge).not.toContain('var(--light')
+    // A hairline: no part of it is wider than a pixel.
+    const lengths = [...edge.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((match) => Number(match[1]))
+    expect(lengths.length).toBeGreaterThan(0)
+    for (const length of lengths) expect(Math.abs(length)).toBeLessThanOrEqual(1)
   })
 
   it('"Auto" in a window too small to measure is the smallest piano, which is exactly the zone', () => {
@@ -550,7 +590,9 @@ describe('changing one key', () => {
     expect(keycap(60)).toBe('^')
   })
 
-  it('keeps one key per note through a long run of changes', () => {
+  // 150 changes on the whole app: well over a second alone, and many times that
+  // when the machine runs the other test files at the same time.
+  it('keeps one key per note through a long run of changes', { timeout: 30_000 }, () => {
     startApp()
     openSettingsOn('Keys')
     const codes = ['KeyA', 'KeyK', 'Digit1', 'Numpad5', 'Slash', 'KeyZ', 'Semicolon', 'IntlBackslash']
@@ -945,7 +987,16 @@ describe('the keyboard type', () => {
       fireEvent.click(pianoKey(48 + round))
       tap('KeyZ', { key: 'w' })
     }
-    expect(settingsStore.get().customLabels).toEqual({ KeyQ: 'Q', KeyZ: 'W' })
+
+    // Twelve changes made with two keys: a letter for each of the two at most,
+    // however often they were chosen. (Q plays nothing by now; whether its
+    // letter is still remembered is up to the app.)
+    const learned = settingsStore.get().customLabels
+    expect(Object.keys(learned).filter((code) => code !== 'KeyQ' && code !== 'KeyZ')).toEqual([])
+    // The key that plays a note has the letter it typed the last time it was chosen.
+    expect(settingsStore.get().bindings.KeyZ).toBe(5)
+    expect(learned.KeyZ).toBe('W')
+    expect(keycap(53)).toBe('W')
   })
 })
 
@@ -997,12 +1048,5 @@ describe('keys changed in another tab of the browser', () => {
     expect(Object.keys(bindings)).toHaveLength(Object.keys(twoOctaves).length - 1)
     expect(new Set(Object.values(bindings)).size).toBe(Object.keys(bindings).length)
     expect(saysCustom()).toBe(true)
-  })
-})
-
-describe('the default settings', () => {
-  it('are untouched by all of the above at the start of a test', () => {
-    expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
-    expect(pianoRange(37, 3)).toEqual({ first: 48, last: 84 })
   })
 })

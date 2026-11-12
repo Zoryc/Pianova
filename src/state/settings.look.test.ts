@@ -374,20 +374,3 @@ describe('a drag through the colour picker', () => {
     expect(store.get().customLabels).toBe(customLabels)
   })
 })
-
-describe('two tabs that do not hear of each other', () => {
-  it('is why the app listens for changes: the tab that saves last wins everything', () => {
-    // Two stores on one storage are two tabs. Without the "storage" event the
-    // second one still holds what it read at the start.
-    const storage = new FlakyStorage()
-    const firstTab = createSettingsStore(storage)
-    const secondTab = createSettingsStore(storage)
-
-    firstTab.set({ bindings: { KeyQ: 0 } })
-    secondTab.set({ volume: 0.3 })
-
-    // The first tab's keys are gone from storage. (The app-wide store reads the
-    // storage again at each "storage" event, which src/App.look.test.tsx tries.)
-    expect(storage.saved()).toMatchObject({ volume: 0.3, bindings: DEFAULT_BINDINGS })
-  })
-})

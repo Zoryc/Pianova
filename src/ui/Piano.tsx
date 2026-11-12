@@ -95,11 +95,21 @@ export function Piano(props: PianoProps): JSX.Element {
     [pointerNotes, range.first, range.last, baseOctave, editMode],
   )
 
-  // A mouse button released while another window has focus never reaches the page.
+  // A mouse button released while another window has focus, or while the page
+  // is hidden or has been left, never reaches the page.
   useEffect(() => {
     const releaseAll = (): void => pointerNotes.releaseAll()
+    const releaseIfHidden = (): void => {
+      if (document.visibilityState === 'hidden') pointerNotes.releaseAll()
+    }
     window.addEventListener('blur', releaseAll)
-    return () => window.removeEventListener('blur', releaseAll)
+    window.addEventListener('pagehide', releaseAll)
+    document.addEventListener('visibilitychange', releaseIfHidden)
+    return () => {
+      window.removeEventListener('blur', releaseAll)
+      window.removeEventListener('pagehide', releaseAll)
+      document.removeEventListener('visibilitychange', releaseIfHidden)
+    }
   }, [pointerNotes])
 
   /** The pointer was lifted or lost: its note stops. */

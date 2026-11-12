@@ -17,6 +17,8 @@ import {
 import type { AccentName } from './types'
 
 const LOWER_CASE_COLOUR = /^#[0-9a-f]{6}$/
+/** A colour with as much red as green as blue. */
+const GREY = /^#([0-9a-f]{2})\1\1$/
 
 function channels(colour: string): [number, number, number] {
   const channel = (start: number): number => Number.parseInt(colour.slice(start, start + 2), 16)
@@ -49,7 +51,13 @@ function* colourCube(): Generator<string> {
   for (const red of steps) for (const green of steps) for (const blue of steps) yield hex(red, green, blue)
 }
 
-describe('any colour of the whole cube', () => {
+/**
+ * Going through the whole cube takes a second or so alone, and many times that
+ * when the machine runs the other test files at the same time.
+ */
+const WHOLE_CUBE_TIMEOUT_MS = 30_000
+
+describe('any colour of the whole cube', { timeout: WHOLE_CUBE_TIMEOUT_MS }, () => {
   it('gives three real colours, a light that shows on black and readable writing on it', () => {
     const problems: string[] = []
 
@@ -60,7 +68,9 @@ describe('any colour of the whole cube', () => {
         problems.push(`${colour}: not a colour in ${JSON.stringify(palette)}`)
         continue
       }
-      // The darkest light allowed is a little under pure blue: 2.3 to 1 against black.
+      // Seen on the black stage. The spec gives no number for that; this asks for
+      // 2.3 to 1 against black, a little less than pure blue has, which the stage
+      // shows as it is. The app may ask for more, never for less.
       if (contrast(light, '#000000') < 2.3) problems.push(`${colour}: light ${light} is too dark`)
       if (contrast(inkOn(light), light) < 4.5) problems.push(`${colour}: no readable ink on ${light}`)
       if (luminance(bright) < luminance(light)) problems.push(`${colour}: bright darker than light`)
@@ -71,23 +81,37 @@ describe('any colour of the whole cube', () => {
     expect(problems.slice(0, 10)).toEqual([])
   })
 
-  it('is left exactly as picked unless it is too dark to show', () => {
+  it('is left exactly as picked when it shows well on black, and is never made darker', () => {
     const changed: string[] = []
+    const darkened: string[] = []
 
     for (const colour of colourCube()) {
       const { light } = paletteFrom(colour)
-      if (light !== colour && contrast(colour, '#000000') >= 2.5) changed.push(`${colour} -> ${light}`)
+      // The light is the colour itself (docs/INTERFACE.md 4.1). Only a colour too
+      // dark to show may be made lighter. Where "too dark" ends is the app's to
+      // tune, so this looks at the colours nobody would call too dark: 4.5 to 1
+      // against black, what the accessibility guidelines ask of text.
+      if (light !== colour && contrast(colour, '#000000') >= 4.5) changed.push(`${colour} -> ${light}`)
+      if (luminance(light) < luminance(colour)) darkened.push(`${colour} -> ${light}`)
     }
 
     expect(changed.slice(0, 10)).toEqual([])
+    expect(darkened.slice(0, 10)).toEqual([])
   })
 })
 
 describe('the colours at the edges', () => {
   it('turns black into a grey and keeps white white', () => {
-    expect(paletteFrom('#000000').light).toMatch(/^#([0-9a-f]{2})\1\1$/)
+    expect(paletteFrom('#000000').light).toMatch(GREY)
     expect(paletteFrom('#000000').light).not.toBe('#000000')
-    expect(paletteFrom('#ffffff')).toEqual({ light: '#ffffff', bright: '#ffffff', deep: '#8c8c8c' })
+
+    const white = paletteFrom('#ffffff')
+    expect(white.light).toBe('#ffffff')
+    expect(white.bright).toBe('#ffffff')
+    // The far end of a white bar is a grey: darker than the bar, and not black.
+    expect(white.deep).toMatch(GREY)
+    expect(luminance(white.deep)).toBeLessThan(luminance(white.light))
+    expect(white.deep).not.toBe('#000000')
   })
 
   it('writes in white on a dark colour of the player and in black on a pale one', () => {

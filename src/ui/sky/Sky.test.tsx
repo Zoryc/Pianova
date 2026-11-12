@@ -17,7 +17,7 @@ import { paletteForNote } from '../../core/colour'
 import { pianoRange } from '../../core/layout'
 import type { PianoRange } from '../../core/layout'
 import { NoteBus } from '../../core/noteBus'
-import { keyRectOf } from '../../core/pianoGeometry'
+import { keyRectOf, keyRects } from '../../core/pianoGeometry'
 import type { Midi, NoteListener } from '../../core/types'
 import type { PlayableNote } from '../../songs/song'
 import { Sky } from './Sky'
@@ -653,6 +653,30 @@ describe('when the piano on screen changes', () => {
     browser.play(0.2)
     expect(sky.bars()).toHaveLength(1)
   })
+
+  it('finds the keys of the piano it is shown, however often two pianos take turns', () => {
+    // Counted by hand: middle C has 23 white keys to its left on the full piano (52 in all), and 7 on the small one (22 in all).
+    const middleCOnFull = (23 + 0.5) * (1300 / 52)
+    const middleCOnSmall = (7 + 0.5) * (1300 / 22)
+    const song = fakeSong([note(C4, 1, 1)])
+    const sky = mount({ falling: song.source })
+    for (let turn = 0; turn < 3; turn++) {
+      sky.update({ range: FULL })
+      expect(centreOf(only(sky.bars()))).toBeCloseTo(middleCOnFull, 6)
+      sky.update({ range: SMALL })
+      expect(centreOf(only(sky.bars()))).toBeCloseTo(middleCOnSmall, 6)
+    }
+    // The keys that were worked out once are handed out again, however the same piano is described.
+    const full = keyRects(FULL)
+    expect(keyRects(SMALL)).not.toBe(full)
+    expect(keyRects({ first: FULL.first, last: FULL.last })).toBe(full)
+    expect(keyRects(FULL)).toBe(full)
+    // Two pianos that start on the same note, or end on the same note, are not taken for each other.
+    expect(keyRects(pianoRange(61, 3))).toHaveLength(61)
+    expect(keyRects(pianoRange(49, 3))).toHaveLength(49)
+    expect(keyRects(FULL)).toHaveLength(88)
+    expect(keyRects(pianoRange(37, 5))).toHaveLength(37)
+  })
 })
 
 describe('changing the look', () => {
@@ -938,6 +962,58 @@ describe('the background', () => {
   })
 })
 
+describe('when the browser takes the drawing away and gives it back', () => {
+  /** A graphics driver that restarts, a laptop that wakes up: the canvas comes back empty, and the browser says so. */
+  function loseAndRestore(sky: MountedSky): Event {
+    const lost = new Event('contextlost', { cancelable: true })
+    sky.canvas.dispatchEvent(lost)
+    sky.context.clearRect(0, 0, browser.size.width, browser.size.height)
+    sky.canvas.dispatchEvent(new Event('contextrestored'))
+    return lost
+  }
+
+  it('paints an idle sky again straight away, without starting to animate', () => {
+    const sky = mount({ background: 'stars' })
+    const lost = loseAndRestore(sky)
+    expect(sky.stamps('backdrop')).toHaveLength(1)
+    expect(browser.frames.requested).toBe(0)
+    // A browser only gives the drawing back when nothing objected to its being taken away.
+    expect(lost.defaultPrevented).toBe(false)
+  })
+
+  it('paints the background anew on another canvas, because the old one may be empty as well', () => {
+    const sky = mount({ background: 'stars' })
+    const before = only(sky.stamps('backdrop')).image as HTMLCanvasElement
+    loseAndRestore(sky)
+    const after = only(sky.stamps('backdrop')).image as HTMLCanvasElement
+    expect(after).not.toBe(before)
+    expect(browser.contextOf(after).discs).toBeGreaterThan(100)
+    // Once is enough: the next pictures copy the new one.
+    sky.update({ glow: 0.9 })
+    expect(only(sky.stamps('backdrop')).image).toBe(after)
+  })
+
+  it('makes the glow of the bars and of the line anew, and keeps the light that was in the air', () => {
+    const sky = mount({ glow: 1 })
+    sky.bus.noteOn(C4, 'keyboard')
+    browser.play(0.3)
+    const bar = { ...only(sky.bars()) }
+    const glow = sky.stamps('glow')[0]?.image
+    const bloom = only(sky.stamps('bloom')).image
+
+    loseAndRestore(sky)
+    expect(only(sky.bars())).toMatchObject({ x: bar.x, y: bar.y, width: bar.width, height: bar.height })
+    expect(only(sky.bars()).fill).not.toBe(bar.fill)
+    expect(sky.stamps('glow')[0]?.image).not.toBe(glow)
+    expect(only(sky.stamps('bloom')).image).not.toBe(bloom)
+    // The frames that were running carry on, one at a time.
+    expect(browser.frames.pending.size).toBe(1)
+    sky.bus.allOff()
+    browser.playUntilIdle()
+    expect(sky.bars()).toEqual([])
+  })
+})
+
 describe('a song is loaded: falling notes', () => {
   const speed = skySpeed(600)
   const notes = [note(C4, 1, 0.5), note(D4, 2, 1), note(C_SHARP_4, 2.5, 0.25), note(64, 9, 1)]
@@ -1111,6 +1187,20 @@ describe('a song is loaded: falling notes', () => {
     expect(sky.bars().length).toBeLessThanOrEqual(400)
   })
 
+  it('counts only the notes that still show toward that limit, so one long note does not use it up', () => {
+    // A note held for the whole song, and a crowd of short notes that come and go above it.
+    const crowded: PlayableNote[] = [note(21, 0, 100)]
+    for (let i = 0; i < 20_000; i++) crowded.push(note(22 + (i % 87), 1 + i * 0.001, 0.05))
+    const song = fakeSong(crowded)
+    // Nearly nine thousand notes have ended since the long one began; three thousand are in the sky.
+    song.state.position = 10.0005
+    const sky = mount({ falling: song.source })
+    // The long note and the 399 that land first: none of the ended ones took a place.
+    expect(sky.bars()).toHaveLength(400)
+    expect(centreOf(sky.bars()[0] as PaintedBar)).toBeCloseTo(keySpan(21).centre, 6)
+    expect(Math.max(...sky.bars().map(bottomAboveLine))).toBeLessThan(0.4 * speed)
+  })
+
   it('follows the song to its new notes when the arrangement changes', () => {
     const song = fakeSong(notes)
     const sky = mount({ falling: song.source })
@@ -1149,6 +1239,18 @@ describe('a song is loaded: key letters', () => {
     }
     // Sized to the bar: a bar 21 wide holds a letter of about 13.
     expect(a?.font).toMatch(/\b1[0-4]px\b/)
+    // The second letter is as new to the sky as the first: it is written at the size of its bar, not at the size it was measured at.
+    expect(s?.font).toBe(a?.font)
+  })
+
+  it('sets the font of the letters again in every picture, because a resized canvas forgets it', () => {
+    const song = fakeSong([note(C4, 1, 1), note(D4, 1.5, 1)])
+    const sky = mount({ falling: song.source, hints })
+    // The stand-in canvas keeps its font through a resize. A real one goes back to this.
+    sky.context.font = '10px sans-serif'
+    // The same width: the letters keep their size, so only the forgotten font asks for it to be set again.
+    browser.resizeTo(browser.size.width, 500)
+    expect(sky.context.texts.map((text) => text.font.startsWith('700 '))).toEqual([true, true])
   })
 
   it('writes nothing with hints off, and nothing on a note that no key plays', () => {
@@ -1160,16 +1262,37 @@ describe('a song is loaded: key letters', () => {
     expect(without.context.texts).toEqual([])
   })
 
-  it('writes no letter on a bar narrower than 14 pixels', () => {
-    // On the full piano in this sky a black-key bar is about 13 wide.
+  it('writes a small letter on a bar 13 pixels wide, and none on a narrower bar', () => {
+    // On the full piano in this sky a black-key bar is just over 13 wide: the narrowest that carries a letter.
     const song = fakeSong([note(C_SHARP_4, 1, 1)])
+    const wideEnough = mount({ falling: song.source, hints })
+    const bar = only(wideEnough.bars())
+    expect(bar.width).toBeGreaterThanOrEqual(13)
+    expect(bar.width).toBeLessThan(13.1)
+    const letter = only(wideEnough.context.texts)
+    expect(letter.text).toBe('W')
+    expect(letter.font).toMatch(/\b8px\b/)
+    // The stand-in canvas makes every character 0.6 times as wide as the font is tall: the letter is inside its bar.
+    expect(letter.text.length * 8 * 0.6).toBeLessThan(bar.width)
+    wideEnough.unmount()
+
+    // A sky ten pixels narrower: the same bar is now a little under 13 wide.
+    browser.size.width = 1290
     const narrow = mount({ falling: song.source, hints })
-    expect(only(narrow.bars()).width).toBeLessThan(14)
+    expect(only(narrow.bars()).width).toBeLessThan(13)
+    expect(only(narrow.bars()).width).toBeGreaterThan(12.9)
     expect(narrow.context.texts).toEqual([])
-    narrow.unmount()
-    const wide = mount({ falling: song.source, hints, range: SMALL })
-    expect(only(wide.bars()).width).toBeGreaterThanOrEqual(14)
-    expect(wide.context.texts.map((text) => text.text)).toEqual(['W'])
+  })
+
+  it('writes a letter on white-key and on black-key notes alike on the full piano in a window 1366 wide', () => {
+    browser.size.width = 1366
+    const song = fakeSong([note(C4, 1, 1), note(C_SHARP_4, 1.2, 1), note(D4, 1.4, 1)])
+    const sky = mount({ falling: song.source, hints })
+    // The black-key bar is between 13 and 14 wide here.
+    const narrowest = Math.min(...sky.bars().map((bar) => bar.width))
+    expect(narrowest).toBeGreaterThanOrEqual(13)
+    expect(narrowest).toBeLessThan(14)
+    expect(sky.context.texts.map((text) => text.text).sort()).toEqual(['A', 'S', 'W'])
   })
 
   it('writes no letter on a bar too short to hold it', () => {
@@ -1210,6 +1333,17 @@ describe('a song is loaded: key letters', () => {
     const text = only(sky.context.texts)
     expect(text.alpha).toBeGreaterThan(0)
     expect(text.alpha).toBeLessThan(1)
+  })
+
+  it('writes the letter in white where a solid bar is still its deep shade, and dark from where the bar has turned light', () => {
+    // The first note is low in the sky; the second has only just come in at the top, where the bar is dark.
+    const song = fakeSong([note(C4, 1, 1), note(D4, 2.6, 0.3)])
+    const sky = mount({ falling: song.source, hints })
+    const [low, high] = sky.context.texts
+    expect([low?.text, high?.text]).toEqual(['A', 'S'])
+    expect(high?.y).toBeLessThan(low?.y ?? 0)
+    expect(low?.colour).toBe('#000000')
+    expect(high?.colour).toBe('#ffffff')
   })
 })
 
@@ -1279,13 +1413,14 @@ describe('cleaning up', () => {
     expect(sky.bars()).toEqual([])
     expect(sky.context.images).toEqual([])
 
-    // Nothing it left behind reacts to later notes, resizes or setting changes.
+    // Nothing it left behind reacts to later notes, resizes, setting changes or a drawing that is given back.
     const wipes = sky.context.wipes
     const requested = browser.frames.requested
     bus.noteOn(D4, 'keyboard')
     bus.allOff()
     window.dispatchEvent(new Event('resize'))
     browser.setReducedMotion(true)
+    sky.canvas.dispatchEvent(new Event('contextrestored'))
     vi.advanceTimersByTime(1000)
     expect(browser.frames.requested).toBe(requested)
     expect(sky.context.wipes).toBe(wipes)

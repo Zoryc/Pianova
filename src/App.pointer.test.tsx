@@ -291,6 +291,12 @@ const C4 = 12
 const D4 = 14
 const E4 = 16
 
+/**
+ * The most frames the sky may take to come to rest once the last note has
+ * ended: four seconds of them. A bar of light has left the sky after three.
+ */
+const FRAMES_TO_REST = 240
+
 // ===========================================================================
 
 describe('playing the on-screen piano', () => {
@@ -367,7 +373,7 @@ describe('playing the on-screen piano', () => {
     expect(bars()[0]?.x).toBeLessThan(skyWidth / 52)
     mouse.up(0)
     expect(held()).toEqual([])
-    browser.playUntilIdle()
+    expect(browser.playUntilIdle()).toBeLessThan(FRAMES_TO_REST)
 
     // The highest: C8.
     mouse.down(87)
@@ -446,7 +452,7 @@ describe('playing the on-screen piano', () => {
     expect(bar.height).toBeGreaterThan(0)
 
     mouse.up(C4)
-    browser.playUntilIdle()
+    expect(browser.playUntilIdle()).toBeLessThan(FRAMES_TO_REST)
     expect(bars()).toHaveLength(0)
     expect(browser.frames.pending.size).toBe(0)
   })
@@ -602,6 +608,58 @@ describe('no stuck notes: the mouse is holding a key when…', () => {
     // The button came up while the page could not see it. Back on the page:
     mouse.down(C4)
     expect(held()).toEqual([60])
+    mouse.up(C4)
+    expect(held()).toEqual([])
+    expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60', 'on 60 0.8', 'off 60'])
+  })
+
+  /*
+   * A mouse button that comes up while the page is hidden, or after it was
+   * left, never reaches the page. The window does not always lose the focus
+   * with it (a keyboard shortcut can switch tabs or go back a page). The
+   * piano must not go on believing that the mouse holds the key: the very
+   * next press on that key would be silent.
+   */
+  it('…the page is hidden while the window keeps the focus: the very next press on that key plays', async () => {
+    await startApp()
+    const mouse = theMouse()
+    mouse.down(C4)
+    expect(held()).toEqual([60])
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    visibility.mockRestore()
+    expect(held()).toEqual([])
+    expect(litSlots()).toEqual([])
+    expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60'])
+
+    // Back on the page, the mouse has not moved: the same key is pressed again.
+    mouse.down(C4)
+    expect(held()).toEqual([60])
+    expect(litSlots()).toEqual([String(C4)])
+    mouse.up(C4)
+    expect(held()).toEqual([])
+    expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60', 'on 60 0.8', 'off 60'])
+  })
+
+  it('…the page is left and comes back as it was: the very next press on that key plays', async () => {
+    await startApp()
+    const mouse = theMouse()
+    mouse.down(C4)
+    expect(held()).toEqual([60])
+
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'))
+    })
+    expect(held()).toEqual([])
+    expect(litSlots()).toEqual([])
+    expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60'])
+
+    mouse.down(C4)
+    expect(held()).toEqual([60])
+    expect(litSlots()).toEqual([String(C4)])
     mouse.up(C4)
     expect(held()).toEqual([])
     expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60', 'on 60 0.8', 'off 60'])
@@ -807,7 +865,7 @@ describe('the stage', () => {
     expect(litSlots()).toEqual([String(C4)])
     mouse.up(C4)
     expect(held()).toEqual([])
-    browser.playUntilIdle()
+    expect(browser.playUntilIdle()).toBeLessThan(FRAMES_TO_REST)
     expect(bars()).toHaveLength(0)
     expect(browser.frames.pending.size).toBe(0)
   })
@@ -834,7 +892,7 @@ describe('the stage', () => {
 
     await user.keyboard('[/KeyA]')
     expect(held()).toEqual([])
-    browser.playUntilIdle()
+    expect(browser.playUntilIdle()).toBeLessThan(FRAMES_TO_REST)
     expect(bars()).toHaveLength(0)
     expect(browser.frames.pending.size).toBe(0)
   })

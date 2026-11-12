@@ -184,6 +184,7 @@ describe('App, as first drawn', () => {
   it('shows the hint where the notes being played will be', () => {
     expect(text).toContain('Press the keys shown on the piano, or click it')
     expect(text).not.toContain('Transposed')
+    expect(text).not.toContain('Sustain on')
   })
 
   it('draws the sky directly before the whole piano', () => {
@@ -282,7 +283,7 @@ describe('the tabs of Settings', () => {
       'Note names C D E Do Ré Mi How notes are written on the piano.',
     )
     expect(lookTab(DEFAULT_SETTINGS).text).toContain(
-      'Light bars On Bars of light for the notes being played.',
+      'Light bars On Bars of light for the notes you play and the falling notes of a song.',
     )
   })
 
@@ -440,8 +441,11 @@ function noteNames(): string[] {
   return [...document.querySelectorAll('.stage__notes .stage__note')].map((name) => name.textContent ?? '')
 }
 
-function transposedBadge(): string | null {
-  return document.querySelector('.stage__badge')?.textContent ?? null
+/** The quiet badges next to the sound status, which say why notes sound different. */
+function badges(): string[] {
+  return [...document.querySelectorAll('.stage__sound .stage__badge')].map(
+    (badge) => badge.textContent ?? '',
+  )
 }
 
 describe('the words over the sky', () => {
@@ -480,7 +484,7 @@ describe('the words over the sky', () => {
     startApp()
     // Nothing played yet: how to play, and why the notes will sound different.
     expect(hint().className).toBe('stage__hint')
-    expect(transposedBadge()).toBe('Transposed −3')
+    expect(badges()).toEqual(['Transposed −3'])
 
     act(() => settingsStore.set({ transpose: 2 }))
     key('keydown', 'KeyG')
@@ -488,12 +492,28 @@ describe('the words over the sky', () => {
     key('keydown', 'KeyD')
     // The names are those of the keys pressed; the badge says why they sound different.
     expect(noteNames()).toEqual(['C4', 'E4', 'G4'])
-    expect(transposedBadge()).toBe('Transposed +2')
+    expect(badges()).toEqual(['Transposed +2'])
     expect(hint().className).toBe('stage__hint stage__hint--gone')
 
     act(() => settingsStore.set({ transpose: 0 }))
-    expect(transposedBadge()).toBeNull()
+    expect(badges()).toEqual([])
     expect(noteNames()).toEqual(['C4', 'E4', 'G4'])
+  })
+
+  // Space switches sustain without showing the menu: the badge is the sign that stays.
+  it('say when sustain is on, next to the word about the transposing', () => {
+    startApp()
+    expect(badges()).toEqual([])
+
+    tap('Space')
+    expect(settingsStore.get().sustain).toBe(true)
+    expect(badges()).toEqual(['Sustain on'])
+
+    act(() => settingsStore.set({ transpose: 2 }))
+    expect(badges()).toEqual(['Transposed +2', 'Sustain on'])
+
+    tap('Space')
+    expect(badges()).toEqual(['Transposed +2'])
   })
 
   it('keep the hint to themselves while the computer keys are being chosen', () => {

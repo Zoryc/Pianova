@@ -34,7 +34,10 @@ export interface SongPlayer {
   /**
    * Replaces what is loaded. Stops first, unless `keepPlace` is true: then
    * position and playing/paused state are kept (used when the options of the
-   * current song change).
+   * current song change). With `keepPlace` and the arrangement that is already
+   * loaded (the same `notes` array, the same duration), only the id and the
+   * title are taken over: the notes that are sounding are left alone (used
+   * when the current song is renamed).
    */
   load(
     song: { id: string; title: string },
@@ -151,6 +154,11 @@ export function createSongPlayer(deps: PlayerDeps): SongPlayer {
     bus.allOff(SOURCE)
   }
 
+  /** True when these are the very notes the player has, with the same length: the same music. */
+  function isLoaded(arrangement: Arrangement): boolean {
+    return arrangement.notes === notes && usableDuration(arrangement.duration) === live.duration
+  }
+
   /** Hands out a new snapshot and tells the subscribers, but only when something changed. */
   function publish(): void {
     if (STATE_KEYS.every((key) => snapshot[key] === live[key])) return
@@ -216,6 +224,13 @@ export function createSongPlayer(deps: PlayerDeps): SongPlayer {
   ): void {
     if (disposed) return
     const keepPlace = options.keepPlace === true && live.status !== 'empty'
+    if (keepPlace && isLoaded(arrangement)) {
+      // Only the name is new. The notes that are sounding still belong to the song: they play on.
+      live.songId = song.id
+      live.title = song.title
+      publish()
+      return
+    }
     if (!keepPlace) setStatus('stopped')
     notes = arrangement.notes
     live.songId = song.id

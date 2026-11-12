@@ -124,11 +124,16 @@ describe('one whole drag of a file', () => {
     expect(messageLines()).toEqual([])
   })
 
-  it('that says "files" and "text" at once (a picture from another page) is a drag of files', () => {
-    const { sky } = drawPage()
-    const picture: Dragged = { types: ['text/uri-list', 'text/html', 'Files'], files: [] }
-    expect(drag('dragOver', picture, sky).defaultPrevented).toBe(true)
+  it('whose end the page never heard of: the overlay goes at the next movement of the mouse', () => {
+    const { onFilesDropped, sky } = drawPage()
+    drag('dragEnter', FILES, sky, null)
     expect(overlay()).not.toBeNull()
+
+    // No "left" and no "dropped" ever came. A mouse that moves is not dragging anything.
+    fireEvent.pointerMove(sky)
+    expect(overlay()).toBeNull()
+    expect(onFilesDropped).not.toHaveBeenCalled()
+    expect(titles()).toEqual([])
   })
 })
 
@@ -143,16 +148,6 @@ describe('what is dragged without being a file', () => {
     expect(overlay()).toBeNull()
     expect(drag('drop', TEXT, sky).defaultPrevented).toBe(false)
     expect(onFilesDropped).not.toHaveBeenCalled()
-  })
-
-  it('does not take away the overlay of a file drag whose end the page never heard of', () => {
-    const { sky } = drawPage()
-    drag('dragEnter', FILES, sky, null)
-    expect(overlay()).not.toBeNull()
-
-    // The first movement of the mouse afterwards does.
-    fireEvent.pointerMove(sky)
-    expect(overlay()).toBeNull()
   })
 })
 
@@ -194,14 +189,28 @@ describe('what is dropped', () => {
     drag('drop', { types: ['Files'], files }, sky)
 
     expect(await screen.findByText('2 songs were added.')).toBeTruthy()
-    const lines = messageLines()
-    expect(lines).toHaveLength(3)
-    expect(lines[0]).toBe('2 songs were added.')
-    // What exactly is said about the folder is not the point here: that it is named is.
-    expect(lines[1]).toMatch(/^My music: \S/)
-    expect(lines[2]).toBe(
+    expect(messageLines()).toEqual([
+      '2 songs were added.',
+      // Nothing is wrong with the folder, and the player is told what to do with it.
+      'My music: That could not be read. ' +
+        'If it is a folder, open it and drop the MIDI files that are in it.',
       'diary.txt: That file is not a MIDI file. MIDI files usually end in .mid or .midi.',
-    )
+    ])
     expect(titles()).toEqual(['Kit', 'Real'])
+  })
+
+  it('is a folder and nothing else: the player reads what to do, and nothing about damage', async () => {
+    const { onFilesDropped, sky } = drawPage()
+    drag('drop', { types: ['Files'], files: [unreadableFile('My music')] }, sky)
+
+    expect(
+      await screen.findByText(
+        'That could not be read. If it is a folder, open it and drop the MIDI files that are in it.',
+      ),
+    ).toBeTruthy()
+    expect(messageLines()).toHaveLength(1)
+    expect(messageLines()[0]).not.toMatch(/damaged/)
+    expect(onFilesDropped).toHaveBeenCalledTimes(1)
+    expect(titles()).toEqual([])
   })
 })

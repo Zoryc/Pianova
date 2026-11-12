@@ -83,7 +83,10 @@ function readSong(bytes: Uint8Array, fileName: string, options: ParseOptions): S
   const start = findMidiStart(bytes)
   if (start < 0) throw new SongImportError('not-midi')
 
-  const file = parseMidi(new ForwardOnlyBytes(bytes.subarray(start)))
+  // A copy, so that it can be changed without touching the bytes that were handed in.
+  const midiBytes = new ForwardOnlyBytes(bytes.subarray(start))
+  blankEmptySequenceNumbers(midiBytes)
+  const file = parseMidi(midiBytes)
   const ticksPerBeat = ticksPerBeatOf(file.header)
   const score = readScore(file.tracks)
   const notes = pairNotes(score)
@@ -103,7 +106,8 @@ function readSong(bytes: Uint8Array, fileName: string, options: ParseOptions): S
 
 /*
  * Step 1: from bytes to events. midi-file does the reading; this part only
- * makes sure it is given something it can finish.
+ * makes sure it is given something it can finish, and smooths over the one
+ * harmless oddity of real files that it refuses.
  */
 
 /**
@@ -142,6 +146,47 @@ class ForwardOnlyBytes extends Uint8Array {
   }
 }
 
+/** Every chunk of a MIDI file (the header, each track) starts with four letters and its length. */
+const CHUNK_HEADER_BYTES = 8
+/** A wait of zero, then a "sequence number" event (FF 00) that says it holds zero bytes. */
+const EMPTY_SEQUENCE_NUMBER = [0x00, 0xff, 0x00, 0x00]
+/** A wait of zero, then a "text" event (FF 01) that holds zero bytes. */
+const EMPTY_TEXT = [0x00, 0xff, 0x01, 0x00]
+
+/**
+ * A track may begin with a "sequence number" event. Some programs write it
+ * without the number, and midi-file refuses the whole file for that. The app
+ * has no use for the number, so such an event is turned into an empty piece of
+ * text, which midi-file reads and the importer passes over.
+ */
+function blankEmptySequenceNumbers(bytes: Uint8Array): void {
+  let at = 0
+  while (at + CHUNK_HEADER_BYTES <= bytes.length) {
+    const length = uint32At(bytes, at + 4)
+    const data = at + CHUNK_HEADER_BYTES
+    if (hasTextAt(bytes, 'MTrk', at) && startsWithEmptySequenceNumber(bytes, data, length)) {
+      bytes.set(EMPTY_TEXT, data)
+    }
+    // Always forwards, by eight bytes at least: the walk ends whatever lengths the file claims.
+    at = data + length
+  }
+}
+
+/** True when the `length` bytes of a track that start at `at` begin with that event, whole. */
+function startsWithEmptySequenceNumber(bytes: Uint8Array, at: number, length: number): boolean {
+  return (
+    length >= EMPTY_SEQUENCE_NUMBER.length &&
+    EMPTY_SEQUENCE_NUMBER.every((byte, index) => bytes[at + index] === byte)
+  )
+}
+
+/** The four bytes at `at` as one number, never negative. */
+function uint32At(bytes: Uint8Array, at: number): number {
+  let value = 0
+  for (let index = 0; index < 4; index++) value = value * 256 + (bytes[at + index] ?? 0)
+  return value
+}
+
 /** How many ticks make one beat, once the file is known to be of a kind this app reads. */
 function ticksPerBeatOf(header: MidiHeader): number {
   const format = wholeNumber(header.format, 0, 2)
@@ -178,6 +223,8 @@ interface TempoChange {
 interface TrackFacts {
   /** '' when the track has no name. */
   name: string
+  /** True when the track plays at least one note the piano has. */
+  hasNotes: boolean
   /** When the last event of the track happens. */
   endTick: number
   /** Channel -> the first instrument the track chooses for it. */
@@ -210,7 +257,7 @@ function byTick(a: { tick: number }, b: { tick: number }): number {
 
 /** Adds the actions and tempo changes of one track to `score`; returns the rest of what it says. */
 function readTrack(events: readonly MidiEvent[], track: number, score: Score): TrackFacts {
-  const facts: TrackFacts = { name: '', endTick: 0, programs: new Map() }
+  const facts: TrackFacts = { name: '', hasNotes: false, endTick: 0, programs: new Map() }
   let tick = 0
   for (const event of events) {
     tick += wholeNumber(event.deltaTime, 0, MAX_DELTA_TICKS)
@@ -224,6 +271,7 @@ function readTrack(events: readonly MidiEvent[], track: number, score: Score): T
         // A "note on" with no force at all is how many files write a note off. (midi-file
         // already reports it as one; checking here keeps the rule from depending on that.)
         if (event.type === 'noteOn' && velocity > 0) {
+          facts.hasNotes = true
           score.actions.push({ kind: 'press', tick, track, channel, midi, velocity })
         } else {
           score.actions.push({ kind: 'release', tick, track, channel, midi })
@@ -328,13 +376,18 @@ class SoundingNotes {
   private readonly pedalsDown = new Set<number>()
   /** The notes whose key is up but which the pedal keeps sounding: channel -> pitch -> notes. */
   private readonly ringing = new Map<number, Map<number, TickNote[]>>()
+  /** The keys struck again while still down, until their next release: key -> when that was. */
+  private readonly struckAgainAt = new Map<number, number>()
 
   press(action: Extract<Action, { kind: 'press' }>): void {
     const { tick, track, channel, midi, velocity } = action
     const key = heldKey(track, channel, midi)
     // The same key cannot be down twice: the note it was playing stops where the new one starts.
     const before = this.held.get(key)
-    if (before) before.endTick = tick
+    if (before) {
+      before.endTick = tick
+      this.struckAgainAt.set(key, tick)
+    }
     this.stopRinging(channel, midi, tick)
 
     const note: TickNote = {
@@ -355,6 +408,11 @@ class SoundingNotes {
     const note = this.held.get(key)
     // A release with no press before it means nothing.
     if (!note) return
+    // Some programs write a repeated note as "new note on, old note off" at the same moment.
+    // That release belongs to the note the press has already ended, not to the new one.
+    const struckAgainAt = this.struckAgainAt.get(key)
+    this.struckAgainAt.delete(key)
+    if (struckAgainAt === action.tick) return
     this.held.delete(key)
     if (this.pedalsDown.has(action.channel)) this.keepRinging(note)
     else note.endTick = action.tick
@@ -572,9 +630,16 @@ const PLACEHOLDER_NAMES: ReadonlySet<string> = new Set([
   'acoustic grand piano',
 ])
 
-/** The name the file gives the song (the name of its first track), or else the name of the file. */
+/**
+ * The name the file gives the song, or else the name of the file. A file
+ * writes the name of its song in its first track. But when that track plays
+ * notes next to other tracks, the name is that of a part ("Right hand",
+ * "Flute"), and the player would not find the song under it.
+ */
 function songTitle(tracks: readonly TrackFacts[], fileName: string): string {
-  const name = tracks[0]?.name ?? ''
+  const first = tracks[0]
+  const namesTheSong = first !== undefined && (tracks.length === 1 || !first.hasNotes)
+  const name = namesTheSong ? first.name : ''
   return name === '' || isPlaceholderName(name) ? titleFromFileName(fileName) : name
 }
 

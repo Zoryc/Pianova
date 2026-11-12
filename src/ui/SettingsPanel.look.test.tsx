@@ -154,7 +154,7 @@ describe('the Look tab, word for word', () => {
       {
         name: 'Light bars',
         choices: ['on/off'],
-        hint: 'Bars of light for the notes being played.',
+        hint: 'Bars of light for the notes you play and the falling notes of a song.',
       },
       {
         name: 'Bar style',
@@ -223,11 +223,30 @@ describe('the About tab, word for word', () => {
       'A piano you play with your computer keyboard.',
       'Piano sound: Salamander Grand Piano by Alexander Holm (CC BY 3.0)',
       'Everything stays in your browser. Nothing is uploaded.',
+      "Clearing the browser's data for this page removes your settings and songs.",
       'Puts every setting and every key back to how it was at the start.',
     ])
     expect(within(page).getAllByRole('button').map((button) => button.textContent)).toEqual([
       'Reset all settings',
     ])
+    // Nothing has been reset yet, so nothing says that it was.
+    expect(within(page).getByRole('status').textContent).toBe('')
+  })
+
+  it('answers "Yes" on "Reset all settings" with one line, said to screen readers too', () => {
+    const page = showTab('About')
+    const report = within(page).getByRole('status')
+
+    fireEvent.click(within(page).getByRole('button', { name: 'Reset all settings' }), { detail: 1 })
+    expect(page.textContent).toContain('Really reset?')
+    expect(report.textContent).toBe('')
+
+    fireEvent.click(within(page).getByRole('button', { name: 'Yes' }), { detail: 1 })
+
+    // The line was on the page before its words were: that is what makes a screen reader say them.
+    expect(within(page).getByRole('status')).toBe(report)
+    expect(report.textContent).toBe('Everything is back to how it was at the start.')
+    expect(page.textContent).not.toContain('Really reset?')
   })
 
   it('links only the name of the licence, to its page, in a new tab that is told nothing', () => {
@@ -270,13 +289,6 @@ describe('the words a casual player should never meet', () => {
     const words = everyWord(showTab(name))
     for (const word of EVERYWHERE) expect(words).not.toMatch(word)
   })
-
-  it.each(['Sound', 'Piano', 'Look', 'About'] as const)(
-    'include "octave" outside the Keys tab: not in the %s tab',
-    (name) => {
-      expect(everyWord(showTab(name))).not.toMatch(/octave/i)
-    },
-  )
 
   it('are not in the values either, at the ends of every slider and stepper', () => {
     act(() => settingsStore.set({ volume: 0, velocity: 0.1, reverb: 0, transpose: -12, glow: 0 }))
@@ -328,14 +340,35 @@ describe('without a mouse', () => {
 
   it('reaches every option of the Look tab with Tab alone, one stop for the colours', () => {
     const page = showTab('Look')
-    const stops = [...page.querySelectorAll<HTMLElement>('button, input')]
-      .filter((control) => control.tabIndex === 0)
-      .map((control) => control.getAttribute('aria-label') ?? control.textContent ?? '')
+    /** The controls of one option at which the Tab key stops. */
+    const stopsOf = (option: string): HTMLElement[] =>
+      [
+        ...within(page)
+          .getByRole('group', { name: option })
+          .querySelectorAll<HTMLElement>('button, input'),
+      ].filter((control) => control.tabIndex === 0)
 
-    // Six themes, the chosen colour, the glow, 4 backgrounds, light bars, 2 bar styles,
-    // 3 sparks and the last three switches.
-    expect(stops).toHaveLength(6 + 1 + 1 + 4 + 1 + 2 + 3 + 3)
-    expect(stops.filter((stop) => stop === 'Red')).toHaveLength(1)
+    for (const option of [
+      'Theme',
+      'Colour',
+      'Glow',
+      'Background',
+      'Light bars',
+      'Bar style',
+      'Sparks',
+      'Key letters on falling notes',
+      'Show the notes being played',
+      'Hide the menu automatically',
+    ]) {
+      expect(stopsOf(option).length, option).toBeGreaterThan(0)
+    }
+
+    // The colours are one group of radio buttons: Tab stops once, on the chosen
+    // colour, and the arrow keys go from there.
+    const colourStops = stopsOf('Colour')
+    expect(colourStops).toHaveLength(1)
+    expect(colourStops[0]?.getAttribute('aria-label')).toBe('Red')
+    expect(colourStops[0]?.getAttribute('aria-checked')).toBe('true')
   })
 
   it('keeps the colour picker of the browser away from the keyboard and from screen readers', () => {

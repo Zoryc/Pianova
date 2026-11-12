@@ -7,13 +7,17 @@
  * The player runs on a clock the test moves by hand, 5 ms at a time (the
  * player's own step), and the sky draws one picture after each step on the
  * stand-in canvas of skyTestKit.ts. The falling notes are handed to the sky
- * the way the app does it (src/ui/useSongs.ts).
+ * the way the app does it (src/ui/useSongs.ts). The last group goes through
+ * that glue itself, with the app's own player: the two seconds a song waits
+ * before its first note, and a song that is moved while it stands still.
  *
  * The sky is 1300 x 600 CSS pixels: one second of the song is 200 pixels.
  */
 import type { JSX } from 'react'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { bus } from '../../app/pianoApp'
+import { player } from '../../app/songsApp'
 import { pianoRange } from '../../core/layout'
 import { NoteBus } from '../../core/noteBus'
 import { keyRectOf } from '../../core/pianoGeometry'
@@ -21,10 +25,13 @@ import type { Midi } from '../../core/types'
 import type { Arrangement, PlayableNote } from '../../songs/song'
 import { createSongPlayer } from '../../songs/songPlayer'
 import type { SongPlayer } from '../../songs/songPlayer'
+import { STARTER_SONGS } from '../../songs/starterSongs'
+import { resetSongs } from '../songsTestKit'
+import { LEAD_IN_SECONDS, playSong, useSongSession } from '../useSongs'
 import { Sky } from './Sky'
 import type { FallingSource } from './Sky'
-import { skySpeed } from './skyModel'
-import { BLOOM_PICTURE_SIZE } from './skySprites'
+import { SKY_SECONDS, skySpeed } from './skyModel'
+import { BLOOM_PICTURE_SIZE, SPARK_PICTURE_SIZE } from './skySprites'
 import { installFakeBrowser } from './skyTestKit'
 import type { FakeBrowser, FakeContext, PaintedBar } from './skyTestKit'
 
@@ -144,29 +151,67 @@ function setTheStage(notes: readonly PlayableNote[] = TUNE): Stage {
     wasPlaying = playing
   })
 
-  const sounded: Midi[] = []
-  bus.subscribe((event) => {
-    if (event.type === 'on' && event.source === 'playback') sounded.push(event.midi)
-  })
-  const landings: Landing[] = []
+  const watch = watchLandings(bus, context)
 
   const run = (ms: number): void => {
     for (let passed = 0; passed < ms; passed += STEP_MS) {
       clock += STEP_MS
       ;(step as (() => void) | null)?.()
       browser.frame(STEP_MS)
-      for (const midi of sounded.splice(0)) {
-        const centre = centreOfKey(midi)
-        const gaps = context.bars
-          .filter((bar) => Math.abs(bar.x + bar.width / 2 - centre) < 0.01)
-          .map(bottomAboveLine)
-          .sort((a, b) => Math.abs(a) - Math.abs(b))
-        landings.push({ midi, gap: gaps[0] ?? Number.NaN })
-      }
+      watch.look()
     }
   }
 
-  return { player, bus, context, landings, run, bottoms: () => context.bars.map(bottomAboveLine) }
+  return {
+    player,
+    bus,
+    context,
+    landings: watch.landings,
+    run,
+    bottoms: () => context.bars.map(bottomAboveLine),
+  }
+}
+
+/**
+ * Follows the notes a player sounds on `bus`. Each time `look` is called, the
+ * notes sounded since the last time are added to `landings`, with where their
+ * bars are in the picture on `context` at that moment.
+ */
+function watchLandings(
+  bus: NoteBus,
+  context: FakeContext,
+): { landings: Landing[]; look(): void; stop(): void } {
+  const sounded: Midi[] = []
+  const stop = bus.subscribe((event) => {
+    if (event.type === 'on' && event.source === 'playback') sounded.push(event.midi)
+  })
+  const landings: Landing[] = []
+  const look = (): void => {
+    for (const midi of sounded.splice(0)) {
+      const centre = centreOfKey(midi)
+      const gaps = context.bars
+        .filter((bar) => Math.abs(bar.x + bar.width / 2 - centre) < 0.01)
+        .map(bottomAboveLine)
+        .sort((a, b) => Math.abs(a) - Math.abs(b))
+      landings.push({ midi, gap: gaps[0] ?? Number.NaN })
+    }
+  }
+  return { landings, look, stop }
+}
+
+/** The lower ends of the bars that should be on screen at `position`, as heights above the line, lowest first. */
+function expectedBottoms(notes: readonly PlayableNote[], position: number): number[] {
+  return notes
+    .filter((each) => each.time + each.duration > position && each.time < position + SKY_SECONDS)
+    .map((each) => (each.time - position) * SPEED)
+    .sort((a, b) => a - b)
+}
+
+/** Checks that the bars on screen are exactly the ones in `expected`, each at its height. */
+function expectBottoms(shown: readonly number[], expected: readonly number[]): void {
+  const sorted = [...shown].sort((a, b) => a - b)
+  expect(sorted).toHaveLength(expected.length)
+  sorted.forEach((bottom, i) => expect(bottom).toBeCloseTo(expected[i] as number, 6))
 }
 
 /** One step of the player at this speed moves a bar by this many pixels at most. */
@@ -256,15 +301,7 @@ describe('a falling note and the moment it sounds', () => {
     stage.run(300)
     stage.player.seek(3.0)
     stage.run(STEP_MS)
-    const position = stage.player.getPosition()
-    const expected = TUNE.filter(
-      (each) => each.time + each.duration > position && each.time < position + 3,
-    ).map((each) => (each.time - position) * SPEED)
-    expect(stage.bottoms().sort((a, b) => a - b)).toHaveLength(expected.length)
-    stage
-      .bottoms()
-      .sort((a, b) => a - b)
-      .forEach((bottom, i) => expect(bottom).toBeCloseTo(expected.sort((a, b) => a - b)[i] as number, 6))
+    expectBottoms(stage.bottoms(), expectedBottoms(TUNE, stage.player.getPosition()))
   })
 
   it('comes to rest when the song is over: no frame, no glow and no spark is left, and the start is shown', () => {
@@ -279,9 +316,16 @@ describe('a falling note and the moment it sounds', () => {
     expect(browser.frames.pending.size).toBe(0)
     const pictures = stage.context.images.map((stamp) => stamp.image as HTMLCanvasElement)
     expect(pictures.filter((picture) => picture.width === BLOOM_PICTURE_SIZE)).toEqual([])
-    // Back at the start: the first notes of the tune are in the air again, standing still.
-    const expected = TUNE.filter((each) => each.time < 3).map((each) => each.time * SPEED)
-    expect(stage.bottoms().sort((a, b) => a - b)).toHaveLength(expected.length)
+    expect(pictures.filter((picture) => picture.width === SPARK_PICTURE_SIZE)).toEqual([])
+    // Back at the start: the first notes of the tune are in the air again, each
+    // at its own height (seven of them come within the three seconds the sky shows).
+    const atTheStart = expectedBottoms(TUNE, 0)
+    expect(atTheStart).toHaveLength(7)
+    expectBottoms(stage.bottoms(), atTheStart)
+    // And they stand still.
+    browser.frames.now += 60_000
+    expectBottoms(stage.bottoms(), atTheStart)
+    expect(browser.frames.pending.size).toBe(0)
   })
 
   it('puts out the glow of the notes that were sounding when the song is paused, and goes still', () => {
@@ -298,5 +342,141 @@ describe('a falling note and the moment it sounds', () => {
     browser.playUntilIdle()
     expect(blooms()).toBe(0)
     expect(browser.frames.pending.size).toBe(0)
+  })
+})
+
+describe('a song the app starts, with its own player and its song glue', () => {
+  const TWINKLE = STARTER_SONGS.find((song) => song.id === 'starter:twinkle-twinkle-little-star')
+  if (!TWINKLE) throw new Error('The starter song of these tests is gone.')
+  /** Its notes as the app plays them: the tune starts on its first beat, so all of it comes later by the lead-in. */
+  const PLAYED = (TWINKLE.tracks[0]?.notes ?? []).map((each) => ({
+    ...each,
+    time: each.time + LEAD_IN_SECONDS,
+  }))
+
+  /** How often the stand-in for the app shell was drawn. */
+  let shellDrawn = 0
+  let stopWatching: () => void = () => undefined
+
+  /** What the app shell does for the sky: it asks the song glue for the falling notes and hands them on. */
+  function ShellWithSky(): JSX.Element {
+    shellDrawn += 1
+    const song = useSongSession(FULL)
+    return (
+      <Sky
+        bus={bus}
+        range={FULL}
+        showBars
+        barStyle="solid"
+        sparks="off"
+        glow={0.6}
+        background="black"
+        accent="red"
+        customColour="#ff2a2a"
+        falling={song.falling}
+        hints={NO_HINTS}
+      />
+    )
+  }
+
+  function drawShell(): FakeContext {
+    const view = render(<ShellWithSky />)
+    return browser.contextOf(view.container.querySelector('canvas') as HTMLCanvasElement)
+  }
+
+  /** Lets `ms` go by on the page's clock, 5 ms at a time: the player steps, then the sky draws. */
+  function run(ms: number, afterEachStep: () => void = () => undefined): void {
+    for (let passed = 0; passed < ms; passed += STEP_MS) {
+      act(() => {
+        vi.advanceTimersByTime(STEP_MS)
+      })
+      browser.frame(STEP_MS)
+      afterEachStep()
+    }
+  }
+
+  beforeEach(async () => {
+    await resetSongs()
+    shellDrawn = 0
+    // The player's clock and its timer; the frames stay with the stand-in browser.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] })
+  })
+
+  afterEach(async () => {
+    stopWatching()
+    cleanup()
+    vi.useRealTimers()
+    await resetSongs()
+  })
+
+  it('shows the first note two seconds up in the sky at "Play", and sounds it when it touches the line', () => {
+    const context = drawShell()
+    const watch = watchLandings(bus, context)
+    stopWatching = watch.stop
+    act(() => {
+      playSong(TWINKLE.id)
+    })
+    browser.frame(0)
+
+    // Nothing sounds yet. The first bar is two seconds above the line, well inside the sky.
+    expect(bus.getActiveNotes().size).toBe(0)
+    const bottoms = context.bars.map(bottomAboveLine)
+    expectBottoms(bottoms, expectedBottoms(PLAYED, 0))
+    expect(Math.min(...bottoms)).toBeCloseTo(LEAD_IN_SECONDS * SPEED, 6)
+
+    // It falls for all of that time without a sound…
+    run(LEAD_IN_SECONDS * 1000 - STEP_MS, watch.look)
+    expect(watch.landings).toEqual([])
+    // …and sounds at the moment it reaches the line.
+    run(2 * STEP_MS, watch.look)
+    expect(watch.landings.map((landing) => landing.midi)).toEqual([PLAYED[0]?.midi])
+    const [first] = watch.landings
+    expect(first?.gap).toBeLessThanOrEqual(1e-6)
+    expect(first?.gap).toBeGreaterThanOrEqual(-onePlayerStep(1) - 1e-6)
+
+    // So does every note after it.
+    run(3000, watch.look)
+    expect(watch.landings.length).toBeGreaterThan(4)
+    for (const landing of watch.landings) {
+      expect(landing.gap, `note ${landing.midi}`).toBeLessThanOrEqual(1e-6)
+      expect(landing.gap, `note ${landing.midi}`).toBeGreaterThanOrEqual(-onePlayerStep(1) - 1e-6)
+    }
+  })
+
+  it('shows a song that stands still at its new place at once when it is moved, and at its start after "Stop"', () => {
+    const context = drawShell()
+    act(() => {
+      playSong(TWINKLE.id)
+    })
+    run(500)
+    act(() => player.pause())
+    browser.playUntilIdle()
+    const framesAsked = browser.frames.requested
+
+    // The progress slider of a paused song, dragged: one new place after the other.
+    for (const place of [10.1, 10.6, 11.1, 4.25, 20.1]) {
+      act(() => player.seek(place))
+      // No time has gone by and no frame was asked for: the picture is already the new one.
+      expectBottoms(context.bars.map(bottomAboveLine), expectedBottoms(PLAYED, place))
+    }
+    act(() => player.stop())
+    expectBottoms(context.bars.map(bottomAboveLine), expectedBottoms(PLAYED, 0))
+    expect(browser.frames.requested).toBe(framesAsked)
+  })
+
+  it('does not draw the app shell again for a song that plays, whatever place it is moved to', () => {
+    const context = drawShell()
+    act(() => {
+      playSong(TWINKLE.id)
+    })
+    run(500)
+    const drawnWhilePlaying = shellDrawn
+
+    run(1500)
+    act(() => player.seek(12))
+    run(1000)
+    expect(shellDrawn).toBe(drawnWhilePlaying)
+    // The sky needs no telling: it draws the song frame by frame, from where the player is.
+    expectBottoms(context.bars.map(bottomAboveLine), expectedBottoms(PLAYED, player.getPosition()))
   })
 })
