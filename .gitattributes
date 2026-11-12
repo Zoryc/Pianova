@@ -1,1 +1,3 @@
 * text=auto eol=lf
+# Windows reads batch files reliably only with its own line endings.
+*.bat text eol=crlf

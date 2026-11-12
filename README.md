@@ -35,6 +35,8 @@ npm run dev
 
 Then open <http://localhost:5173>.
 
+On Windows you can skip both commands: double-click `start.bat`. It downloads what the app needs the first time, starts the app and opens it in your browser. Keep its window open while you play; close it to stop the app.
+
 Other commands:
 
 | Command | What it does |
