@@ -15,8 +15,8 @@ It is made for a desktop or laptop computer with a keyboard and a mouse. Phones 
 - **One Settings panel** with five tabs:
   - *Sound*: volume, sustain (also the Space bar), touch strength, room echo, how long notes ring, transpose.
   - *Keys*: the layouts and your own keys, moving the playable keys lower or higher, the keyboard type.
-  - *Piano*: 88, 61, 49 or 37 keys (or automatic, to suit the window), three key styles, four effects for what a key does when you play it, what is printed on the keys, note names as C D E or Do Ré Mi.
-  - *Look*: six themes, the colour of the light (including your own colour and a rainbow), glow, backgrounds, bar styles, sparks, and what is shown on screen (the bars of light, the key letters on falling notes, the names of the notes you play).
+  - *Piano*: 88, 61, 49 or 37 keys (or automatic, to suit the window), three key styles, what is printed on the keys, note names as C D E or Do Ré Mi.
+  - *Look*: six themes, the colour of the light (including your own colour and a rainbow), glow, backgrounds, bar styles, sparks, four effects for what a key does when you play it, and what is shown on screen (the bars of light, the key letters on falling notes, the names of the notes you play).
   - *About*: credits, and a button that puts every setting back to how it was at the start.
 
 Planned next: Practice mode (the song waits for you), then Real-time mode with scoring. See [ROADMAP.md](ROADMAP.md).

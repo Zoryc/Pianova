@@ -167,6 +167,11 @@ describe('the Look tab, word for word', () => {
         hint: 'Small sparks where the light meets the keys.',
       },
       {
+        name: 'Key effect',
+        choices: ['Glow', 'Press', 'Edge', 'Pop'],
+        hint: 'What a key does when you play it. Try each one on the piano below.',
+      },
+      {
         name: 'Key letters on falling notes',
         choices: ['on/off'],
         hint: 'Shows which computer key to press on each note of a song.',
@@ -356,6 +361,7 @@ describe('without a mouse', () => {
       'Light bars',
       'Bar style',
       'Sparks',
+      'Key effect',
       'Key letters on falling notes',
       'Show the notes being played',
       'Hide the menu automatically',

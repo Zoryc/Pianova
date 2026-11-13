@@ -93,6 +93,7 @@ describe('the Look tab', () => {
       'Light bars',
       'Bar style',
       'Sparks',
+      'Key effect',
       'Key letters on falling notes',
       'Show the notes being played',
       'Hide the menu automatically',
@@ -109,6 +110,7 @@ describe('the Look tab', () => {
       'Light bars': 'Bars of light for the notes you play and the falling notes of a song.',
       'Bar style': 'Solid bars are filled with light. Neon bars are glowing outlines.',
       Sparks: 'Small sparks where the light meets the keys.',
+      'Key effect': 'What a key does when you play it. Try each one on the piano below.',
       'Key letters on falling notes': 'Shows which computer key to press on each note of a song.',
       'Show the notes being played': 'Writes the names of the notes you play above the piano.',
       'Hide the menu automatically': 'The top bar hides when the mouse is still.',
@@ -477,6 +479,8 @@ describe('the options that fine-tune the look', () => {
     ['Background', ['Black', 'Night', 'Stars', 'Aurora'], 'Black'],
     ['Bar style', ['Solid', 'Neon'], 'Solid'],
     ['Sparks', ['Off', 'Some', 'Lots'], 'Some'],
+    // The effect the piano has always had comes first.
+    ['Key effect', ['Glow', 'Press', 'Edge', 'Pop'], 'Glow'],
   ])('offers the choices of %s', (name, choices, first) => {
     render(<LiveTab />)
     expect(choicesOf(name)).toEqual(choices)
@@ -490,6 +494,9 @@ describe('the options that fine-tune the look', () => {
     ['Bar style', 'Neon', { barStyle: 'neon' }],
     ['Sparks', 'Off', { sparks: 'off' }],
     ['Sparks', 'Lots', { sparks: 'lots' }],
+    ['Key effect', 'Press', { keyEffect: 'press' }],
+    ['Key effect', 'Edge', { keyEffect: 'edge' }],
+    ['Key effect', 'Pop', { keyEffect: 'pop' }],
   ] as const)('sets %s to %s', async (name, choiceName, change) => {
     const user = userEvent.setup()
     render(<LiveTab />)
@@ -500,6 +507,26 @@ describe('the options that fine-tune the look', () => {
     expect(within(option(name)).getAllByRole('button').filter(isChosen)).toEqual([
       choice(name, choiceName),
     ])
+  })
+
+  it('goes back to the Glow effect', async () => {
+    const user = userEvent.setup()
+    render(<LiveTab />)
+    await user.click(choice('Key effect', 'Pop'))
+
+    await user.click(choice('Key effect', 'Glow'))
+
+    expectSettings({})
+  })
+
+  it('keeps the theme when the key effect changes: an effect is no part of a theme', async () => {
+    const user = userEvent.setup()
+    render(<LiveTab />)
+    expect(isChosen(themeCard('Ember'))).toBe(true)
+
+    await user.click(choice('Key effect', 'Edge'))
+
+    expect(isChosen(themeCard('Ember'))).toBe(true)
   })
 
   it.each([

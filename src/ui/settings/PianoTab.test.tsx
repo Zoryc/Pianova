@@ -42,7 +42,6 @@ describe('the Piano tab', () => {
     expect(namesInOrder(container)).toEqual([
       'Piano size',
       'Key style',
-      'Key effect',
       'Labels on the keys',
       'Note names',
     ])
@@ -55,9 +54,6 @@ describe('the Piano tab', () => {
     )
     expect(explanationOf(option('Key style'))).toBe(
       'Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through.',
-    )
-    expect(explanationOf(option('Key effect'))).toBe(
-      'What a key does when you play it. Try each one on the piano below.',
     )
     expect(explanationOf(option('Labels on the keys'))).toBe('')
     expect(explanationOf(option('Note names'))).toBe('How notes are written on the piano.')
@@ -130,39 +126,6 @@ describe('the Piano tab', () => {
       // A picture only: the name says it all to a screen reader.
       expect(picture?.getAttribute('aria-hidden')).toBe('true')
       expect(choice('Key style', name).textContent).toBe(name)
-    })
-  })
-
-  describe('Key effect', () => {
-    it('offers the effect the piano has always had first, then the three others', () => {
-      render(<LiveTab />)
-      expect(choicesOf('Key effect')).toEqual(['Glow', 'Press', 'Edge', 'Pop'])
-      expect(isChosen(choice('Key effect', 'Glow'))).toBe(true)
-    })
-
-    it.each([
-      ['Press', 'press'],
-      ['Edge', 'edge'],
-      ['Pop', 'pop'],
-    ] as const)('sets the %s effect', async (name, keyEffect) => {
-      const user = userEvent.setup()
-      render(<LiveTab />)
-
-      await user.click(choice('Key effect', name))
-
-      expectSettings({ keyEffect })
-      expect(isChosen(choice('Key effect', name))).toBe(true)
-      expect(isChosen(choice('Key effect', 'Glow'))).toBe(false)
-    })
-
-    it('goes back to Glow', async () => {
-      const user = userEvent.setup()
-      render(<LiveTab />)
-      await user.click(choice('Key effect', 'Pop'))
-
-      await user.click(choice('Key effect', 'Glow'))
-
-      expectSettings({})
     })
   })
 

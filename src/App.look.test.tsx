@@ -736,6 +736,7 @@ describe('after a click with the mouse in Settings', () => {
     expectFocusReleased(swatch('Your colour'))
     expectFocusReleased(sliderOf('Glow'))
     expectFocusReleased(choice('Sparks', 'Lots'))
+    expectFocusReleased(choice('Key effect', 'Pop'))
     expectFocusReleased(switchOf('Light bars'))
   })
 

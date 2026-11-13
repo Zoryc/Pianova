@@ -1,5 +1,5 @@
 import type { JSX } from 'react'
-import type { BackgroundName, BarStyle, SparksLevel } from '../../core/types'
+import type { BackgroundName, BarStyle, KeyEffect, SparksLevel } from '../../core/types'
 import { settingsStore } from '../../state/settings'
 import type { Settings } from '../../state/settings'
 import { Field, PercentSlider, Segmented, Switch } from '../controls'
@@ -23,6 +23,14 @@ const SPARKS_OPTIONS: readonly { value: SparksLevel; label: string }[] = [
   { value: 'off', label: 'Off' },
   { value: 'some', label: 'Some' },
   { value: 'lots', label: 'Lots' },
+]
+
+/** The effect the piano has always had comes first: it is the one a new player gets. */
+const KEY_EFFECT_OPTIONS: readonly { value: KeyEffect; label: string }[] = [
+  { value: 'glow', label: 'Glow' },
+  { value: 'press', label: 'Press' },
+  { value: 'edge', label: 'Edge' },
+  { value: 'pop', label: 'Pop' },
 ]
 
 /** The light and the screen: a theme to start from, then every part of it one by one. */
@@ -88,6 +96,17 @@ export function LookTab({ settings }: { settings: Settings }): JSX.Element {
           value={settings.sparks}
           options={SPARKS_OPTIONS}
           onChange={(sparks) => settingsStore.set({ sparks })}
+        />
+      </Field>
+
+      <Field
+        label="Key effect"
+        hint="What a key does when you play it. Try each one on the piano below."
+      >
+        <Segmented
+          value={settings.keyEffect}
+          options={KEY_EFFECT_OPTIONS}
+          onChange={(keyEffect) => settingsStore.set({ keyEffect })}
         />
       </Field>
 
