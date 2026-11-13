@@ -142,7 +142,7 @@ function clickWithMouse(target: HTMLElement): void {
   fireEvent.click(target, { detail: 1 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it: the first key press takes the start box away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -156,9 +156,21 @@ function panel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
 }
 
+/** The start box: the small menu that the Menu button opens, with its lines. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** Clicks a line of the start box, which the Menu button opens first when it is closed. */
+function clickInStartBox(line: string): void {
+  if (!startBox()) clickWithMouse(button('Menu'))
+  const box = screen.getByRole('dialog', { name: 'Menu' })
+  clickWithMouse(within(box).getByRole('button', { name: line }))
+}
+
 /** Opens Settings on one of its tabs. (The panel remembers its last tab from test to test.) */
 function openSettingsOn(tab: string): HTMLElement {
-  if (!panel()) clickWithMouse(button('Settings'))
+  if (!panel()) clickInStartBox('Settings')
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   clickWithMouse(within(settings).getByRole('tab', { name: tab }))
   return settings
@@ -639,26 +651,35 @@ describe('changing one key', () => {
     expect(message()).toBe('')
   })
 
-  it.each(['the close button', 'a click on the sky', 'the Settings button', 'the Songs button'])(
-    'ends when the panel is closed with %s, and the next key press plays',
-    (how) => {
-      startChanging(64)
-      if (how === 'the close button') clickWithMouse(button('Close Settings'))
-      else if (how === 'a click on the sky') {
-        clickWithMouse(document.querySelector('.stage__sky') as HTMLElement)
-      } else if (how === 'the Settings button') clickWithMouse(button('Settings'))
-      else clickWithMouse(button('Songs'))
+  it.each([
+    'the close button',
+    'a click on the sky',
+    'the Menu button',
+    'the "All songs…" line of the start box',
+  ])('ends when the panel is closed with %s, and the next key press plays', (how) => {
+    startChanging(64)
+    if (how === 'the close button') clickWithMouse(button('Close Settings'))
+    else if (how === 'a click on the sky') {
+      clickWithMouse(document.querySelector('.stage__sky') as HTMLElement)
+    } else if (how === 'the Menu button') {
+      // The start box opens in the place of the panel.
+      clickWithMouse(button('Menu'))
+      expect(startBox()).not.toBeNull()
+    } else {
+      // The Songs panel is opened from the start box, and takes the place of Settings.
+      clickInStartBox('All songs…')
+      expect(screen.queryByRole('dialog', { name: 'Songs' })).not.toBeNull()
+    }
 
-      expect(panel()).toBeNull()
-      expect(piano().classList.contains('piano--editing')).toBe(false)
-      expect(piano().querySelector('.is-selected')).toBeNull()
+    expect(panel()).toBeNull()
+    expect(piano().classList.contains('piano--editing')).toBe(false)
+    expect(piano().querySelector('.is-selected')).toBeNull()
 
-      key('keydown', 'KeyD', { key: 'd' })
-      expect(heldNotes()).toEqual([64])
-      expect(settingsStore.get().bindings).toEqual(DEFAULT_BINDINGS)
-      key('keyup', 'KeyD', { key: 'd' })
-    },
-  )
+    key('keydown', 'KeyD', { key: 'd' })
+    expect(heldNotes()).toEqual([64])
+    expect(settingsStore.get().bindings).toEqual(DEFAULT_BINDINGS)
+    key('keyup', 'KeyD', { key: 'd' })
+  })
 
   it('is cancelled by "Reset to default keys", which puts every key back', () => {
     startApp()
@@ -784,6 +805,41 @@ describe('a note held while its key is given away', () => {
     clickWithMouse(button('Yes'))
     key('keyup', 'KeyM')
     expect(heldNotes()).toEqual([])
+    expect(nothingLeftSounding()).toBe(true)
+  })
+})
+
+describe('a key held down while the start box is opened', () => {
+  /*
+   * The start box goes away when a key that plays a note is pressed. A key
+   * that was down already was not pressed for that: its note sounds, and the
+   * box was opened under it, with a click of the mouse on the Menu button.
+   */
+  it('does not close the box with the repeats it sends: only a new press does, and plays', () => {
+    startApp()
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
+    clickWithMouse(button('Menu'))
+    expect(startBox()).not.toBeNull()
+
+    // Still down: the repeats a held key sends are not presses, and start nothing.
+    for (let repeat = 0; repeat < 4; repeat++) {
+      expect(key('keydown', 'KeyA', { repeat: true }).defaultPrevented).toBe(true)
+    }
+    expect(startBox()).not.toBeNull()
+    expect(audio.heard).toEqual(['on 60'])
+
+    // Its note stops at its own release, and the box is still there.
+    key('keyup', 'KeyA')
+    expect(heldNotes()).toEqual([])
+    expect(litKeys()).toEqual([])
+    expect(startBox()).not.toBeNull()
+
+    // Pressed again, the key takes the box away and plays its note.
+    key('keydown', 'KeyA')
+    expect(startBox()).toBeNull()
+    expect(heldNotes()).toEqual([60])
+    key('keyup', 'KeyA')
     expect(nothingLeftSounding()).toBe(true)
   })
 })

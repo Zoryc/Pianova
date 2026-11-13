@@ -1,20 +1,25 @@
 // @vitest-environment jsdom
 /**
  * The whole app under a long, shuffled run of what a player can do to its
- * shell: keys down and up, clicks on the menu, the panels, their tabs, the
- * sky and the piano, the mouse moving and standing still, the window being
- * resized, a song loaded, paused and closed, settings changing under it all.
+ * shell: keys down and up, clicks on the Menu button, the lines of the start
+ * box it opens, the panels, their tabs, the sky and the piano, the mouse
+ * moving and standing still, the window being resized, a song loaded, paused
+ * and closed, settings changing under it all.
  *
  * After every step a few plain truths must hold, whatever came before:
- * one panel at most, keys are being chosen exactly while Settings shows its
- * Keys tab, the menu is on screen whenever something pins it, the cursor is
- * hidden exactly while the menu is, the stage says "Sustain on" exactly while
- * sustain is on, and no note sounds that nobody is holding. And every press
+ * of the start box and the two panels one at most is open, the Menu button
+ * says whether the box is open, keys are being chosen exactly while Settings
+ * shows its Keys tab, the menu is on screen whenever something pins it, the
+ * cursor is hidden exactly while the menu is, the stage says "Sustain on"
+ * exactly while sustain is on, and no note sounds that nobody is holding. A
+ * line of the start box does what it says, and the box goes away at a press
+ * of the mouse anywhere else and at a key that plays a note. And every press
  * of Escape takes back one thing, the first there is in its fixed order.
  *
  * A second set of runs is about Escape alone, which the first set seldom
- * meets with much open: a piano key that waits, the song options, a panel,
- * the focus here and there, and the key pressed, held down and let go.
+ * meets with much open: a piano key that waits, the song options, a panel or
+ * the start box, the focus here and there, and the key pressed, held down and
+ * let go.
  *
  * The shuffling is seeded, so a failure can be run again.
  */
@@ -67,6 +72,7 @@ vi.mock('./ui/sky/Sky', async () => {
 import { App } from './App'
 import { bus } from './app/pianoApp'
 import { player } from './app/songsApp'
+import { slotToMidi } from './core/layout'
 import { settingsStore } from './state/settings'
 import { resetSongs } from './ui/songsTestKit'
 import { playSong } from './ui/useSongs'
@@ -77,6 +83,27 @@ const SETTINGS_TABS = ['Sound', 'Keys', 'Piano', 'Look', 'About'] as const
 const RUN_TIMEOUT_MS = 20_000
 /** Keys that play a note, one that plays none, and the keys the shell itself listens to. */
 const CODES = ['KeyA', 'KeyS', 'KeyK', 'Quote', 'KeyM', 'Space', 'Escape', 'Enter', 'Tab'] as const
+
+/** Which of the start box (the dialog named "Menu") and the two panels is open. */
+type Shown = 'Menu' | 'Settings' | 'Songs' | null
+
+/** A line of the start box, and what a click on it leaves open. */
+interface Line {
+  name: string
+  leaves: Shown
+}
+
+/** The lines of the start box that open a panel in its place. */
+const PANEL_LINES: readonly Line[] = [
+  { name: 'Settings', leaves: 'Settings' },
+  { name: 'All songs…', leaves: 'Songs' },
+]
+const FREE_PLAY: Line = { name: 'Free Play', leaves: null }
+/** A way to play that is not built yet: the line does nothing, and the box stays. */
+const PRACTICE: Line = { name: 'Practice', leaves: 'Menu' }
+const A_SONG: Line = { name: 'Play Twinkle, Twinkle, Little Star', leaves: null }
+const ABOUT: Line = { name: 'About', leaves: 'Settings' }
+const OTHER_LINES: readonly Line[] = [FREE_PLAY, PRACTICE, A_SONG, ABOUT]
 
 /** A small seeded generator of numbers from 0 up to (not including) 1. */
 function seeded(seed: number): () => number {
@@ -139,9 +166,25 @@ function key(type: 'keydown' | 'keyup', code: string, init: KeyboardEventInit = 
   return event
 }
 
+/**
+ * A click with the mouse: first the press, which the open start box watches
+ * the whole window for, then the click, which finds the control focused.
+ */
 function clickWithMouse(target: HTMLElement): void {
+  const box = startBox()
+  const onBoxOrItsButton = box?.contains(target) || menuButton('Menu').contains(target)
+  fireEvent.pointerDown(target, { button: 0 })
+  // The press alone takes the start box away, unless it is on the box or on the Menu button.
+  const told = `the start box after the mouse went down on "${target.textContent}"`
+  expect(startBox() !== null, told).toBe(box !== null && onBoxOrItsButton)
   target.focus()
   fireEvent.click(target, { detail: 1 })
+}
+
+/** Enter on a focused control: the browser sends a click that no mouse button made. */
+function pressEnterOn(target: HTMLElement): void {
+  target.focus()
+  fireEvent.click(target, { detail: 0 })
 }
 
 function menu(): HTMLElement {
@@ -175,6 +218,36 @@ function menuButton(name: string): HTMLElement {
   return found
 }
 
+/** The start box, while it is open. The Menu button opens it, and the panels open from it. */
+function startBox(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.start-box')
+}
+
+/** A line of the open start box: by its name where it has one, else by the words it starts with. */
+function startBoxLine(name: string): HTMLElement {
+  const lines = [...document.querySelectorAll<HTMLElement>('.start-box .start-box__row')]
+  const found = lines.find((line) =>
+    (line.getAttribute('aria-label') ?? line.textContent ?? '').startsWith(name),
+  )
+  if (!found) throw new Error(`The start box has no "${name}" line.`)
+  return found
+}
+
+/**
+ * Presses a line of the start box, with the mouse or with Enter. When the box
+ * is closed, the Menu button is pressed first, the same way, to open it.
+ */
+function pressInMenu(line: string, press: (target: HTMLElement) => void = clickWithMouse): void {
+  if (!startBox()) press(menuButton('Menu'))
+  press(startBoxLine(line))
+}
+
+function shown(): Shown {
+  if (startBox()) return 'Menu'
+  if (dialog('Settings')) return 'Settings'
+  return dialog('Songs') ? 'Songs' : null
+}
+
 function settingsTab(name: string): HTMLElement | null {
   const tabs = [...document.querySelectorAll<HTMLElement>('.floating-panel .tab')]
   return tabs.find((tab) => tab.textContent === name) ?? null
@@ -198,20 +271,28 @@ interface Open {
   waitingPianoKey: boolean
   songOptions: boolean
   panel: boolean
+  /** Comes after the panel. (The two are never open together.) */
+  startBox: boolean
   focusInMenu: boolean
-  /** Not taken back by itself: the focus is on a control inside the open panel (not on the panel). */
-  focusInPanel: boolean
+  /**
+   * Not taken back by itself: the focus is on a control inside the open panel
+   * or start box (not on the panel or the box itself).
+   */
+  focusInside: boolean
 }
 
 function whatIsOpen(): Open {
   const panel = document.querySelector('.floating-panel')
+  const box = startBox()
+  const holder = panel ?? box
   const focused = document.activeElement
   return {
     waitingPianoKey: piano().querySelector('.is-selected') !== null,
     songOptions: songOptions() !== null,
     panel: panel !== null,
+    startBox: box !== null,
     focusInMenu: menu().contains(focused),
-    focusInPanel: panel !== null && panel !== focused && panel.contains(focused),
+    focusInside: holder !== null && holder !== focused && holder.contains(focused),
   }
 }
 
@@ -219,18 +300,19 @@ function whatIsOpen(): Open {
 function afterEscape(before: Open): Open {
   if (before.waitingPianoKey) return { ...before, waitingPianoKey: false }
   if (before.songOptions) return { ...before, songOptions: false }
-  // A control of the panel that had the focus goes away with it: the focus is
-  // then on the button that opens the panel, which is in the menu.
-  if (before.panel) {
-    const focusInMenu = before.focusInMenu || before.focusInPanel
-    return { ...before, panel: false, focusInPanel: false, focusInMenu }
-  }
+  // A control of the panel or of the start box that had the focus goes away
+  // with it: the focus is then on the Menu button, which is in the menu.
+  const focusInMenu = before.focusInMenu || before.focusInside
+  if (before.panel) return { ...before, panel: false, focusInside: false, focusInMenu }
+  if (before.startBox) return { ...before, startBox: false, focusInside: false, focusInMenu }
   return { ...before, focusInMenu: false }
 }
 
 /** True when there is something for a press of Escape to take back. */
 function somethingIsOpen(open: Open): boolean {
-  return open.waitingPianoKey || open.songOptions || open.panel || open.focusInMenu
+  return (
+    open.waitingPianoKey || open.songOptions || open.panel || open.startBox || open.focusInMenu
+  )
 }
 
 describe('the shell, through 20 shuffled runs of 140 steps', () => {
@@ -257,10 +339,19 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
         if (keysDown.has(code)) return 'nothing'
         keysDown.add(code)
         const open = whatIsOpen()
+        const { bindings, baseOctave } = settingsStore.get()
+        const slot = Object.hasOwn(bindings, code) ? bindings[code] : undefined
         key('keydown', code, { key: code === 'KeyM' ? 'm' : code })
+        const told = `${code}, after: ${story.slice(-12).join(' / ')}`
         if (code === 'Escape') {
-          const told = `Escape, after: ${story.slice(-12).join(' / ')}`
           expect(whatIsOpen(), told).toEqual(afterEscape(open))
+        } else {
+          // A key that plays a note takes the start box away, and plays its
+          // note. Any other key leaves the box as it was.
+          expect(startBox() !== null, told).toBe(open.startBox && slot === undefined)
+          if (open.startBox && slot !== undefined) {
+            expect([...bus.getActiveNotes()], told).toContain(slotToMidi(slot, baseOctave))
+          }
         }
         // What Tab leaves focused in the menu is let go again, as by a click elsewhere.
         if (code === 'Tab' && random() < 0.5) act(() => (document.activeElement as HTMLElement).blur())
@@ -274,9 +365,28 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
         return `up ${code}`
       }
       if (dice < 0.46) {
-        const name = pick(['Settings', 'Songs'] as const)
-        clickWithMouse(menuButton(name))
-        return `click ${name}`
+        const which = random()
+        if (which < 0.2) {
+          // The Menu button alone: it opens the start box, in place of a panel
+          // that is open, and closes it.
+          const wasOpen = startBox() !== null
+          clickWithMouse(menuButton('Menu'))
+          expect(shown(), 'after a click on Menu').toBe(wasOpen ? null : 'Menu')
+          return 'click Menu'
+        }
+        // A line of the start box: most of the time one that opens a panel.
+        const line = pick(which < 0.8 ? PANEL_LINES : OTHER_LINES)
+        const song = player.getState().status
+        pressInMenu(line.name)
+        const told = `after a click on "${line.name}" in the start box`
+        expect(shown(), told).toBe(line.leaves)
+        if (line === ABOUT) {
+          expect(settingsTab('About')?.getAttribute('aria-selected'), told).toBe('true')
+        }
+        if (line === A_SONG) expect(player.getState().status, told).toBe('playing')
+        // "Free Play" only closes the box: a song that is loaded stays as it was.
+        if (line === FREE_PLAY) expect(player.getState().status, told).toBe(song)
+        return `click ${line.name}`
       }
       if (dice < 0.54) {
         const tab = settingsTab(pick(SETTINGS_TABS))
@@ -286,6 +396,8 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
       }
       if (dice < 0.58) {
         clickWithMouse(sky())
+        // The sky is all there is to see: neither a panel nor the start box is left over it.
+        expect(shown(), 'after a click on the sky').toBeNull()
         return 'click sky'
       }
       if (dice < 0.66) {
@@ -297,6 +409,8 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
           fireEvent.click(piano(), { detail: 1 })
         } else {
           fireEvent.pointerDown(piano(), { button: 0, ...point })
+          // A press of the mouse outside the start box takes it away.
+          expect(startBox(), 'the start box after the mouse went down on the piano').toBeNull()
         }
         mouseDownOnPiano = !mouseDownOnPiano
         return mouseDownOnPiano ? 'mouse down on the piano' : 'mouse up'
@@ -368,11 +482,14 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
       story.push(step())
       const told = `after: ${story.slice(-12).join(' / ')}`
 
+      const box = startBox()
       const settings = dialog('Settings')
       const songs = dialog('Songs')
+      // The start box is a dialog too: of the box and the two panels, one at most is open.
       expect(document.querySelectorAll('[role="dialog"]').length, told).toBeLessThanOrEqual(1)
-      expect(menuButton('Settings').getAttribute('aria-expanded'), told).toBe(String(settings !== null))
-      expect(menuButton('Songs').getAttribute('aria-expanded'), told).toBe(String(songs !== null))
+      // The Menu button says whether the box is open, and points at it while it is.
+      expect(menuButton('Menu').getAttribute('aria-expanded'), told).toBe(String(box !== null))
+      expect(menuButton('Menu').getAttribute('aria-controls'), told).toBe(box ? box.id : null)
 
       const onKeysTab = settingsTab('Keys')?.getAttribute('aria-selected') === 'true'
       expect(piano().classList.contains('piano--editing'), told).toBe(onKeysTab)
@@ -381,6 +498,7 @@ describe('the shell, through 20 shuffled runs of 140 steps', () => {
       const hidden = menu().classList.contains('menu--hidden')
       const state = player.getState().status
       const pinned =
+        box !== null ||
         settings !== null ||
         songs !== null ||
         state === 'paused' ||
@@ -445,20 +563,19 @@ describe('Escape, through 16 shuffled runs of 120 steps', () => {
       const dice = random()
       if (dice < 0.14) {
         // Settings on its Keys tab, where a click on a piano key makes it wait for a computer key.
-        if (!dialog('Settings')) clickWithMouse(menuButton('Settings'))
+        if (!dialog('Settings')) pressInMenu('Settings')
         const keys = settingsTab('Keys')
         if (keys) clickWithMouse(keys)
         return 'Settings on Keys'
       }
       if (dice < 0.2) {
-        const name = pick(['Settings', 'Songs'] as const)
-        // With the mouse, or with Enter: the focus then goes into the panel that opens.
-        const button = menuButton(name)
-        if (random() < 0.5) clickWithMouse(button)
-        else {
-          button.focus()
-          fireEvent.click(button, { detail: 0 })
-        }
+        // Half of the time the Menu button alone, which opens the start box
+        // and closes it; else a panel, through the box. With the mouse, or
+        // with Enter: the focus then goes into what opens.
+        const name = random() < 0.5 ? 'Menu' : pick(['Settings', 'All songs…'] as const)
+        const press = random() < 0.5 ? clickWithMouse : pressEnterOn
+        if (name === 'Menu') press(menuButton('Menu'))
+        else pressInMenu(name, press)
         return `press ${name}`
       }
       if (dice < 0.34) {
@@ -470,15 +587,18 @@ describe('Escape, through 16 shuffled runs of 120 steps', () => {
         const options = songOptionsButton()
         if (!options) return 'nothing'
         if (random() < 0.5) clickWithMouse(options)
-        else {
-          options.focus()
-          fireEvent.click(options, { detail: 0 })
-        }
+        else pressEnterOn(options)
         return 'press Song options'
       }
       if (dice < 0.56) {
-        // The focus goes where Tab can take it: into the panel, the song options or the top bar.
-        const where = pick(['.floating-panel button', '.song-options button', '.top-bar button'])
+        // The focus goes where Tab can take it: into the panel, the start box,
+        // the song options or the top bar.
+        const where = pick([
+          '.floating-panel button',
+          '.start-box button',
+          '.song-options button',
+          '.top-bar button',
+        ])
         return focus(document.querySelector<HTMLElement>(where))
       }
       if (dice < 0.64) {

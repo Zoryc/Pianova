@@ -172,3 +172,167 @@ describe('FullscreenButton', () => {
     expect(changes(removed)).toBe(changes(added))
   })
 })
+
+describe('FullscreenButton, drawn as a line of a list (rowClassName)', () => {
+  function drawLine(): void {
+    render(<FullscreenButton rowClassName="menu-line" />)
+  }
+
+  /** The shape of the picture on the button: one for going full screen, another for leaving it. */
+  function picture(): string | null {
+    return theButton().querySelector('svg path')?.getAttribute('d') ?? null
+  }
+
+  it.each([undefined, false])('is not drawn where full screen is not possible (%s)', (enabled) => {
+    giveThePageFullScreen(enabled)
+    const { container } = render(<FullscreenButton rowClassName="menu-line" />)
+    expect(screen.queryByRole('button')).toBeNull()
+    // Nothing at all: no empty line is left in the list.
+    expect(container.innerHTML).toBe('')
+  })
+
+  it('is one plain button, with the class it was given and no other', () => {
+    drawLine()
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(theButton().className).toBe('menu-line')
+    expect(theButton().getAttribute('type')).toBe('button')
+  })
+
+  it('has its name written on it after the picture, so it needs no label and no tooltip', () => {
+    drawLine()
+    expect(theButton().textContent).toBe('Full screen')
+    expect(screen.getByRole('button', { name: 'Full screen' })).toBe(theButton())
+    expect(theButton().hasAttribute('aria-label')).toBe(false)
+    expect(theButton().hasAttribute('title')).toBe(false)
+
+    // The picture comes first, and says nothing to a screen reader: the words do.
+    const [first, ...others] = [...theButton().children]
+    expect(first?.tagName.toLowerCase()).toBe('svg')
+    expect(first?.getAttribute('aria-hidden')).toBe('true')
+    expect(others).toEqual([])
+    expect(theButton().lastChild?.textContent).toBe('Full screen')
+  })
+
+  it('takes the class it is given, whatever it is', () => {
+    render(<FullscreenButton rowClassName="start-box__row" />)
+    expect(theButton().className).toBe('start-box__row')
+    expect(theButton().textContent).toBe('Full screen')
+  })
+
+  it('asks the browser to fill the screen with the whole page, once per click', () => {
+    drawLine()
+    fireEvent.click(theButton())
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(request.mock.contexts[0]).toBe(document.documentElement)
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('keeps its words until the browser says that the screen is filled', () => {
+    drawLine()
+    const before = picture()
+    fireEvent.click(theButton())
+    expect(theButton().textContent).toBe('Full screen')
+    expect(picture()).toBe(before)
+
+    browserShows(document.documentElement)
+    expect(theButton().textContent).toBe('Leave full screen')
+    expect(screen.getByRole('button', { name: 'Leave full screen' })).toBe(theButton())
+    // Still without a label or a tooltip, and with the other picture.
+    expect(theButton().hasAttribute('aria-label')).toBe(false)
+    expect(theButton().hasAttribute('title')).toBe(false)
+    expect(theButton().className).toBe('menu-line')
+    expect(picture()).not.toBe(before)
+    expect(theButton().querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('leaves full screen when it is clicked again', () => {
+    drawLine()
+    browserShows(document.documentElement)
+    fireEvent.click(theButton())
+    expect(exit).toHaveBeenCalledTimes(1)
+    expect(request).not.toHaveBeenCalled()
+
+    browserShows(null)
+    expect(theButton().textContent).toBe('Full screen')
+  })
+
+  it('follows a full screen that ended without it (Escape)', () => {
+    drawLine()
+    browserShows(document.documentElement)
+    browserShows(null)
+    expect(theButton().textContent).toBe('Full screen')
+
+    fireEvent.click(theButton())
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(exit).not.toHaveBeenCalled()
+  })
+
+  it('knows that the screen is already filled when it is first drawn', () => {
+    fullscreenElement = document.documentElement
+    drawLine()
+    expect(theButton().textContent).toBe('Leave full screen')
+  })
+
+  it('is the same button whatever it says: it keeps the focus when its words change', () => {
+    drawLine()
+    const line = theButton()
+    line.focus()
+    browserShows(document.documentElement)
+    expect(theButton()).toBe(line)
+    expect(document.activeElement).toBe(line)
+
+    browserShows(null)
+    expect(document.activeElement).toBe(line)
+  })
+
+  it('shows the same pictures as the round button does', () => {
+    const round = render(<FullscreenButton />)
+    const enter = picture()
+    browserShows(document.documentElement)
+    const leave = picture()
+    round.unmount()
+
+    drawLine()
+    expect(picture()).toBe(leave)
+    browserShows(null)
+    expect(picture()).toBe(enter)
+  })
+
+  it('stays as it is, and nothing fails, when the browser says no', async () => {
+    const unhandled = vi.fn()
+    runner.on('unhandledRejection', unhandled)
+    try {
+      request.mockRejectedValue(new TypeError('Fullscreen request denied'))
+      exit.mockRejectedValue(new TypeError('Not in full screen'))
+      drawLine()
+
+      fireEvent.click(theButton())
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+      expect(theButton().textContent).toBe('Full screen')
+
+      browserShows(document.documentElement)
+      fireEvent.click(theButton())
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+      expect(theButton().textContent).toBe('Leave full screen')
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      runner.off('unhandledRejection', unhandled)
+    }
+  })
+
+  it('stops listening to the browser when it is taken off the page', () => {
+    const added = vi.spyOn(document, 'addEventListener')
+    const removed = vi.spyOn(document, 'removeEventListener')
+    const changes = (spy: typeof added): number =>
+      spy.mock.calls.filter(([type]) => type === 'fullscreenchange').length
+
+    render(
+      <StrictMode>
+        <FullscreenButton rowClassName="menu-line" />
+      </StrictMode>,
+    )
+    cleanup()
+    expect(changes(added)).toBeGreaterThan(0)
+    expect(changes(removed)).toBe(changes(added))
+  })
+})

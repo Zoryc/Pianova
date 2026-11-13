@@ -1,0 +1,387 @@
+/*
+ * The start box: the small menu in the middle of the sky, open when the app
+ * opens and whenever the Menu button says so.
+ *
+ * It is made of the same glass as the floating panel. Its lines are buttons
+ * as wide as their column; what is chosen takes the colour of the light.
+ * Every colour is a token from theme.css.
+ */
+
+/* ---------- Where it sits ---------- */
+
+/*
+ * Opened with the Menu button, the box is one of the things the app puts
+ * between the menu and the piano (.app__panels in src/styles/app.css), like
+ * the floating panels: it can never cover the piano, and it lies under the
+ * menu, so that the song options open over it.
+ *
+ * While the app waits to start, the box hangs in this layer instead, which
+ * covers the whole window, the bar too. It keeps the box where the app would
+ * put it: under the top bar, and above the piano, which is never higher than
+ * 34% of the window with 2% of room under it (piano.css, stage.css).
+ */
+.start-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-overlay);
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--top-bar-height) + 12px) 0 calc(36dvh + 12px);
+  /* Clicks go through it, to the screen behind: only the box and the window button take them. */
+  pointer-events: none;
+}
+
+/* The window around the box, as one unseen button. */
+.start-layer__window {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+}
+
+/*
+ * The window is the whole screen, so a ring around it would only outline the
+ * screen. The ring goes around the sentence that says what it does.
+ */
+.start-layer__window:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.start-layer__window:focus-visible ~ .start-box .start-box__way-out {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---------- The box ---------- */
+
+/*
+ * In the middle, a little under the menu. It is never higher than the room
+ * it is given, and what does not fit scrolls inside it.
+ */
+.start-box {
+  position: relative;
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  width: min(660px, 94%);
+  min-height: 0;
+  margin: clamp(8px, 6dvh, 60px) auto 0;
+  overflow: clip;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-glass);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+  animation: floating-panel-in 160ms ease-out;
+}
+
+/* It holds the focus itself after it was opened with the mouse, as the floating panel does. */
+.start-box:focus-visible {
+  box-shadow: var(--shadow-float);
+}
+
+/* ---------- Its head: the name over a small picture of the stage ---------- */
+
+.start-box__head {
+  position: relative;
+  flex: none;
+  height: 132px;
+  overflow: hidden;
+  background: var(--stage-bg);
+  user-select: none;
+}
+
+.start-box__picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Half as strong as a real note: the stage keeps the only full light on screen. */
+.start-box__picture-notes {
+  fill: var(--light);
+  opacity: 0.5;
+}
+
+.start-box__picture-line {
+  fill: var(--light);
+}
+
+.start-box__picture-white {
+  fill: var(--key-ivory);
+}
+
+.start-box__picture-gap {
+  fill: var(--key-ivory-shade);
+}
+
+.start-box__picture-black {
+  fill: var(--key-ebony);
+}
+
+.start-box__name {
+  position: relative;
+  margin: 20px 24px 0;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.start-box__tagline {
+  position: relative;
+  margin: 2px 24px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* ---------- Its two lists ---------- */
+
+.start-box__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+
+.start-box__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 0 16px;
+  padding: 16px 12px 8px;
+}
+
+.start-box__heading {
+  margin: 0;
+  padding: 0 12px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
+.start-box__list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One line of the box: an icon, its words, and what belongs at its end. */
+.start-box__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  user-select: none;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.start-box__row:hover {
+  background: var(--control-hover);
+}
+
+.start-box__row:active {
+  background: var(--control-pressed);
+}
+
+/* The way to play that is on. */
+.start-box__row[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--light) 55%, transparent);
+  background: color-mix(in srgb, var(--light) 16%, transparent);
+}
+
+.start-box__row[aria-pressed='true'] .icon {
+  color: var(--light-bright);
+}
+
+/* A way to play that cannot be chosen yet. */
+.start-box__row[aria-disabled='true'] {
+  background: transparent;
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.start-box__words {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.start-box__note {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.start-box__row[aria-disabled='true'] .start-box__note {
+  color: var(--text-faint);
+}
+
+.start-box__badge {
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+/* The title of a song takes the room its length leaves, and is cut with "…" when it is longer. */
+.start-box__title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.start-box__length {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Its foot: what is used rarely, and how to leave ---------- */
+
+.start-box__foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--control-line);
+}
+
+.start-box__foot .start-box__row {
+  gap: 8px;
+  width: auto;
+  min-height: 36px;
+  color: var(--text-muted);
+}
+
+.start-box__foot .start-box__row:hover {
+  color: var(--text);
+}
+
+.start-box__way-out {
+  margin: 0 0 0 auto;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  user-select: none;
+}
+
+/* ---------- Small windows ---------- */
+
+/*
+ * A window that is not high has no room for the picture: the name and the
+ * lists matter more. (With the picture the whole box needs a window about
+ * 845px high.)
+ */
+@media (max-height: 859px) {
+  .start-box__head {
+    height: auto;
+    padding-bottom: 12px;
+  }
+
+  .start-box__picture {
+    display: none;
+  }
+
+  .start-box__name {
+    margin-top: 12px;
+    font-size: 22px;
+  }
+}
+
+/*
+ * A low window: the box moves up, the sentence goes on the line of the name
+ * and the lines are a little lower, so that the whole box is in view in a
+ * window 1366 by 633. Opened with the Menu button, the box has no head at
+ * all there: with a song loaded the menu is higher, and the room that is
+ * left is for the lists.
+ */
+@media (max-height: 759px) {
+  .start-box {
+    margin-top: 8px;
+  }
+
+  .start-box__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 12px;
+    padding: 12px 24px;
+  }
+
+  .start-box__name,
+  .start-box__tagline {
+    margin: 0;
+  }
+
+  .start-box__row {
+    min-height: 40px;
+  }
+
+  .app__panels .start-box {
+    margin-top: 0;
+  }
+
+  .app__panels .start-box__head {
+    display: none;
+  }
+}
+
+/* A narrow window: the songs go under the ways to play. */
+@media (max-width: 599px) {
+  .start-box__columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px 0;
+  }
+}
+
+/* ---------- Windows contrast themes ---------- */
+
+/* What is chosen is painted in the theme's own "selected" colours, as chrome.css does. */
+@media (forced-colors: active) {
+  .start-box__row[aria-pressed='true'] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .start-box__row[aria-pressed='true'] .icon,
+  .start-box__row[aria-pressed='true'] .start-box__note {
+    color: HighlightText;
+  }
+}

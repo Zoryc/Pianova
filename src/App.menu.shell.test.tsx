@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
  * The menu at the top of the whole app: when it hides, what keeps it on
- * screen (the mouse over it, the keyboard focus inside it, a panel, a song
- * that is loaded but not playing), the Tab key that brings it back, and the
- * mouse cursor that hides with it.
+ * screen (the mouse over it, the keyboard focus inside it, the start box, a
+ * panel, a song that is loaded but not playing), the Tab key that brings it
+ * back, and the mouse cursor that hides with it.
  *
  * These go through the real app, because what keeps the menu depends on how
  * the pieces hand the mouse and the focus to each other. The sound engine and
@@ -109,7 +109,7 @@ function pressEnterOn(target: HTMLElement): void {
   fireEvent.click(target, { detail: 0 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it: the first key press takes the start box away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -129,6 +129,32 @@ function sky(): HTMLElement {
 
 function button(name: string | RegExp): HTMLElement {
   return screen.getByRole('button', { name })
+}
+
+function panel(name: 'Settings' | 'Songs'): HTMLElement | null {
+  return screen.queryByRole('dialog', { name })
+}
+
+/** The start box: the small menu the app opens with, and that the Menu button opens again. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** The line of the start box that opens each panel. */
+const LINE_OF = { Settings: 'Settings', Songs: 'All songs…' } as const
+
+/** Opens a panel with the mouse: the Menu button, then the panel's line of the start box. */
+function openPanel(name: 'Settings' | 'Songs'): HTMLElement {
+  if (!startBox()) clickWithMouse(button('Menu'))
+  clickWithMouse(button(LINE_OF[name]))
+  return screen.getByRole('dialog', { name })
+}
+
+/** Opens a panel with the keyboard alone: Enter on "Menu", then Enter on the panel's line. */
+function openPanelWithEnter(name: 'Settings' | 'Songs'): HTMLElement {
+  if (!startBox()) pressEnterOn(button('Menu'))
+  pressEnterOn(button(LINE_OF[name]))
+  return screen.getByRole('dialog', { name })
 }
 
 function wait(milliseconds: number): void {
@@ -187,11 +213,11 @@ const AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE: readonly [string, (from: Element) 
 describe('the menu stays while the mouse is over it', () => {
   it('over the top bar, and hides 2.5 seconds after the mouse has left it', () => {
     startApp()
-    moveMouse(sky(), button('Songs'))
+    moveMouse(sky(), button('Menu'))
     wait(AUTO_HIDE_DELAY_MS * 4)
     expect(isHidden()).toBe(false)
 
-    moveMouse(button('Songs'), sky())
+    moveMouse(button('Menu'), sky())
     wait(AUTO_HIDE_DELAY_MS - 1)
     expect(isHidden()).toBe(false)
     wait(1)
@@ -240,17 +266,18 @@ describe('the menu stays while the mouse is over it', () => {
   )
 
   it('is seen under a mouse that was already resting on it when the app started', () => {
-    // The start overlay covered the menu: the mouse never "entered" it. The
-    // first thing the page hears is a move over the bar.
+    // Until the app started, the window around the start box covered the menu:
+    // the mouse never "entered" it. The first thing the page hears is a move
+    // over the bar.
     startApp()
     mouseX += 7
-    fireEvent.mouseMove(button('Songs'), { screenX: mouseX, screenY: 300 })
+    fireEvent.mouseMove(button('Menu'), { screenX: mouseX, screenY: 300 })
     wait(AUTO_HIDE_DELAY_MS * 4)
     expect(isHidden()).toBe(false)
   })
 })
 
-describe('the menu and the full-screen button', () => {
+describe('the menu and the full-screen line of the start box', () => {
   /** The element the make-believe browser is showing full screen, or null. */
   let fullscreenElement: Element | null = null
 
@@ -280,53 +307,82 @@ describe('the menu and the full-screen button', () => {
     })
   }
 
-  it('has the button at the end of the bar, and it lets go of the keyboard after a click', () => {
+  /** The start box, opened with a click on the Menu button, which the mouse then leaves. */
+  function openStartBox(): HTMLElement {
+    moveMouse(sky(), button('Menu'))
+    clickWithMouse(button('Menu'))
+    const box = startBox() as HTMLElement
+    moveMouse(button('Menu'), box)
+    return box
+  }
+
+  it('has the line in the foot of the box, and it lets go of the keyboard after a click', () => {
     startApp()
-    const controls = [...menu().querySelectorAll('button')]
+    const box = openStartBox()
+    const foot = [...box.querySelectorAll('.start-box__foot button')]
     const fullScreen = button('Full screen')
-    expect(controls[controls.length - 1]).toBe(fullScreen)
+    expect(foot.map((line) => line.textContent)).toEqual(['Settings', 'Full screen', 'About'])
+    expect(foot[1]).toBe(fullScreen)
+    expect(menu().contains(fullScreen)).toBe(false)
 
     clickWithMouse(fullScreen)
     expect(document.activeElement).toBe(document.body)
     browserShows(document.documentElement)
     expect(button('Leave full screen')).toBe(fullScreen)
+    // The box stays: the player is still choosing.
+    expect(startBox()).toBe(box)
   })
 
-  // The button changes its picture when the screen is filled, so the picture
-  // the mouse was on is taken off the page. In full screen the page has moved
-  // up under the mouse, which is now over the sky. As after "Close" above, the
-  // browser sends no "mouse out" for the picture that is gone.
-  it.each(AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE)(
-    'hides after full screen was started with the mouse, which is then over the sky (%s)',
-    (_what, browserSays) => {
-      startApp()
-      const fullScreen = button('Full screen')
-      const picture = fullScreen.querySelector('path') as SVGPathElement
-      moveMouse(sky(), picture)
-      fireEvent.click(picture, { detail: 1 })
-      browserShows(document.documentElement)
-      expect(picture.isConnected).toBe(false)
-      browserSays(fullScreen)
-
-      wait(AUTO_HIDE_DELAY_MS - 1)
-      expect(isHidden()).toBe(false)
-      wait(1)
-      expect(isHidden()).toBe(true)
-    },
-  )
-
-  it('hides too when the browser looks where the mouse is before the button has changed its picture', () => {
-    // Which of the two comes first was not seen in a real browser. This is the
-    // other order: the picture is still there, so the mouse is seen leaving it.
+  // The line is in the start box, not in the menu: when the screen is filled
+  // and the line changes its picture, nothing of the menu goes away under the
+  // mouse. What keeps the menu then is the box, which stays open after the
+  // click. Once the box has closed, the menu hides like any other time.
+  it('keeps the menu on screen after a click on the line, until a note has closed the box', () => {
     startApp()
-    const picture = button('Full screen').querySelector('path') as SVGPathElement
-    moveMouse(sky(), picture)
+    const box = openStartBox()
+    const fullScreen = button('Full screen')
+    const picture = fullScreen.querySelector('path') as SVGPathElement
+    moveMouse(box, picture)
     fireEvent.click(picture, { detail: 1 })
-    fireEvent.mouseOut(picture, { relatedTarget: sky() })
-    fireEvent.mouseOver(sky(), { relatedTarget: picture })
     browserShows(document.documentElement)
+    // The line shows another picture now: the one that was clicked is off the page.
+    expect(picture.isConnected).toBe(false)
 
-    wait(AUTO_HIDE_DELAY_MS)
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(startBox()).toBe(box)
+    expect(isHidden()).toBe(false)
+
+    // A note is played: the box goes away, and nothing keeps the menu any more.
+    tap('KeyA')
+    expect(startBox()).toBeNull()
+    wait(AUTO_HIDE_DELAY_MS - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
+    expect(isHidden()).toBe(true)
+  })
+
+  it('lets the menu hide once a press on the sky has closed the box, in full screen too', () => {
+    startApp()
+    const box = openStartBox()
+    const fullScreen = button('Full screen')
+    moveMouse(box, fullScreen)
+    clickWithMouse(fullScreen)
+    browserShows(document.documentElement)
+    // The mouse leaves the line for the sky: the box is still open, and still keeps the menu.
+    moveMouse(fullScreen, sky())
+
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(startBox()).toBe(box)
+    expect(isHidden()).toBe(false)
+
+    // A press of the mouse on the sky, where the mouse is, closes the box.
+    fireEvent.pointerDown(sky())
+    fireEvent.mouseDown(sky())
+    fireEvent.click(sky(), { detail: 1 })
+    expect(startBox()).toBeNull()
+    wait(AUTO_HIDE_DELAY_MS - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
     expect(isHidden()).toBe(true)
   })
 })
@@ -340,7 +396,8 @@ describe('the menu stays while the keyboard focus is inside it', () => {
     const press = key('keydown', 'Tab', { key: 'Tab' })
     expect(press.defaultPrevented).toBe(true)
     expect(isHidden()).toBe(false)
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Free Play' }))
+    // The first control of the menu.
+    expect(document.activeElement).toBe(button('Menu'))
     expect(root().className).toBe('app')
 
     wait(AUTO_HIDE_DELAY_MS * 4)
@@ -379,7 +436,7 @@ describe('the menu stays while the keyboard focus is inside it', () => {
   it('until Escape lets go of it: the menu then hides like any other time, and Tab brings it back', () => {
     startApp()
     wait(AUTO_HIDE_DELAY_MS)
-    // A slip onto Tab while playing: the menu is back, with the focus on "Free Play".
+    // A slip onto Tab while playing: the menu is back, with the focus on "Menu".
     tap('Tab', { key: 'Tab' })
     wait(AUTO_HIDE_DELAY_MS * 4)
     expect(isHidden()).toBe(false)
@@ -399,25 +456,34 @@ describe('the menu stays while the keyboard focus is inside it', () => {
     expect(isHidden()).toBe(true)
     tap('Tab', { key: 'Tab' })
     expect(isHidden()).toBe(false)
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Free Play' }))
+    expect(document.activeElement).toBe(button('Menu'))
   })
 
-  it('through an Escape that is held down after it closed a panel: only a new press lets go', () => {
-    startApp()
-    pressEnterOn(button('Settings'))
-    key('keydown', 'Escape')
-    for (let repeat = 0; repeat < 5; repeat++) key('keydown', 'Escape', { repeat: true })
-    key('keyup', 'Escape')
-    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    expect(document.activeElement).toBe(button('Settings'))
-    wait(AUTO_HIDE_DELAY_MS * 2)
-    expect(isHidden()).toBe(false)
+  it.each<[string, () => void]>([
+    ['a panel', () => void openPanelWithEnter('Settings')],
+    ['the start box', () => pressEnterOn(button('Menu'))],
+  ])(
+    'through an Escape that is held down after it closed %s: only a new press lets go',
+    (_what, openWithEnter) => {
+      startApp()
+      openWithEnter()
+      expect(menu().contains(document.activeElement)).toBe(false)
+      key('keydown', 'Escape')
+      for (let repeat = 0; repeat < 5; repeat++) key('keydown', 'Escape', { repeat: true })
+      key('keyup', 'Escape')
+      expect(panel('Settings')).toBeNull()
+      expect(startBox()).toBeNull()
+      // What had the focus is gone: the Menu button has it now.
+      expect(document.activeElement).toBe(button('Menu'))
+      wait(AUTO_HIDE_DELAY_MS * 2)
+      expect(isHidden()).toBe(false)
 
-    tap('Escape')
-    expect(document.activeElement).toBe(document.body)
-    wait(AUTO_HIDE_DELAY_MS)
-    expect(isHidden()).toBe(true)
-  })
+      tap('Escape')
+      expect(document.activeElement).toBe(document.body)
+      wait(AUTO_HIDE_DELAY_MS)
+      expect(isHidden()).toBe(true)
+    },
+  )
 
   it('and after Escape let go of it, for as long as something else keeps the menu', () => {
     startApp()
@@ -448,26 +514,26 @@ describe('the menu stays while the keyboard focus is inside it', () => {
     expect(isHidden()).toBe(true)
   })
 
-  it('when Escape closed a panel that was opened with Enter: the focus is back on its button', () => {
+  it('when Escape closed a panel that was opened with Enter: the focus is on "Menu"', () => {
     startApp()
-    pressEnterOn(button('Settings'))
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
+    const settings = openPanelWithEnter('Settings')
+    expect(settings.contains(document.activeElement)).toBe(true)
 
     tap('Escape')
-    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(panel('Settings')).toBeNull()
+    expect(document.activeElement).toBe(button('Menu'))
 
     // Nothing is touched: the focus is in the menu, so the menu stays.
     wait(AUTO_HIDE_DELAY_MS * 2)
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(document.activeElement).toBe(button('Menu'))
     expect(isHidden()).toBe(false)
   })
 
   it('when the panel was closed with Enter on its own close button', () => {
     startApp()
-    pressEnterOn(button('Songs'))
+    openPanelWithEnter('Songs')
     pressEnterOn(button('Close Songs'))
-    expect(document.activeElement).toBe(button('Songs'))
+    expect(document.activeElement).toBe(button('Menu'))
 
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
@@ -475,37 +541,60 @@ describe('the menu stays while the keyboard focus is inside it', () => {
 
   it('when Enter on "Play" closed the Songs panel and the song plays', () => {
     startApp()
-    pressEnterOn(button('Songs'))
-    const songs = screen.getByRole('dialog', { name: 'Songs' })
+    const songs = openPanelWithEnter('Songs')
     pressEnterOn(within(songs).getByRole('button', { name: /^Play Twinkle/ }))
+    expect(panel('Songs')).toBeNull()
     expect(player.getState().status).toBe('playing')
-    expect(document.activeElement).toBe(button('Songs'))
+    expect(document.activeElement).toBe(button('Menu'))
 
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
   })
 
-  it('when choosing keys ended with the focus on a piano key, which goes to "Settings"', () => {
+  it('when Enter on a song of the start box closed the box and the song plays', () => {
     startApp()
-    clickWithMouse(button('Settings'))
-    const settings = screen.getByRole('dialog', { name: 'Settings' })
+    pressEnterOn(button('Menu'))
+    pressEnterOn(button(/^Play Twinkle/))
+    expect(startBox()).toBeNull()
+    expect(player.getState().status).toBe('playing')
+    expect(document.activeElement).toBe(button('Menu'))
+
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(isHidden()).toBe(false)
+  })
+
+  it('when Enter on "Free Play" closed the start box', () => {
+    startApp()
+    pressEnterOn(button('Menu'))
+    expect(document.activeElement).toBe(button(/Free Play/))
+    pressEnterOn(button(/Free Play/))
+    expect(startBox()).toBeNull()
+    expect(document.activeElement).toBe(button('Menu'))
+
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(isHidden()).toBe(false)
+  })
+
+  it('when choosing keys ended with the focus on a piano key, which goes to "Menu"', () => {
+    startApp()
+    const settings = openPanel('Settings')
     clickWithMouse(within(settings).getByRole('tab', { name: 'Keys' }))
     const pianoKey = document.querySelector('.piano-key[data-midi="64"]') as HTMLElement
     pianoKey.focus()
 
     tap('Escape')
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(document.activeElement).toBe(button('Menu'))
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
   })
 
-  it('when Enter on "Close" took the player line away, and the focus went to "Songs"', () => {
+  it('when Enter on "Close" took the player line away, and the focus went to "Menu"', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
     pressEnterOn(button('Close'))
-    expect(document.activeElement).toBe(button('Songs'))
+    expect(document.activeElement).toBe(button('Menu'))
 
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
@@ -533,23 +622,46 @@ describe('the menu is pinned', () => {
     expect(isHidden()).toBe(true)
   })
 
-  it.each(['Settings', 'Songs'] as const)('while %s is open, however long', (name) => {
+  it.each<[string, () => void]>([
+    ['the start box', () => clickWithMouse(button('Menu'))],
+    ['Settings', () => void openPanel('Settings')],
+    ['Songs', () => void openPanel('Songs')],
+  ])('while %s is open, however long', (_what, open) => {
     startApp()
-    clickWithMouse(button(name))
+    open()
     wait(AUTO_HIDE_DELAY_MS * 10)
     expect(isHidden()).toBe(false)
     expect(root().className).toBe('app')
   })
 
-  it('while one panel takes the place of the other', () => {
+  it('while the start box and the panels take the place of one another', () => {
     startApp()
-    clickWithMouse(button('Settings'))
-    wait(AUTO_HIDE_DELAY_MS * 2)
-    clickWithMouse(button('Songs'))
-    wait(AUTO_HIDE_DELAY_MS * 2)
-    clickWithMouse(button('Settings'))
+    // Each panel is opened from the start box, which the Menu button puts in its place.
+    for (const line of ['Settings', 'All songs…', 'Settings']) {
+      clickWithMouse(button('Menu'))
+      wait(AUTO_HIDE_DELAY_MS * 2)
+      expect(isHidden()).toBe(false)
+      clickWithMouse(button(line))
+      wait(AUTO_HIDE_DELAY_MS * 2)
+      expect(isHidden()).toBe(false)
+    }
+    expect(panel('Settings')).not.toBeNull()
+  })
+
+  it('no longer once the start box has closed: the menu then hides after 2.5 seconds', () => {
+    startApp()
+    clickWithMouse(button('Menu'))
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
+
+    // Escape closes the box, which held the focus itself: nothing is left in the menu.
+    tap('Escape')
+    expect(startBox()).toBeNull()
+    wait(AUTO_HIDE_DELAY_MS - 1)
+    expect(isHidden()).toBe(false)
+    wait(1)
+    expect(isHidden()).toBe(true)
+    expect(root().className).toBe('app cursor-hidden')
   })
 
   it('when a song that was playing with the menu hidden comes to its end', () => {
@@ -578,8 +690,8 @@ describe('the menu is pinned', () => {
     expect(isHidden()).toBe(false)
 
     pressEnterOn(button('Close'))
-    expect(document.activeElement).toBe(button('Songs'))
-    act(() => button('Songs').blur())
+    expect(document.activeElement).toBe(button('Menu'))
+    act(() => button('Menu').blur())
     wait(AUTO_HIDE_DELAY_MS - 1)
     expect(isHidden()).toBe(false)
     wait(1)
@@ -598,7 +710,7 @@ describe('Tab, pressed while the menu is hidden', () => {
 
     expect(key('keydown', 'Tab', { key: 'Tab' }).defaultPrevented).toBe(true)
     expect(isHidden()).toBe(false)
-    expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Free Play' }))
+    expect(document.activeElement).toBe(button('Menu'))
     expect(player.getState().status).toBe('playing')
   })
 
@@ -683,11 +795,14 @@ describe('the mouse cursor', () => {
     expect(isHidden()).toBe(true)
   })
 
-  it('is never hidden while a panel is open or the start overlay is up', () => {
+  it('is never hidden while the app waits to start, or with the start box or a panel open', () => {
     render(<App />)
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(root().className).toBe('app')
     tap('Enter')
+    clickWithMouse(button('Menu'))
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(root().className).toBe('app')
     clickWithMouse(button('Settings'))
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(root().className).toBe('app')

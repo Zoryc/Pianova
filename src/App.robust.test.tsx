@@ -227,9 +227,15 @@ function pointer(
   })
 }
 
+/** The start box: the small menu the app opens with, and that the Menu button opens again. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
 /**
- * Draws the app and gets past the start overlay, as a player would. The
- * simulated browser gets the 37-key piano; the full one has to be asked for.
+ * Draws the app and starts it with a key press, as a player would: the start
+ * box, which the app opens with, goes away. The simulated browser gets the
+ * 37-key piano; the full one has to be asked for.
  */
 function startApp(pianoToShow: TestPiano = SMALL_PIANO): ReturnType<typeof render> {
   if (pianoToShow === FULL_PIANO) act(() => settingsStore.set({ pianoSize: 88 }))
@@ -238,6 +244,7 @@ function startApp(pianoToShow: TestPiano = SMALL_PIANO): ReturnType<typeof rende
   keyDown('Enter')
   keyUp('Enter')
   expect(screen.queryByText('Click or press any key to start')).toBeNull()
+  expect(startBox()).toBeNull()
   const { first, last } = pianoToShow.range
   expect(document.querySelectorAll('.piano-key')).toHaveLength(last - first + 1)
   return view
@@ -258,6 +265,16 @@ function settingsPanel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
 }
 
+/**
+ * Opens Settings with the mouse, on the tab it was last on: a click on
+ * "Menu", then one on the "Settings" line of the start box that opens.
+ */
+function openSettings(): void {
+  click('Menu')
+  click('Settings')
+  expect(settingsPanel()).not.toBeNull()
+}
+
 /** A click with the mouse on one of the tabs of Settings, which must be open. */
 function chooseTab(tab: SettingsTab): void {
   fireEvent.click(screen.getByRole('tab', { name: tab }), { detail: 1 })
@@ -266,7 +283,7 @@ function chooseTab(tab: SettingsTab): void {
 
 /** Opens Settings with the mouse, if it is not open, and shows one of its tabs. */
 function openSettingsOn(tab: SettingsTab): void {
-  if (!settingsPanel()) click('Settings')
+  if (!settingsPanel()) openSettings()
   chooseTab(tab)
 }
 
@@ -308,12 +325,15 @@ function expectPlaying(...notes: number[]): void {
   expect(sounding()).toEqual(notes)
 }
 
-describe('start overlay', () => {
+describe('the start box', () => {
   it('uses the first key press only to start the sound, even when that key is still held', () => {
     render(<App />)
+    // The app waits to start, with the start box open.
+    expect(startBox()).not.toBeNull()
     const first = keyDown('KeyA')
     expect(first.defaultPrevented).toBe(true)
     expect(audio.state.starts).toBe(1)
+    expect(startBox()).toBeNull()
     // The key is still down and repeats: that is not a note either.
     keyDown('KeyA', { repeat: true })
     expectSilence()
@@ -325,6 +345,75 @@ describe('start overlay', () => {
     keyUp('KeyA')
     expectSilence()
     expect(audio.state.starts).toBe(1)
+  })
+
+  /*
+   * Once the app has started, the Menu button opens the start box again. A
+   * key of the piano, or a press of the mouse outside the box, then closes
+   * it, and is played as well: the note it starts must end like any other.
+   */
+  it('closes at a key of the piano, whose note plays and stops when the key is released', () => {
+    startApp()
+    click('Menu')
+    expect(startBox()).not.toBeNull()
+
+    keyDown('KeyA')
+    expect(startBox()).toBeNull()
+    expectPlaying(C4)
+    expect(litKeys()).toEqual(['C4, key A'])
+    keyUp('KeyA')
+    expectSilence()
+  })
+
+  it('closes at a press on the piano, whose note plays and stops when the mouse lets go', () => {
+    startApp()
+    click('Menu')
+    expect(startBox()).not.toBeNull()
+
+    pointer('pointerDown', 12)
+    expect(startBox()).toBeNull()
+    expectPlaying(C4)
+    pointer('pointerUp', 12)
+    expectSilence()
+  })
+
+  it('leaves a held note alone when it opens and when Escape closes it', () => {
+    startApp()
+    keyDown('KeyA')
+    expectPlaying(C4)
+
+    click('Menu')
+    expect(startBox()).not.toBeNull()
+    expectPlaying(C4)
+    keyDown('Escape', { key: 'Escape' })
+    keyUp('Escape', { key: 'Escape' })
+    expect(startBox()).toBeNull()
+    expectPlaying(C4)
+
+    keyUp('KeyA')
+    expectSilence()
+  })
+
+  /*
+   * A key that is held down sends its press again and again. Those repeats
+   * play nothing, and none of them is a key being played: a box that is opened
+   * with the mouse while a key is held down stays open.
+   */
+  it('stays open while a key that was already down repeats, and its note stops at release', () => {
+    startApp()
+    keyDown('KeyA')
+    expectPlaying(C4)
+    click('Menu')
+    expect(startBox()).not.toBeNull()
+
+    keyDown('KeyA', { repeat: true })
+    keyDown('KeyA', { repeat: true })
+    expect(startBox()).not.toBeNull()
+    expectPlaying(C4)
+
+    keyUp('KeyA')
+    expectSilence()
+    expect(startBox()).not.toBeNull()
   })
 })
 
@@ -415,7 +504,7 @@ describe('a note started with the computer keyboard stops', () => {
   })
 
   it('when the Keys tab of Settings is opened, where the computer keys are chosen', () => {
-    click('Settings')
+    openSettings()
     // Settings alone lets the piano play on. Its Keys tab is what silences it.
     expect(isChoosingKeys()).toBe(false)
     expectPlaying(C4)
@@ -434,7 +523,7 @@ describe('a note started with the computer keyboard stops', () => {
     keyDown('KeyA')
     expectPlaying(C4)
 
-    click('Settings')
+    openSettings()
     expect(isChoosingKeys()).toBe(true)
     expectSilence()
     keyUp('KeyA')
@@ -565,6 +654,9 @@ describe('a note started with the pointer stops', () => {
   })
 
   it('when the Keys tab of Settings is opened with the keyboard while the pointer is down', () => {
+    // Enter on "Menu" opens the start box, and Enter on its "Settings" line opens Settings.
+    pressEnterOn(screen.getByRole('button', { name: 'Menu' }))
+    expectPlaying(C4)
     pressEnterOn(screen.getByRole('button', { name: 'Settings' }))
     // The keyboard is now on the first tab of Settings, and the note is still held.
     expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'Sound' }))
@@ -653,7 +745,7 @@ describe('a note started through the bus (the way the song player plays notes) s
   })
 
   it('when the Keys tab of Settings is opened, where the computer keys are chosen', () => {
-    click('Settings')
+    openSettings()
     expectPlaying(C4)
     chooseTab('Keys')
     expect(isChoosingKeys()).toBe(true)

@@ -58,7 +58,7 @@ function drawStage(overrides: Partial<StageProps> = {}): DrawnStage {
   const ranges: PianoRange[] = []
   const props: StageProps = {
     id: 'the-stage',
-    labelledBy: 'free-play-tab',
+    label: 'Free Play',
     bus: new NoteBus(),
     settings: withSettings({}),
     keyLabels: new Map(),

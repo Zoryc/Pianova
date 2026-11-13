@@ -22,9 +22,9 @@ import type { FallingSource } from './sky/Sky'
 import './stage.css'
 
 export interface StageProps {
-  /** The stage is the page of the Free Play tab: its own id, and the id of that tab. */
+  /** The stage's own id, and what it is called: the way of playing that is on ("Free Play"). */
   id: string
-  labelledBy: string
+  label: string
   /** Where the notes come from: the keys that are lit and the light in the sky follow it. */
   bus: NoteBus
   settings: Settings
@@ -36,8 +36,8 @@ export interface StageProps {
   falling: FallingSource | null
   audioStatus: AudioStatus
   /**
-   * Whether to say how to play, until the first note. Off behind the start
-   * overlay, and while the computer keys are being chosen, where a click on
+   * Whether to say how to play, until the first note. Off while the start
+   * box is open, and while the computer keys are being chosen, where a click on
    * the piano does something else.
    */
   showHint: boolean
@@ -105,8 +105,8 @@ export function Stage(props: StageProps): JSX.Element {
       ref={stage}
       id={props.id}
       className={settings.autoHideMenu ? 'stage' : 'stage stage--below-menu'}
-      role="tabpanel"
-      aria-labelledby={props.labelledBy}
+      role="region"
+      aria-label={props.label}
     >
       <div className="stage__sky" onClick={props.onSkyClick}>
         <Sky

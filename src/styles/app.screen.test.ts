@@ -1,12 +1,12 @@
 /**
  * A code review of the stylesheets written down as checks: the numbers and
  * the rules the look and the layout depend on (docs/INTERFACE.md sections 1,
- * 2, 6 and 8), read from the stylesheets themselves.
+ * 2, 5.3a, 6 and 8), read from the stylesheets themselves.
  *
  * The styles of the screen are in several files: theme.css (the tokens) and
  * app.css (how the window is shared) here, and next to their components
- * chrome.css (the menu, the panels and every shared control), stage.css,
- * piano.css, settings.css, songs.css and sky.css.
+ * chrome.css (the menu, the panels and every shared control), startBox.css
+ * (the start box), stage.css, piano.css, settings.css, songs.css and sky.css.
  *
  * There is no layout engine here. How high things are, and whether the piano
  * stays in view in a low window or under an open panel, can only be seen in
@@ -41,6 +41,7 @@ function readStyles(path: string): string {
 const appCss = readStyles('./app.css')
 const themeCss = readStyles('./theme.css')
 const chromeCss = readStyles('../ui/chrome.css')
+const startBoxCss = readStyles('../ui/startBox.css')
 const stageCss = readStyles('../ui/stage.css')
 const pianoCss = readStyles('../ui/piano.css')
 const settingsCss = readStyles('../ui/settings/settings.css')
@@ -51,6 +52,7 @@ const skyCss = readStyles('../ui/sky/sky.css')
 const SHEETS: Readonly<Record<string, string>> = {
   'app.css': appCss,
   'chrome.css': chromeCss,
+  'startBox.css': startBoxCss,
   'stage.css': stageCss,
   'piano.css': pianoCss,
   'settings.css': settingsCss,
@@ -58,9 +60,10 @@ const SHEETS: Readonly<Record<string, string>> = {
   'sky.css': skyCss,
 }
 
-/** The sheets that draw the chrome: the menu, the panels and the controls in them. */
+/** The sheets that draw the chrome: the menu, the start box, the panels and their controls. */
 const CHROME_SHEETS: Readonly<Record<string, string>> = {
   'chrome.css': chromeCss,
+  'startBox.css': startBoxCss,
   'settings.css': settingsCss,
   'songs.css': songsCss,
 }
@@ -155,20 +158,45 @@ function token(name: string): string {
   return found[1].trim().replace(/\s+/g, ' ')
 }
 
+/** One "@media … { … }" of a stylesheet. */
+interface MediaBlock {
+  /** What it asks of the window, as it is written: "(max-height: 859px)". */
+  query: string
+  /** The rules it holds. */
+  css: string
+}
+
+/**
+ * A stylesheet taken apart at its "@media … { … }" blocks: what it says for
+ * every window, and the blocks in the order of the sheet.
+ */
+function mediaBlocks(css: string): { everyWindow: string; blocks: MediaBlock[] } {
+  const blocks: MediaBlock[] = []
+  let everyWindow = ''
+  let done = 0
+  for (let start = css.indexOf('@media'); start >= 0; start = css.indexOf('@media', done)) {
+    const from = css.indexOf('{', start) + 1
+    let depth = 1
+    let at = from
+    while (at < css.length && depth > 0) {
+      if (css[at] === '{') depth++
+      if (css[at] === '}') depth--
+      at++
+    }
+    everyWindow += css.slice(done, start)
+    blocks.push({
+      query: css.slice(start + '@media'.length, from - 1).trim(),
+      css: css.slice(from, at - 1),
+    })
+    done = at
+  }
+  return { everyWindow: everyWindow + css.slice(done), blocks }
+}
+
 /** The rules a stylesheet keeps for Windows contrast themes. */
 function contrastThemeRules(css: string): StyleRule[] {
-  const opening = '@media (forced-colors: active)'
-  const start = css.indexOf(opening)
-  if (start < 0) return []
-  const from = css.indexOf('{', start) + 1
-  let depth = 1
-  let at = from
-  while (at < css.length && depth > 0) {
-    if (css[at] === '{') depth++
-    if (css[at] === '}') depth--
-    at++
-  }
-  return rules(css.slice(from, at - 1))
+  const kept = mediaBlocks(css).blocks.find(({ query }) => query === '(forced-colors: active)')
+  return kept ? rules(kept.css) : []
 }
 
 describe('the page', () => {
@@ -190,10 +218,17 @@ describe('the page', () => {
     expect(value('.floating-panel', 'margin', chromeCss)).toBe('0 auto')
   })
 
+  it('caps the start box the same way, at 660px, a little under the menu', () => {
+    expect(value('.start-box', 'width', startBoxCss)).toBe('min(660px, 94%)')
+    // Centred from side to side; from the top, a share of the window's height within limits.
+    expect(value('.start-box', 'margin', startBoxCss)).toBe('clamp(8px, 6dvh, 60px) auto 0')
+  })
+
   // The piano never leaves the screen: the sky is what is left of the window
   // above it, down to nothing, and a panel is never higher than its box. A
   // height or a minimum height of their own is exactly what would hold the
-  // middle of the screen open, and push the piano out at the bottom.
+  // middle of the screen open, and push the piano out at the bottom. The
+  // start box lives in the same box as a panel, and is held to the same.
   it('promises the sky and an open panel no height of their own, so the piano never leaves the screen', () => {
     const boxes: [selector: string, css: string][] = [
       ['.stage__sky', stageCss],
@@ -202,6 +237,8 @@ describe('the page', () => {
       ['.app__panels', appCss],
       ['.floating-panel', chromeCss],
       ['.floating-panel__body', chromeCss],
+      ['.start-box', startBoxCss],
+      ['.start-box__body', startBoxCss],
     ]
     const promised = boxes.flatMap(([selector, css]) =>
       ['height', 'min-height']
@@ -214,6 +251,46 @@ describe('the page', () => {
     // What does not fit in a panel scrolls inside it, up and down only.
     expect(value('.floating-panel__body', 'overflow', chromeCss)).toBe('hidden auto')
     expect(value('.floating-panel__body', 'min-height', chromeCss)).toBe('0')
+    // The same for the two lists of the start box, which gives way before the piano does.
+    expect(value('.start-box__body', 'overflow', startBoxCss)).toBe('hidden auto')
+    expect(value('.start-box__body', 'min-height', startBoxCss)).toBe('0')
+    expect(value('.start-box', 'min-height', startBoxCss)).toBe('0')
+    expect(value('.start-box', 'flex', startBoxCss)).toBe('0 1 auto')
+  })
+
+  // A panel is held to its box by a greatest height. The start box has a
+  // margin above it, so it is held another way: each of the two places it is
+  // put in is a column in which it may shrink. Its head and its foot keep
+  // their height, so its two lists are what gives way, and they scroll.
+  it('lets the start box shrink to the room it is given, its two lists first', () => {
+    const places: [selector: string, css: string][] = [
+      ['.start-layer', startBoxCss],
+      ['.app__panels', appCss],
+    ]
+    for (const [selector, css] of places) {
+      expect(value(selector, 'display', css), selector).toBe('flex')
+      expect(value(selector, 'flex-direction', css), selector).toBe('column')
+    }
+    expect(value('.start-box', 'display', startBoxCss)).toBe('flex')
+    expect(value('.start-box', 'flex-direction', startBoxCss)).toBe('column')
+    expect(value('.start-box__head', 'flex', startBoxCss)).toBe('none')
+    expect(value('.start-box__foot', 'flex', startBoxCss)).toBe('none')
+    expect(value('.start-box__body', 'flex', startBoxCss)).toBe('1 1 auto')
+    // In a window so low that even the head and the foot do not fit, what
+    // sticks out of the box is cut off: it never lies over the piano.
+    expect(value('.start-box', 'overflow', startBoxCss)).toBe('clip')
+
+    // No rule, for any window or for either place, gives the box or its lists
+    // a height to hold on to. The two that are named say "down to nothing".
+    const heights = rules(startBoxCss)
+      .filter(({ selectors }) =>
+        selectors.some((selector) => /(?:^|\s)\.start-box(?:__body)?$/.test(selector)),
+      )
+      .flatMap(({ declarations }) => [
+        ...declarations.matchAll(/(?:^|;)\s*((?:min-)?height)\s*:\s*([^;]+)/g),
+      ])
+      .map((match) => `${match[1]}: ${(match[2] ?? '').trim()}`)
+    expect(heights).toEqual(['min-height: 0', 'min-height: 0'])
   })
 
   it('puts nothing between the sky and the piano: no gap, no margin, no room above the keys', () => {
@@ -241,13 +318,193 @@ describe('the page', () => {
   })
 })
 
+describe('the start box', () => {
+  /** What startBox.css says for every window, and its "@media" blocks in the order of the sheet. */
+  const { everyWindow, blocks } = mediaBlocks(startBoxCss)
+
+  /** What it says only for the windows that match `query`: inWindows('(max-height: 859px)'). */
+  function inWindows(query: string): string {
+    const found = blocks.find((block) => block.query === query)
+    if (!found) throw new Error(`startBox.css has no "@media ${query}"`)
+    return found.css
+  }
+
+  // The layer the box hangs in covers the whole window, and so does its
+  // unseen button. A colour, a picture or a blur on either of them would lie
+  // over the stage, which is in full view from the first moment.
+  it('does not dim the stage while the app waits to start', () => {
+    const fill = /(?:^|;)\s*(background(?:-color|-image)?|backdrop-filter)\s*:\s*([^;]+)/g
+    const looked: string[] = []
+    const painted: string[] = []
+    for (const css of Object.values(SHEETS)) {
+      for (const { selectors, declarations } of rules(css)) {
+        // The layer and its button, in any state, and whatever is drawn with them (::before).
+        const ofTheLayer = selectors.filter((selector) =>
+          /^\.start-layer(?![a-z0-9])/.test(selector.split(/[\s>+~]+/).at(-1) ?? ''),
+        )
+        if (ofTheLayer.length === 0) continue
+        looked.push(...ofTheLayer)
+        for (const [, property, text] of declarations.matchAll(fill)) {
+          if (/^(?:none|transparent)$/.test((text ?? '').trim())) continue
+          painted.push(`${ofTheLayer.join(', ')} { ${property}: ${text} }`)
+        }
+      }
+    }
+    expect(looked).toEqual(expect.arrayContaining(['.start-layer', '.start-layer__window']))
+    expect(painted).toEqual([])
+    // A button has a fill and a frame of the browser's own until it is told otherwise.
+    expect(value('.start-layer__window', 'background', startBoxCss)).toBe('transparent')
+    expect(value('.start-layer__window', 'border', startBoxCss)).toBe('0')
+
+    // The colour that dims the stage is left to the one thing that still
+    // does: the overlay that says where to drop a file.
+    const everyRule = Object.values(SHEETS).flatMap((css) => rules(css))
+    const dimmed = everyRule
+      .filter(({ declarations }) => declarations.includes('var(--scrim)'))
+      .flatMap(({ selectors }) => selectors)
+    expect(dimmed).toEqual(['.drop-overlay'])
+    // And the screen behind the box, which cannot be used yet, looks as it always does.
+    const whileWaiting = everyRule
+      .flatMap(({ selectors }) => selectors)
+      .filter((selector) => selector.includes('inert'))
+    expect(whileWaiting).toEqual([])
+  })
+
+  it('scrolls its lists with the slim scroll bar of a panel, wherever a panel has one', () => {
+    const panel = '.floating-panel__body'
+    const lists = '.start-box__body'
+    // Every rule that draws the scroll bar of a panel: its parts in Chrome and
+    // Edge, and the standard properties for the browsers without those parts.
+    const drawn = rules(chromeCss).filter(
+      ({ selectors, declarations }) =>
+        selectors.some((selector) => selector.startsWith(`${panel}::-webkit-scrollbar`)) ||
+        (selectors.includes(panel) && /(?:^|;)\s*scrollbar-[a-z]+\s*:/.test(declarations)),
+    )
+    // The bar, its thumb, the thumb under the mouse, and the standard properties.
+    expect(drawn.length).toBeGreaterThanOrEqual(4)
+    for (const { selectors } of drawn) {
+      const forThePanel = selectors.filter((selector) => selector.startsWith(panel))
+      const forTheLists = selectors.filter((selector) => selector.startsWith(lists))
+      expect(forTheLists).toEqual(forThePanel.map((selector) => selector.replace(panel, lists)))
+    }
+    // Slim: a thumb four pixels wide in a bar of twelve, or the thin bar of the browser.
+    expect(value(`${lists}::-webkit-scrollbar`, 'width', chromeCss)).toBe('12px')
+    expect(value(`${lists}::-webkit-scrollbar-thumb`, 'border', chromeCss)).toBe(
+      '4px solid transparent',
+    )
+    expect(value(lists, 'scrollbar-width', chromeCss)).toBe('thin')
+  })
+
+  // A rule for a small window changes something only when it comes after the
+  // rule for every window, and the rule for a lower window after the rule for
+  // a higher one: of two rules for the same thing, the later one counts.
+  it('knows three kinds of small window, and says last what changes in them', () => {
+    const small = blocks.filter(({ query }) => /width|height/.test(query))
+    expect(small.map(({ query }) => query)).toEqual([
+      '(max-height: 859px)',
+      '(max-height: 759px)',
+      '(max-width: 599px)',
+    ])
+
+    // Nothing they change is said again for every window further down the sheet.
+    const changed = new Set(
+      small.flatMap(({ css }) => rules(css)).flatMap(({ selectors }) => selectors),
+    )
+    const fromTheFirst = startBoxCss.slice(startBoxCss.indexOf('@media'))
+    const saidAgain = rules(mediaBlocks(fromTheFirst).everyWindow)
+      .flatMap(({ selectors }) => selectors)
+      .filter((selector) => changed.has(selector))
+    expect(changed.size).toBeGreaterThan(0)
+    expect(saidAgain).toEqual([])
+  })
+
+  it('leaves the picture out in a window less than 860px high, which has no room for it', () => {
+    const low = inWindows('(max-height: 859px)')
+    expect(declared('.start-box__picture', 'display', everyWindow)).toBeNull()
+    expect(value('.start-box__picture', 'display', low)).toBe('none')
+    // With the picture the head is as high as the picture. Without it, as high as its words.
+    expect(value('.start-box__head', 'height', everyWindow)).toBe('132px')
+    expect(value('.start-box__head', 'height', low)).toBe('auto')
+    // The name is written smaller there.
+    expect(value('.start-box__name', 'font-size', everyWindow)).toBe('30px')
+    expect(value('.start-box__name', 'font-size', low)).toBe('22px')
+  })
+
+  // All of this is there so that the whole box is in view in a window 1366 by
+  // 633, where nothing of it should have to scroll.
+  it('moves up and makes its lines lower in a window less than 760px high', () => {
+    const low = inWindows('(max-height: 759px)')
+    // Above it: a share of the height of a higher window, and here the least of that share.
+    expect(value('.start-box', 'margin', everyWindow)).toBe('clamp(8px, 6dvh, 60px) auto 0')
+    expect(value('.start-box', 'margin-top', low)).toBe('8px')
+    // The sentence goes on the line of the name, or under it where the box is too narrow for both.
+    expect(value('.start-box__head', 'display', low)).toBe('flex')
+    expect(value('.start-box__head', 'flex-wrap', low)).toBe('wrap')
+    expect(value('.start-box__head', 'align-items', low)).toBe('baseline')
+    expect(value('.start-box__head', 'padding', low)).toBe('12px 24px')
+    for (const selector of ['.start-box__name', '.start-box__tagline']) {
+      expect(value(selector, 'margin', low), selector).toBe('0')
+    }
+    // Its lines lose four pixels each, and are still as high as any control.
+    expect(value('.start-box__row', 'min-height', everyWindow)).toBe('44px')
+    expect(value('.start-box__row', 'min-height', low)).toBe('40px')
+  })
+
+  // Opened with the Menu button, the box shares the room between the menu and
+  // the piano with a song's player line: there the room is for the lists.
+  it('has no head and no margin above it in such a window once it is among the panels', () => {
+    const low = inWindows('(max-height: 759px)')
+    expect(value('.app__panels .start-box', 'margin-top', low)).toBe('0')
+    expect(value('.app__panels .start-box__head', 'display', low)).toBe('none')
+    // Only there: in a higher window the box among the panels looks like the
+    // box the app opens with. And that one, the welcome, keeps its head in
+    // every window.
+    const amongThePanels = (css: string): string[] =>
+      rules(css)
+        .flatMap(({ selectors }) => selectors)
+        .filter((selector) => selector.includes('.app__panels'))
+    expect(amongThePanels(low)).toEqual([
+      '.app__panels .start-box',
+      '.app__panels .start-box__head',
+    ])
+    expect(amongThePanels(startBoxCss)).toEqual(amongThePanels(low))
+    const headsTakenAway = rules(startBoxCss)
+      .filter(({ declarations }) => /(?:^|;)\s*display\s*:\s*none/.test(declarations))
+      .flatMap(({ selectors }) => selectors)
+      .filter((selector) => selector.endsWith('.start-box__head'))
+    expect(headsTakenAway).toEqual(['.app__panels .start-box__head'])
+  })
+
+  it('puts the songs under the ways to play in a window less than 600px wide', () => {
+    const narrow = inWindows('(max-width: 599px)')
+    // Side by side, the songs a little wider. Each column may shrink, so that
+    // a long title is cut and does not push the box wider.
+    expect(value('.start-box__columns', 'display', everyWindow)).toBe('grid')
+    expect(value('.start-box__columns', 'grid-template-columns', everyWindow)).toBe(
+      'minmax(0, 1fr) minmax(0, 1.25fr)',
+    )
+    expect(value('.start-box__columns', 'gap', everyWindow)).toBe('0 16px')
+    // One column, with room between the two lists now that one is under the other.
+    expect(value('.start-box__columns', 'grid-template-columns', narrow)).toBe('minmax(0, 1fr)')
+    expect(value('.start-box__columns', 'gap', narrow)).toBe('12px 0')
+  })
+})
+
 describe('controls', () => {
-  it.each(['.button', '.switch', '.select', '.field__control', '.mode-tab', '.tab', '.swatch'])(
-    '%s is at least 36px high',
-    (selector) => {
-      expect(px(chromeValue(selector, 'min-height'))).toBeGreaterThanOrEqual(36)
-    },
-  )
+  // The ways to play are lines of the start box (.start-box__row). The lines
+  // of its foot are lower than the others, and held to the same height.
+  it.each([
+    '.button',
+    '.switch',
+    '.select',
+    '.field__control',
+    '.start-box__row',
+    '.start-box__foot .start-box__row',
+    '.tab',
+    '.swatch',
+  ])('%s is at least 36px high', (selector) => {
+    expect(px(chromeValue(selector, 'min-height'))).toBeGreaterThanOrEqual(36)
+  })
 
   it('sliders, round buttons and icon buttons are 36px too', () => {
     expect(px(value('.slider', 'height', chromeCss))).toBeGreaterThanOrEqual(36)
@@ -264,7 +521,14 @@ describe('controls', () => {
     ).toBeGreaterThanOrEqual(36)
   })
 
-  it.each(['.button', '.switch', '.segmented__option', '.choice-card', '.swatch'])(
+  it.each([
+    '.button',
+    '.switch',
+    '.segmented__option',
+    '.choice-card',
+    '.swatch',
+    '.start-box__row',
+  ])(
     '%s reacts to being pressed',
     (control) => {
       const whilePressed = Object.values(CHROME_SHEETS)
@@ -275,20 +539,23 @@ describe('controls', () => {
     },
   )
 
-  it('never takes the focus ring away from a control (only the full-screen start overlay may)', () => {
+  it('never hides the focus ring of a control (only the window around the start box may)', () => {
     const switchedOff = /(?:outline|box-shadow)\s*:\s*(?:none|0)\s*(?:;|$)/
+    // The unseen button that starts the app: the whole window around the start box.
+    const theWindow = '.start-layer__window:focus-visible'
     for (const [name, css] of Object.entries(SHEETS)) {
       const withoutRing = rules(css)
         .filter(({ declarations }) => switchedOff.test(declarations))
         .flatMap(({ selectors }) => selectors)
         .filter((selector) => selector.includes(':focus'))
       expect(
-        withoutRing.filter((selector) => !selector.startsWith('.start-overlay')),
+        withoutRing.filter((selector) => selector !== theWindow),
         name,
       ).toEqual([])
     }
-    // The overlay covers the window, so its ring goes around its line of text instead.
-    const movedRing = rule('.start-overlay:focus-visible .start-overlay__action', chromeCss)
+    // That button covers the window, so a ring around it would only outline
+    // the screen. Its ring goes around the sentence that says what it does.
+    const movedRing = rule(`${theWindow} ~ .start-box .start-box__way-out`, startBoxCss)
     expect(movedRing).toMatch(/box-shadow\s*:\s*var\(--focus-ring\)/)
     expect(movedRing).not.toMatch(/outline\s*:\s*(?:none|0)\s*(?:;|$)/)
 
@@ -310,7 +577,7 @@ describe('controls', () => {
       'select',
       'slider',
       'tab',
-      'mode-tab',
+      'start-box__row',
       'choice-card',
       'swatch',
       'song-part',
@@ -350,7 +617,6 @@ describe('controls', () => {
       ".segmented__option[aria-checked='true']",
       ".switch[aria-checked='true'] .switch__track",
       ".tab[aria-selected='true']::after",
-      ".mode-tab[aria-selected='true']::after",
     ]
     for (const selector of filled) {
       const declarations = marked(chromeCss, selector)
@@ -359,6 +625,14 @@ describe('controls', () => {
     }
     for (const selector of ['.button--primary', ".segmented__option[aria-pressed='true']"]) {
       expect(marked(chromeCss, selector), selector).toMatch(/(?:^|;)\s*color\s*:\s*HighlightText/)
+    }
+    // The way to play that is on, in the start box: the whole line is filled,
+    // so what is written on it takes the colour that can be read there.
+    const chosenWay = ".start-box__row[aria-pressed='true']"
+    expect(marked(startBoxCss, chosenWay)).toMatch(/forced-color-adjust\s*:\s*none/)
+    expect(marked(startBoxCss, chosenWay)).toMatch(/background\s*:\s*Highlight\s*(?:;|$)/)
+    for (const selector of [chosenWay, `${chosenWay} .icon`, `${chosenWay} .start-box__note`]) {
+      expect(marked(startBoxCss, selector), selector).toMatch(/(?:^|;)\s*color\s*:\s*HighlightText/)
     }
     expect(marked(chromeCss, ".switch[aria-checked='true'] .switch__thumb")).toMatch(
       /background\s*:\s*HighlightText/,
@@ -442,11 +716,11 @@ describe('the visual rules of the spec', () => {
 
   // Like the 4 px grid below, this is a rule for the controls: chrome.css
   // promises at its top that every control answers within 80 to 160 ms, and
-  // the sheets of the two panels are full of controls. The piano and the stage
-  // are left out on purpose. They have timings of their own, which their own
-  // tests hold them to: a key dips in 50 ms and its light fades over 250 ms
-  // (src/ui/Piano.pointer.test.tsx), and the words "how to play" fade over
-  // 400 ms (src/ui/stage.css.test.ts).
+  // the sheets of the start box and of the two panels are full of controls.
+  // The piano and the stage are left out on purpose. They have timings of
+  // their own, which their own tests hold them to: a key dips in 50 ms and
+  // its light fades over 250 ms (src/ui/Piano.pointer.test.tsx), and the
+  // words "how to play" fade over 400 ms (src/ui/stage.css.test.ts).
   it.each(Object.keys(CHROME_SHEETS))('%s keeps every transition between 80 and 160 ms', (name) => {
     const durations = [...(CHROME_SHEETS[name] ?? '').matchAll(/(\d+(?:\.\d+)?)ms/g)].map((match) =>
       Number(match[1]),
@@ -495,9 +769,9 @@ describe('the visual rules of the spec', () => {
 
   // The 4 px grid is a rule for the shared controls, which chrome.css draws
   // (it says so at its top), and for how the window is shared (app.css and
-  // stage.css). settings.css and songs.css are left out on purpose: the
-  // layout a panel adds for itself is not held to the grid, where a small
-  // drawing or a tight row may need a gap of 2px.
+  // stage.css). settings.css, songs.css and startBox.css are left out on
+  // purpose: the layout a panel or the start box adds for itself is not held
+  // to the grid, where a small drawing or a tight row may need a gap of 2px.
   it('spaces things in multiples of 4px', () => {
     const sheets = [chromeCss, appCss, stageCss].join('\n')
     const spacing = [
@@ -520,8 +794,10 @@ describe('the visual rules of the spec', () => {
   it('defines the tokens of the stage with the values of the spec', () => {
     expect(token('--stage-bg')).toBe('#000')
     expect(token('--panel-glass')).toBe('rgb(16 17 22 / 0.86)')
+    // Behind the menu: black as far down as its controls go, so that no
+    // falling note shows through a word, and fading out under them.
     expect(token('--bar-fade')).toBe(
-      'linear-gradient(to bottom, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0))',
+      'linear-gradient(to bottom, rgb(0 0 0 / 0.9) 60%, rgb(0 0 0 / 0))',
     )
     expect(token('--top-bar-height')).toBe('52px')
     const keyColours = [
@@ -534,11 +810,16 @@ describe('the visual rules of the spec', () => {
     for (const name of keyColours) {
       expect(token(name), name).toMatch(/^#[0-9a-f]{6}$/)
     }
-    // The menu and the panels are made of them.
+    // The menu, the panels and the start box are made of them.
     expect(value('.menu', 'background', chromeCss)).toBe('var(--bar-fade)')
-    expect(value('.top-bar', 'height', chromeCss)).toBe('var(--top-bar-height)')
+    // The bar is at least that high, not exactly: while a song is loaded,
+    // the player line is a second row in it, unless the window is very wide.
+    expect(value('.top-bar', 'min-height', chromeCss)).toBe('var(--top-bar-height)')
+    expect(declared('.top-bar', 'height', chromeCss)).toBeNull()
     expect(value('.floating-panel', 'background', chromeCss)).toBe('var(--panel-glass)')
     expect(value('.floating-panel', 'backdrop-filter', chromeCss)).toMatch(/^blur\(\d+px\)$/)
+    expect(value('.start-box', 'background', startBoxCss)).toBe('var(--panel-glass)')
+    expect(value('.start-box', 'backdrop-filter', startBoxCss)).toMatch(/^blur\(\d+px\)$/)
   })
 
   // The app sets the light on its root element from the player's settings.
@@ -561,9 +842,21 @@ describe('the visual rules of the spec', () => {
     expect(value('.button--primary', '--button-ink', chromeCss)).toBe('var(--light-ink)')
     // The line under the chosen tab.
     expect(value('.tab::after', 'background', chromeCss)).toBe('var(--light)')
-    expect(value('.mode-tab::after', 'background', chromeCss)).toBe('var(--light)')
     expect(value(".tab[aria-selected='true']::after", 'opacity', chromeCss)).toBe('1')
     expect(value('.tab::after', 'opacity', chromeCss)).toBe('0')
+    // The way to play that is on, in the start box: its line has an edge of
+    // the light and a weak wash of it, on which the words keep their own colour.
+    const chosenWay = ".start-box__row[aria-pressed='true']"
+    expect(value(chosenWay, 'border-color', startBoxCss)).toBe(
+      'color-mix(in srgb, var(--light) 55%, transparent)',
+    )
+    expect(value(chosenWay, 'background', startBoxCss)).toBe(
+      'color-mix(in srgb, var(--light) 16%, transparent)',
+    )
+    expect(value('.start-box__row', 'color', startBoxCss)).toBe('var(--text)')
+    // A line that is not on has neither.
+    expect(value('.start-box__row', 'border', startBoxCss)).toBe('1px solid transparent')
+    expect(value('.start-box__row', 'background', startBoxCss)).toBe('transparent')
     // A switch that is on.
     expect(value(".switch[aria-checked='true'] .switch__track", 'background', chromeCss)).toBe(
       'var(--light)',

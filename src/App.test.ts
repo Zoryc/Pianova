@@ -60,9 +60,8 @@ import { bus } from './app/pianoApp'
 import { SLOT_COUNT } from './core/layout'
 import { DEFAULT_SETTINGS, settingsStore } from './state/settings'
 import type { Settings } from './state/settings'
-import { ModeTabs } from './ui/ModeTabs'
+import { StartBox } from './ui/StartBox'
 import { TopBar } from './ui/TopBar'
-import type { PanelName } from './ui/TopBar'
 import { ConfirmButton } from './ui/controls'
 import { KeysTab } from './ui/settings/KeysTab'
 import { LookTab } from './ui/settings/LookTab'
@@ -99,15 +98,13 @@ function count(haystack: string, needle: string): number {
 
 function noop(): void {}
 
-/** The top bar as the app draws it: shown, with one of the two panels open or none. */
-function topBar(settings: Settings, openPanel: PanelName | null = null): ReactElement {
+/** The top bar as the app draws it: shown, with the start box open or closed. */
+function topBar(settings: Settings, startBoxOpen = false): ReactElement {
   return createElement(TopBar, {
     settings,
-    openPanel,
-    songsPanelId: 'songs',
-    settingsPanelId: 'settings',
-    onToggleSongs: noop,
-    onToggleSettings: noop,
+    startBoxOpen,
+    startBoxId: 'start-box',
+    onToggleStartBox: noop,
     menu: {
       visible: true,
       menuProps: {
@@ -118,8 +115,21 @@ function topBar(settings: Settings, openPanel: PanelName | null = null): ReactEl
         onBlur: noop,
       },
     },
-    modeTabId: 'tab',
-    modePanelId: 'panel',
+  })
+}
+
+/** The start box as the app draws it once it has started: opened with the Menu button. */
+function startBox(): ReactElement {
+  return createElement(StartBox, {
+    id: 'start-box',
+    overWindow: false,
+    waitingToStart: false,
+    opener: { current: null },
+    onClose: noop,
+    onPlaySong: noop,
+    onShowSongs: noop,
+    onShowSettings: noop,
+    onShowAbout: noop,
   })
 }
 
@@ -155,30 +165,47 @@ function keysTab(settings: Settings): { html: string; text: string } {
 describe('App, as first drawn', () => {
   const { html, text } = draw(createElement(App))
   const menu = html.slice(html.indexOf('<header'), html.indexOf('</header>'))
+  /** Where the screen ends and what lies over it begins: the start box, in its window. */
+  const screenEnd = html.indexOf('<div class="start-layer">')
+  const screenHtml = html.slice(0, screenEnd)
+  const startLayer = html.slice(screenEnd)
 
-  it('shows the name and the three modes', () => {
-    expect(html).toContain(`<h1 class="top-bar__name">${APP_NAME}</h1>`)
-    expect(text).toContain('Free Play Practice Soon Real-time Soon')
+  it('shows the name and the three ways to play, in the start box', () => {
+    expect(startLayer).toContain(`<h1 class="start-box__name">${APP_NAME}</h1>`)
+    // The name is the one main heading of the page: the bar has none.
+    expect(count(html, '<h1')).toBe(1)
+    expect(textOf(startLayer)).toContain(
+      'Play Free Play Play anything you like Practice The song waits for you Soon ' +
+        'Real-time Your timing is scored Soon',
+    )
+    // The stage is called by the way of playing that is on.
+    expect(screenHtml).toContain('class="stage" role="region" aria-label="Free Play"')
   })
 
   it('shows the top bar with the default settings, and nothing else in it', () => {
     expect(menu).toContain('aria-label="Volume" aria-valuetext="80%" value="80"')
     expect(menu).toContain('role="switch" aria-checked="false" aria-label="Sustain"')
-    // Everything the bar says, left to right. The rest is in Settings.
-    expect(textOf(menu)).toBe(
-      `${APP_NAME} Free Play Practice Soon Real-time Soon Sustain Off Space Songs Settings`,
-    )
+    // Everything the bar says, left to right. The rest is in the start box.
+    expect(textOf(menu)).toBe('Menu Sustain Off Space')
   })
 
   it('keeps the Settings and Songs panels closed, and no piano key waits to be chosen', () => {
     expect(html).toContain('<div class="app__panels"></div>')
-    expect(html).not.toContain('role="dialog"')
+    // The one thing that is open is the start box, and the Menu button, the
+    // only button that opens anything, says so and points at it.
+    expect(count(html, 'role="dialog"')).toBe(1)
+    expect(count(html, 'aria-expanded=')).toBe(1)
+    const pointedAt = /aria-expanded="true" aria-controls="([^"]+)"/.exec(menu)?.[1]
+    expect(startLayer).toContain(
+      `<section id="${pointedAt}" class="start-box" role="dialog" aria-label="Menu"`,
+    )
     expect(text).not.toContain('Click a piano key')
     expect(html).not.toContain('piano--editing')
-    expect(count(html, 'aria-expanded="false"')).toBe(2)
-    expect(html).not.toContain('aria-expanded="true"')
-    expect(html).toContain('aria-pressed="false"')
-    expect(html).not.toContain('aria-pressed="true"')
+    // No key of the piano is pressed in. The one line that is, is the way to
+    // play that is on, in the start box.
+    expect(screenHtml).toContain('aria-pressed="false"')
+    expect(screenHtml).not.toContain('aria-pressed="true"')
+    expect(count(startLayer, 'aria-pressed=')).toBe(1)
   })
 
   it('shows the hint where the notes being played will be', () => {
@@ -214,29 +241,74 @@ describe('App, as first drawn', () => {
     expect(text).not.toContain('Sound could not start')
   })
 
-  it('waits behind the start overlay, which is not part of what it covers', () => {
-    expect(text).toContain(`${APP_NAME} Click or press any key to start`)
+  it('waits behind the start box, which is not part of what it covers', () => {
+    // The box says what the app is, and ends with how to start it.
+    const said = textOf(startLayer)
+    expect(said.startsWith(`${APP_NAME} A piano you play with your computer keyboard. `)).toBe(true)
+    expect(said.endsWith(' Click or press any key to start')).toBe(true)
     expect(html).toMatch(/^<div class="app"[^>]*><div class="app__screen" inert="">/)
     expect(count(html, 'inert=""')).toBe(1)
-    const screenEnd = html.indexOf('</div><button type="button" class="start-overlay">')
+    // The screen is closed before the box begins. The whole window around
+    // the box is one unseen button, which is called by what the box says.
+    const overTheScreen =
+      '</div><div class="start-layer"><button type="button" class="start-layer__window" ' +
+      'aria-label="Click or press any key to start"></button><section '
+    expect(html.slice(screenEnd - '</div>'.length).startsWith(overTheScreen)).toBe(true)
     expect(screenEnd).toBeGreaterThan(html.indexOf('class="stage__piano"'))
   })
 })
 
-describe('ModeTabs', () => {
-  const { html } = draw(createElement(ModeTabs, { tabId: 'tab', panelId: 'panel' }))
+describe('StartBox', () => {
+  const { html, text } = draw(startBox())
+  /** Each line of the box that can be pressed: the button, with what is written in it. */
+  const lines = html.match(/<button.*?<\/button>/g) ?? []
 
-  it('marks Free Play as the selected tab of the page below', () => {
-    expect(html).toContain('role="tablist"')
-    expect(html).toContain('id="tab"')
-    expect(html).toContain('role="tab" aria-selected="true" aria-controls="panel">Free Play<')
+  /** The line that begins with these words. */
+  function line(name: string): string {
+    const found = lines.find((each) => textOf(each).startsWith(name))
+    if (found === undefined) throw new Error(`The start box has no line "${name}"`)
+    return found
+  }
+
+  it('marks Free Play as the way to play that is on', () => {
+    // A line that is pressed in, not a tab: the ways to play are no row of tabs.
+    expect(html).not.toContain('role="tablist"')
+    expect(html).not.toContain('role="tab"')
+    expect(line('Free Play')).toMatch(
+      /^<button type="button" class="start-box__row" aria-pressed="true"><svg class="icon"/,
+    )
+    expect(textOf(line('Free Play'))).toBe('Free Play Play anything you like')
+    // Of all the lines it is the only one that says whether it is pressed in.
+    expect(count(html, 'aria-pressed=')).toBe(1)
   })
 
-  it('marks the other modes as not available yet', () => {
-    expect(count(html, 'aria-selected="false"')).toBe(2)
+  it('marks the other ways to play as not available yet', () => {
     expect(count(html, 'aria-disabled="true"')).toBe(2)
     expect(count(html, 'title="Coming in a later update"')).toBe(2)
     expect(count(html, '>Soon<')).toBe(2)
+    // Each of them, greyed out and not reached with the Tab key.
+    const notYet =
+      '<button type="button" class="start-box__row" aria-disabled="true" tabindex="-1" ' +
+      'title="Coming in a later update">'
+    expect(line('Practice').startsWith(notYet)).toBe(true)
+    expect(textOf(line('Practice'))).toBe('Practice The song waits for you Soon')
+    expect(line('Real-time').startsWith(notYet)).toBe(true)
+    expect(textOf(line('Real-time'))).toBe('Real-time Your timing is scored Soon')
+  })
+
+  it('says everything in order: the name, the ways to play, a few songs, and the rest', () => {
+    // A dialog called "Menu", like the button that opens it.
+    const opening = '<section id="start-box" class="start-box" role="dialog" aria-label="Menu" '
+    expect(html.startsWith(opening)).toBe(true)
+    expect(text).toBe(
+      `${APP_NAME} A piano you play with your computer keyboard. ` +
+        'Play Free Play Play anything you like Practice The song waits for you Soon ' +
+        'Real-time Your timing is scored Soon ' +
+        'Songs Twinkle, Twinkle, Little Star 0:28 Mary Had a Little Lamb 0:17 Ode to Joy 0:34 ' +
+        'All songs… Settings About Click outside or play a key to close',
+    )
+    // A song is called by what its line does, for someone who hears the lines read out.
+    expect(line('Ode to Joy')).toContain('aria-label="Play Ode to Joy"')
   })
 })
 
@@ -249,20 +321,25 @@ describe('TopBar', () => {
     expect(html).toContain('role="switch" aria-checked="true" aria-label="Sustain"')
   })
 
-  it('shows which of its two panels is open, and points at it', () => {
-    const settingsOpen = draw(topBar(DEFAULT_SETTINGS, 'settings')).html
-    expect(settingsOpen).toContain('aria-expanded="true" aria-controls="settings">Settings</button>')
-    expect(settingsOpen).toContain('aria-expanded="false">Songs</button>')
+  it('shows whether the start box is open, and points at it', () => {
+    /** The first button of the bar, with what is written in it. */
+    const firstButton = (html: string): string => /<button.*?<\/button>/.exec(html)?.[0] ?? ''
+    const MENU_BUTTON = '<button type="button" class="button top-bar__menu" '
 
-    const songsOpen = draw(topBar(DEFAULT_SETTINGS, 'songs')).html
-    expect(songsOpen).toContain('aria-expanded="true" aria-controls="songs">Songs</button>')
-    expect(songsOpen).toContain('aria-expanded="false">Settings</button>')
+    const open = draw(topBar(DEFAULT_SETTINGS, true)).html
+    const whileOpen = firstButton(open)
+    const pointing = `${MENU_BUTTON}aria-expanded="true" aria-controls="start-box">`
+    expect(whileOpen.startsWith(pointing)).toBe(true)
+    expect(textOf(whileOpen)).toBe('Menu')
+    expect(count(open, 'aria-expanded=')).toBe(1)
 
-    // A closed panel is not on the page: there is nothing to point at.
+    // A closed box is not on the page: there is nothing to point at.
     const closed = draw(topBar(DEFAULT_SETTINGS)).html
-    expect(count(closed, 'aria-expanded="false"')).toBe(2)
-    expect(closed).not.toContain('aria-controls="settings"')
-    expect(closed).not.toContain('aria-controls="songs"')
+    const whileClosed = firstButton(closed)
+    expect(whileClosed.startsWith(`${MENU_BUTTON}aria-expanded="false">`)).toBe(true)
+    expect(textOf(whileClosed)).toBe('Menu')
+    expect(count(closed, 'aria-expanded=')).toBe(1)
+    expect(closed).not.toContain('aria-controls')
   })
 })
 
@@ -402,7 +479,7 @@ function clickWithMouse(target: HTMLElement): void {
   fireEvent.click(target, { detail: 1 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it with a key press, which takes the start box away too. */
 function startApp(): void {
   render(createElement(App))
   tap('Enter')
@@ -412,21 +489,39 @@ function button(name: string): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/** The start box, when it is open. */
+function openStartBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/**
+ * A line of the start box. When the box is closed, the Menu button opens it
+ * first, pressed the way `press` says: with the mouse or with Enter.
+ */
+function startBoxLine(name: string | RegExp, press: (target: HTMLElement) => void): HTMLElement {
+  if (!openStartBox()) press(button('Menu'))
+  return within(screen.getByRole('dialog', { name: 'Menu' })).getByRole('button', { name })
+}
+
 function settingsPanel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
 }
 
-/** Opens Settings on one of its tabs, with the mouse. (The panel remembers its last tab from test to test.) */
+/**
+ * Opens Settings on one of its tabs, with the mouse: the Menu button, the
+ * "Settings" line of the start box, then the tab. (The panel remembers its
+ * last tab from test to test.)
+ */
 function openSettingsOn(tab: string): HTMLElement {
-  if (!settingsPanel()) clickWithMouse(button('Settings'))
+  if (!settingsPanel()) clickWithMouse(startBoxLine('Settings', clickWithMouse))
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   clickWithMouse(within(settings).getByRole('tab', { name: tab }))
   return settings
 }
 
-/** The same with the keyboard alone: Enter on the "Settings" button, then on the tab. */
+/** The same with the keyboard alone: Enter on the Menu button, on "Settings", then on the tab. */
 function openSettingsWithKeyboardOn(tab: string): HTMLElement {
-  pressEnterOn(button('Settings'))
+  pressEnterOn(startBoxLine('Settings', pressEnterOn))
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   pressEnterOn(within(settings).getByRole('tab', { name: tab }))
   return settings
@@ -529,6 +624,21 @@ describe('the words over the sky', () => {
     expect(noteNames()).toEqual(['C4'])
     expect(hint().className).toBe('stage__hint stage__hint--gone')
   })
+
+  // The start box lies over the middle of the sky, where the hint is written.
+  it('keep the hint to themselves while the start box is open', () => {
+    startApp()
+    expect(hint().className).toBe('stage__hint')
+
+    clickWithMouse(button('Menu'))
+    expect(openStartBox()).not.toBeNull()
+    expect(hint().className).toBe('stage__hint stage__hint--gone')
+
+    // "Free Play" only closes the box. Nothing was played yet, so the hint is back.
+    clickWithMouse(startBoxLine(/^Free Play/, clickWithMouse))
+    expect(openStartBox()).toBeNull()
+    expect(hint().className).toBe('stage__hint')
+  })
 })
 
 describe('Settings, in the app', () => {
@@ -546,8 +656,26 @@ describe('Settings, in the app', () => {
     expect(licence.getAttribute('target')).toBe('_blank')
   })
 
+  it('opens on its About tab from the "About" line of the start box, which it replaces', () => {
+    startApp()
+    // Another tab was the last one shown: "About" does not just open what was open before.
+    openSettingsOn('Sound')
+    tap('Escape')
+    expect(settingsPanel()).toBeNull()
+
+    clickWithMouse(startBoxLine('About', clickWithMouse))
+
+    const settings = screen.getByRole('dialog', { name: 'Settings' })
+    const chosen = within(settings).getByRole('tab', { selected: true })
+    expect(chosen.textContent).toBe('About')
+    expect(within(settings).getByText(/^Piano sound:/)).toBeTruthy()
+    expect(openStartBox()).toBeNull()
+  })
+
+  // The Menu button is the way in to Settings, through the start box, so it
+  // is where the focus goes when the control that has it leaves the page.
   it.each(['Close Settings', 'Reset to default keys'])(
-    'hands the keyboard focus back to the "Settings" button when it closes while "%s" has it',
+    'hands the keyboard focus to the Menu button when it closes while "%s" has it',
     (name) => {
       startApp()
       const settings = openSettingsWithKeyboardOn('Keys')
@@ -560,7 +688,9 @@ describe('Settings, in the app', () => {
       else tap('Escape')
 
       expect(settingsPanel()).toBeNull()
-      expect(focused()).toBe(button('Settings'))
+      expect(focused()).toBe(button('Menu'))
+      // Only Settings was closed: the start box does not come back with the focus.
+      expect(openStartBox()).toBeNull()
     },
   )
 
@@ -569,12 +699,12 @@ describe('Settings, in the app', () => {
     // Opened with the mouse, which leaves the keyboard to the piano.
     const settings = openSettingsOn('Keys')
     expect(settings.contains(focused())).toBe(false)
-    const focusSettingsButton = vi.spyOn(button('Settings'), 'focus')
+    const focusMenuButton = vi.spyOn(button('Menu'), 'focus')
 
     tap('Escape')
 
     expect(settingsPanel()).toBeNull()
-    expect(focusSettingsButton).not.toHaveBeenCalled()
+    expect(focusMenuButton).not.toHaveBeenCalled()
     expect(focused()).toBe(document.body)
   })
 })

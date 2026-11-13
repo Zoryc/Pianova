@@ -12,27 +12,35 @@ import { settingsStore, useSettings } from './state/settings'
 import type { Settings } from './state/settings'
 import { DropOverlay } from './ui/DropOverlay'
 import { PlayerLine, SongProgressLine } from './ui/PlayerLine'
-import { SettingsPanel } from './ui/SettingsPanel'
+import { SettingsPanel, openSettingsOn } from './ui/SettingsPanel'
 import { SongsPanel } from './ui/SongsPanel'
 import { Stage } from './ui/Stage'
-import { StartOverlay } from './ui/StartOverlay'
+import { StartBox } from './ui/StartBox'
 import { TopBar } from './ui/TopBar'
-import type { PanelName } from './ui/TopBar'
 import { useAudioStatus, useKeyboardPiano, useNoStuckNotes, useSoundSettings } from './ui/hooks'
 import { isFunctionKey } from './ui/keyEditorModel'
 import { useAutoHide } from './ui/useAutoHide'
 import { useKeyEditor } from './ui/useKeyEditor'
-import { closeSongOptions, useSongOptionsOpen, useSongSession } from './ui/useSongs'
+import { closeSongOptions, playSong, useSongOptionsOpen, useSongSession } from './ui/useSongs'
+
+/** The two panels that open from the start box. Only one is open at a time. */
+type PanelName = 'songs' | 'settings'
 
 /** No key letters on the falling notes: what the sky gets while that setting is off. */
 const NO_HINTS: ReadonlyMap<Midi, string> = new Map()
 
+/** What the stage is called: the only way of playing that is built so far. */
+const STAGE_NAME = 'Free Play'
+
 /**
  * The whole screen: the stage (the sky and the piano) fills the window, and
- * everything else floats over it. The menu at the top (the top bar, with the
- * player line under it while a song is loaded) hides when the mouse is still.
- * The Settings and Songs panels open from it, one at a time. Until the first
- * click or key press, the start overlay covers it all.
+ * everything else floats over it. The menu at the top (the Menu button, the
+ * player line while a song is loaded, volume and sustain) hides when the
+ * mouse is still. The start box, a small menu in the middle of the sky, is
+ * open when the app opens and whenever the Menu button says so; the Settings
+ * and Songs panels open from it. Of the box and the two panels only one is
+ * open at a time. Until the first click or key press the app waits: the
+ * whole window around the start box then starts it.
  *
  * How these share the window is explained at the top of src/styles/app.css.
  */
@@ -43,10 +51,19 @@ export function App(): JSX.Element {
   const keyEditor = useKeyEditor(layoutMap)
   const { editing, selectedSlot } = keyEditor
   /**
-   * False while the start overlay is up: until the first click or key press,
+   * False while the app waits to start: until the first click or key press,
    * which is what lets the browser play sound, or until a file is dropped.
    */
   const [started, setStarted] = useState(false)
+  /** The start box is what the app opens with. */
+  const [startBoxOpen, setStartBoxOpen] = useState(true)
+  /**
+   * Where the start box is drawn: over the whole window, which is how the app
+   * opens, until it is closed for the first time; among the panels after
+   * that. (It does not move when the app starts under it: "Full screen"
+   * starts the app and leaves the box open, with the focus where it was.)
+   */
+  const [startBoxOverWindow, setStartBoxOverWindow] = useState(true)
   const [openPanel, setOpenPanel] = useState<PanelName | null>(null)
   /** The piano on screen, as the stage last reported it. A full piano until it has. */
   const [range, setRange] = useState<PianoRange>(() => pianoRange(88, settings.baseOctave))
@@ -54,15 +71,19 @@ export function App(): JSX.Element {
   const songOptionsOpen = useSongOptionsOpen()
   const menu = useAutoHide({
     enabled: settings.autoHideMenu,
-    pinned: !started || openPanel !== null || (song.loaded && !song.playing),
+    pinned: !started || startBoxOpen || openPanel !== null || (song.loaded && !song.playing),
   })
 
-  const modeTabId = useId()
   const stageId = useId()
+  const startBoxId = useId()
   const songsPanelId = useId()
   const settingsPanelId = useId()
-  const songsButton = useRef<HTMLButtonElement>(null)
-  const settingsButton = useRef<HTMLButtonElement>(null)
+  /** The Menu button: what opens the start box, and through it both panels. */
+  const startBoxButton = useRef<HTMLButtonElement>(null)
+  /** True as soon as the app has been started, before the screen is drawn again. */
+  const hasStarted = useRef(false)
+  /** What had the keyboard focus when Enter last went down as a new press. */
+  const enterWentDownOn = useRef<Element | null>(null)
   /** True when the last click was Enter on a focused control, not the mouse. */
   const clickedWithKeyboard = useRef(false)
 
@@ -82,39 +103,83 @@ export function App(): JSX.Element {
   )
 
   function start(): void {
+    // One click can say "start" twice (a line of the start box closes the
+    // box, which starts the app, and the click itself starts it too): the
+    // sound is asked for once.
+    if (hasStarted.current) return
+    hasStarted.current = true
     setStarted(true)
     wakeAudio()
   }
 
-  function togglePanel(panel: PanelName): void {
-    setOpenPanel(openPanel === panel ? null : panel)
+  /**
+   * When a line of `container` (the start box or a panel) has the keyboard
+   * focus, puts the focus on the Menu button instead: the line is about to
+   * leave the page, and someone working with the keyboard keeps their place.
+   * (After a click with the mouse, `handleClick` lets go of the button again.
+   * A box or panel that holds the focus itself was only ever used with the
+   * mouse, and leaves the focus nowhere.)
+   */
+  function keepFocusOnMenuButton(container: HTMLElement | null): void {
+    if (isOnALineOf(container)) startBoxButton.current?.focus()
+  }
+
+  /**
+   * Takes the start box away. While the app waits to start, that is the
+   * click that starts it: on the window around the box, or on one of its lines.
+   */
+  function closeStartBox(): void {
+    if (!started) start()
+    if (!startBoxOpen) return
+    keepFocusOnMenuButton(document.getElementById(startBoxId))
+    setStartBoxOpen(false)
+    setStartBoxOverWindow(false)
+  }
+
+  /** The Menu button: opens the start box, in place of a panel that is open, and closes it. */
+  function toggleStartBox(): void {
+    if (startBoxOpen) {
+      closeStartBox()
+      return
+    }
+    setOpenPanel(null)
+    setStartBoxOpen(true)
+  }
+
+  /** A line of the start box that opens a panel: the panel takes the place of the box. */
+  function showPanel(panel: PanelName): void {
+    closeStartBox()
+    setOpenPanel(panel)
+  }
+
+  /** A song of the start box: it plays, and the box goes away so that the piano is in view. */
+  function playFromStartBox(songId: string): void {
+    closeStartBox()
+    // A song that cannot be read is not played: the Songs panel says why.
+    if (!playSong(songId)) setOpenPanel('songs')
   }
 
   /**
    * Closes the open panel. A control inside it that has the keyboard focus
-   * goes away with it, so the focus is first put on the button that opens the
-   * panel: someone working with the keyboard keeps their place. (After a
-   * click with the mouse, `handleClick` lets go of that button again. A panel
-   * that holds the focus itself was only ever used with the mouse, and leaves
-   * the focus nowhere.)
+   * goes away with it, so the focus is first put on the Menu button, which
+   * the panel was opened through.
    */
   function closePanel(): void {
     if (openPanel === null) return
     const isSongs = openPanel === 'songs'
-    const panel = document.getElementById(isSongs ? songsPanelId : settingsPanelId)
-    if (holdsFocus(panel) && document.activeElement !== panel) {
-      const opener = isSongs ? songsButton : settingsButton
-      opener.current?.focus()
-    }
+    keepFocusOnMenuButton(document.getElementById(isSongs ? songsPanelId : settingsPanelId))
     setOpenPanel(null)
   }
 
   /** A file was dropped on the page: the Songs panel shows what became of it. */
   function showDroppedSongs(): void {
-    // A drop before the first click starts the app too, or the panel would
-    // open behind the start overlay. The sound still waits for a click or a
-    // key press, as the browser wants.
+    // A drop before the first click starts the app too, and takes the start
+    // box away, or the panel would open behind it. The sound still waits for
+    // a click or a key press, as the browser wants.
+    hasStarted.current = true
     setStarted(true)
+    setStartBoxOpen(false)
+    setStartBoxOverWindow(false)
     setOpenPanel('songs')
   }
 
@@ -123,15 +188,37 @@ export function App(): JSX.Element {
     // Browser shortcuts (Ctrl+R, Alt+Tab…) and typing in a field are never the piano's business.
     if (event.ctrlKey || event.altKey || event.metaKey) return false
     if (isTextEntryTarget(event.target)) return false
+    if (isEnter(event.code) && !event.repeat) enterWentDownOn.current = document.activeElement
 
     if (!started) {
-      start()
+      // The start box can be used with the keyboard before anything else:
+      // Tab moves through its lines (and Shift, which goes down before Tab
+      // on the way back, starts nothing either), and Enter presses the line
+      // it is on, which starts the app as a click on it does.
+      if (event.code === 'Tab' || isShift(event.code)) return false
+      if (isEnter(event.code) && isOnALineOf(document.getElementById(startBoxId))) return false
+      closeStartBox()
       // The key that starts the sound does nothing else. Function keys are
       // left to the browser (F5 still reloads the page).
       return !isFunctionKey(event.code)
     }
     wakeAudio()
     if (event.code === 'Escape') return pressEscape(event)
+    // A held Enter sends the press again and again. It goes on pressing what
+    // it went down on, and never what the focus has moved to since: the first
+    // control of a panel that the press opened ("Import a MIDI file" would
+    // open the file picker). On the Menu button and on a line of the start
+    // box it counts once: the box would open and close in turn.
+    if (event.repeat && isEnter(event.code)) {
+      if (document.activeElement !== enterWentDownOn.current) return true
+      if (isOnStartBoxOrItsButton()) return true
+    }
+    // A key of the piano takes the start box away and plays its note: the
+    // keyboard is the piano's as soon as it is played. A key that was already
+    // down when the box was opened is not played again, and leaves it open.
+    if (startBoxOpen && !event.repeat && Object.hasOwn(settings.bindings, event.code)) {
+      closeStartBox()
+    }
     return keyEditor.handleKey(event)
   }
 
@@ -140,7 +227,7 @@ export function App(): JSX.Element {
    *
    *   1. the piano key that is waiting for a computer key;
    *   2. the song options that are open under the player line;
-   *   3. the open panel;
+   *   3. the open panel, or the start box;
    *   4. the keyboard focus, when it is inside the menu: the menu can then hide.
    *
    * With none of them, the key is left to the browser.
@@ -151,13 +238,25 @@ export function App(): JSX.Element {
     // A key that is held down sends the press again and again. Escape has
     // then done its one thing: the repeats take nothing more back. They are
     // still used up while something is left that a new press would take back.
-    if (event.repeat) return songOptionsOpen || openPanel !== null || holdsFocus(menuElement())
+    if (event.repeat) {
+      return songOptionsOpen || openPanel !== null || startBoxOpen || holdsFocus(menuElement())
+    }
     if (closeSongOptions()) return true
     if (openPanel !== null) {
       closePanel()
       return true
     }
+    if (startBoxOpen) {
+      closeStartBox()
+      return true
+    }
     return letGoOfMenu()
+  }
+
+  /** True when the keyboard focus is on the Menu button or on a line of the start box. */
+  function isOnStartBoxOrItsButton(): boolean {
+    const focused = document.activeElement
+    return focused === startBoxButton.current || isOnALineOf(document.getElementById(startBoxId))
   }
 
   function menuElement(): HTMLElement | null {
@@ -173,8 +272,12 @@ export function App(): JSX.Element {
   }
 
   function handleClick(event: ReactMouseEvent): void {
-    // The click that starts the app has asked for the sound already (see `start`).
+    // The click that starts the app has asked for the sound already (see
+    // `start`). A click anywhere on the start box starts it too, not only on
+    // the window around it: on the very words that say "click", and on "Full
+    // screen", which has no other way to say so.
     if (started) wakeAudio()
+    else if (isInside(document.getElementById(startBoxId), event.target)) start()
     clickedWithKeyboard.current = isKeyboardClick(event)
     giveKeyboardBackToPiano(event)
   }
@@ -185,18 +288,35 @@ export function App(): JSX.Element {
 
   // The piano's keys can hold the keyboard focus only while the computer keys
   // are being chosen, where they are reached with Tab. When that ends while
-  // one of them has it, the focus goes to the "Settings" button instead of
-  // being lost: someone working with the keyboard alone keeps their place.
+  // one of them has it, the focus goes to the Menu button instead of being
+  // lost: someone working with the keyboard alone keeps their place.
   useEffect(() => {
-    if (!editing && holdsFocus(document.getElementById(stageId))) settingsButton.current?.focus()
+    if (!editing && holdsFocus(document.getElementById(stageId))) startBoxButton.current?.focus()
   }, [editing, stageId])
 
   // The same when the player line goes away under the focus: "Close", pressed with Enter.
   useEffect(() => {
     if (!song.loaded && clickedWithKeyboard.current && focusIsNowhere()) {
-      songsButton.current?.focus()
+      startBoxButton.current?.focus()
     }
   }, [song.loaded])
+
+  const startBox = startBoxOpen && (
+    <StartBox
+      id={startBoxId}
+      overWindow={startBoxOverWindow}
+      waitingToStart={!started}
+      opener={startBoxButton}
+      onClose={closeStartBox}
+      onPlaySong={playFromStartBox}
+      onShowSongs={() => showPanel('songs')}
+      onShowSettings={() => showPanel('settings')}
+      onShowAbout={() => {
+        openSettingsOn('about')
+        showPanel('settings')
+      }}
+    />
+  )
 
   return (
     <div
@@ -207,21 +327,17 @@ export function App(): JSX.Element {
       <div className="app__screen" inert={!started}>
         <TopBar
           settings={settings}
-          openPanel={openPanel}
-          songsPanelId={songsPanelId}
-          settingsPanelId={settingsPanelId}
-          onToggleSongs={() => togglePanel('songs')}
-          onToggleSettings={() => togglePanel('settings')}
+          startBoxOpen={startBoxOpen}
+          startBoxId={startBoxId}
+          onToggleStartBox={toggleStartBox}
           menu={menu}
-          modeTabId={modeTabId}
-          modePanelId={stageId}
-          songsButtonRef={songsButton}
-          settingsButtonRef={settingsButton}
+          startBoxButtonRef={startBoxButton}
         >
           <PlayerLine />
         </TopBar>
 
         <div className="app__panels">
+          {!startBoxOverWindow && startBox}
           {openPanel === 'songs' && <SongsPanel id={songsPanelId} onClose={closePanel} />}
           {openPanel === 'settings' && (
             <SettingsPanel
@@ -236,14 +352,14 @@ export function App(): JSX.Element {
 
         <Stage
           id={stageId}
-          labelledBy={modeTabId}
+          label={STAGE_NAME}
           bus={bus}
           settings={settings}
           keyLabels={keyLabels}
           hints={hints}
           falling={song.falling}
           audioStatus={audioStatus}
-          showHint={started && !editing}
+          showHint={started && !editing && !startBoxOpen}
           editMode={editing}
           selectedSlot={selectedSlot}
           onSelectSlot={keyEditor.select}
@@ -256,7 +372,8 @@ export function App(): JSX.Element {
         <SongProgressLine />
       </div>
 
-      {!started && <StartOverlay onStart={start} />}
+      {/* Until the first click the screen above cannot be used: the start box is put over it. */}
+      {startBoxOverWindow && startBox}
       <DropOverlay onFilesDropped={showDroppedSongs} />
     </div>
   )
@@ -307,6 +424,35 @@ function giveKeyboardBackToPiano(event: ReactMouseEvent): void {
 /** True when the keyboard focus is on something inside `container`. */
 function holdsFocus(container: HTMLElement | null): boolean {
   return container !== null && container.contains(document.activeElement)
+}
+
+/**
+ * True when the keyboard focus is on one of the controls of `container`: not
+ * on the container itself, and not on a part of it that only scrolls, which
+ * a click between two lines gives the focus to.
+ */
+function isOnALineOf(container: HTMLElement | null): boolean {
+  const focused = document.activeElement
+  if (container === null || !(focused instanceof HTMLElement)) return false
+  return focused !== container && container.contains(focused) && focused.matches(CONTROL)
+}
+
+/** What counts as a control: something to press, move or type in. Not a part that only scrolls. */
+const CONTROL = 'a[href], button, input, select, textarea'
+
+/** True when what was clicked is `container` or something in it. */
+function isInside(container: HTMLElement | null, clicked: EventTarget): boolean {
+  return container !== null && clicked instanceof Node && container.contains(clicked)
+}
+
+/** One of the two Shift keys. */
+function isShift(code: string): boolean {
+  return code === 'ShiftLeft' || code === 'ShiftRight'
+}
+
+/** Enter, on the main block of keys or on the number pad. */
+function isEnter(code: string): boolean {
+  return code === 'Enter' || code === 'NumpadEnter'
 }
 
 /** True when no control has the keyboard focus: the one that had it has left the page. */

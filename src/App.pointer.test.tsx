@@ -184,13 +184,22 @@ function settingsPanel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
 }
 
+/** The start box: the small menu that the Menu button opens. Null while it is closed. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
 /**
- * Opens Settings with the mouse, on one of its tabs. (The panel remembers its
- * last tab from one test to the next.) The Keys tab is where the computer keys
- * are chosen: while it shows, a click on a piano key selects it.
+ * Opens Settings with the mouse (the Menu button, then "Settings" in the
+ * start box), on one of its tabs. (The panel remembers its last tab from one
+ * test to the next.) The Keys tab is where the computer keys are chosen:
+ * while it shows, a click on a piano key selects it.
  */
 async function openSettingsOn(user: User, tab: string): Promise<HTMLElement> {
-  if (!settingsPanel()) await user.click(button('Settings'))
+  if (!settingsPanel()) {
+    if (!startBox()) await user.click(button('Menu'))
+    await user.click(button('Settings'))
+  }
   const panel = screen.getByRole('dialog', { name: 'Settings' })
   await user.click(within(panel).getByRole('tab', { name: tab }))
   return panel
@@ -456,6 +465,24 @@ describe('playing the on-screen piano', () => {
     expect(bars()).toHaveLength(0)
     expect(browser.frames.pending.size).toBe(0)
   })
+
+  it('closes the start box when the mouse presses a piano key, and plays the key', async () => {
+    const user = await startApp()
+    await user.click(button('Menu'))
+    expect(startBox()).not.toBeNull()
+    const mouse = theMouse()
+
+    // The piano is outside the box: the press closes it, and is a note as well.
+    mouse.down(C4)
+    expect(startBox()).toBeNull()
+    expect(busEvents).toEqual(['on 60 pointer'])
+    expect(litSlots()).toEqual([String(C4)])
+
+    mouse.up(C4)
+    expect(busEvents).toEqual(['on 60 pointer', 'off 60 pointer'])
+    expect(held()).toEqual([])
+    expect(startBox()).toBeNull()
+  })
 })
 
 describe('no stuck notes: the mouse is holding a key when…', () => {
@@ -575,9 +602,16 @@ describe('no stuck notes: the mouse is holding a key when…', () => {
     mouse.down(C4)
     expect(held()).toEqual([60])
 
-    // The other hand, on the keyboard: Enter on the "Settings" button.
+    // The other hand, on the keyboard: Enter on the Menu button, which opens
+    // the start box and changes nothing for the note…
+    button('Menu').focus()
+    await user.keyboard('[Enter]')
+    expect(startBox()).not.toBeNull()
+    expect(held()).toEqual([60])
+    // …then Enter on "Settings" in the box.
     button('Settings').focus()
     await user.keyboard('[Enter]')
+    expect(settingsPanel()).not.toBeNull()
     expect(isChoosingKeys()).toBe(true)
     expect(held()).toEqual([])
     expect(audio.state.calls).toEqual(['on 60 0.8', 'off 60'])
@@ -749,8 +783,16 @@ describe('choosing the computer keys on the piano', () => {
 
   it('selects a key with Tab and Enter, assigns the next key press, and never touches sustain', async () => {
     const user = await startApp()
-    // Settings, opened and brought to its Keys tab with the keyboard alone.
-    button('Settings').focus()
+    // Settings, opened and brought to its Keys tab with the keyboard alone:
+    // Enter on the Menu button, Tab down the start box to "Settings", Enter.
+    button('Menu').focus()
+    await user.keyboard('[Enter]')
+    expect(startBox()?.contains(document.activeElement)).toBe(true)
+    let steps = 0
+    while (document.activeElement !== button('Settings')) {
+      await user.tab()
+      if (++steps > 10) throw new Error('Tab never reached "Settings" in the start box')
+    }
     await user.keyboard('[Enter]')
     const settings = screen.getByRole('dialog', { name: 'Settings' })
     await user.keyboard('[Home][ArrowRight]')
@@ -790,14 +832,14 @@ describe('choosing the computer keys on the piano', () => {
 
     // The new key plays straight away, and Escape closes Settings, which ends
     // the choosing: the piano keys are Tab stops no longer, and the keyboard
-    // focus is not left on one of them.
+    // focus is not left on one of them. It goes to the Menu button.
     await user.keyboard('[KeyQ]')
     expect(busEvents).toEqual(['on 51 keyboard', 'off 51 keyboard'])
     await user.keyboard('[Escape]')
     expect(settingsPanel()).toBeNull()
     expect(isChoosingKeys()).toBe(false)
     expect(piano().contains(document.activeElement)).toBe(false)
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(document.activeElement).toBe(button('Menu'))
     expect(piano().querySelectorAll('.piano-key[tabindex="0"]')).toHaveLength(0)
   })
 

@@ -149,8 +149,14 @@ function button(name: string | RegExp): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/** Opens the start box with the Menu button and clicks one of its lines. */
+function clickInMenu(line: string): void {
+  clickWithMouse(button('Menu'))
+  clickWithMouse(button(line))
+}
+
 function openSettingsOn(tab: string): HTMLElement {
-  if (!screen.queryByRole('dialog', { name: 'Settings' })) clickWithMouse(button('Settings'))
+  if (!screen.queryByRole('dialog', { name: 'Settings' })) clickInMenu('Settings')
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   clickWithMouse(within(settings).getByRole('tab', { name: tab }))
   return settings
@@ -384,7 +390,7 @@ describe('a song and the piano on screen', () => {
     startApp()
     expect(pianoOnScreen()).toEqual({ first: 48, last: 84 })
 
-    clickWithMouse(button('Songs'))
+    clickInMenu('All songs…')
     clickWithMouse(button('Play Low'))
     expect(settingsStore.get().baseOctave).toBe(1)
     expect(pianoOnScreen()).toEqual({ first: 24, last: 60 })
@@ -417,7 +423,7 @@ describe('a song and the piano on screen', () => {
     await addSong('Low.mid', { notes: [36, 38, 40, 41] })
     stageWidth = 700
     startApp()
-    clickWithMouse(button('Songs'))
+    clickInMenu('All songs…')
     clickWithMouse(button('Play Low'))
     expect(pianoOnScreen()).toEqual({ first: 24, last: 60 })
 
@@ -432,7 +438,7 @@ describe('a song and the piano on screen', () => {
     key('keyup', 'KeyA')
 
     // Moved by the player while the song was loaded: the keys stay where the player put them.
-    clickWithMouse(button('Songs'))
+    clickInMenu('All songs…')
     clickWithMouse(button('Play Low'))
     const settings = openSettingsOn('Keys')
     clickWithMouse(within(settings).getByRole('button', { name: /Higher/ }))

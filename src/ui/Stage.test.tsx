@@ -91,7 +91,7 @@ const HOME_ROW_LABELS: ReadonlyMap<number, string> = new Map([
 function stageProps(overrides: Partial<StageProps> = {}): StageProps {
   return {
     id: 'the-stage',
-    labelledBy: 'free-play-tab',
+    label: 'Free Play',
     bus: new NoteBus(),
     settings: DEFAULT_SETTINGS,
     keyLabels: HOME_ROW_LABELS,
@@ -317,7 +317,7 @@ describe('the sky and the piano', () => {
 
   it('puts the canvas, then the light line, in the sky, and the piano after the sky', () => {
     drawStage()
-    const stage = screen.getByRole('tabpanel')
+    const stage = screen.getByRole('region', { name: 'Free Play' })
     const [skyBox, pianoBox] = [...stage.children]
     expect(stage.children).toHaveLength(2)
     expect(skyBox?.className).toBe('stage__sky')
@@ -328,19 +328,24 @@ describe('the sky and the piano', () => {
     expect(pianoBox?.firstElementChild).toBe(screen.getByRole('group', { name: 'Piano' }))
   })
 
-  it('is the page of the tab it is named by', () => {
-    drawStage()
-    const stage = screen.getByRole('tabpanel')
+  it('is a region of the page, called by the way of playing it is given', () => {
+    const { redraw } = drawStage()
+    const stage = screen.getByRole('region')
     expect(stage.id).toBe('the-stage')
-    expect(stage.getAttribute('aria-labelledby')).toBe('free-play-tab')
+    expect(stage.getAttribute('aria-label')).toBe('Free Play')
+    // The name is written on the stage itself, not borrowed from another part of the page.
+    expect(stage.hasAttribute('aria-labelledby')).toBe(false)
+
+    redraw({ label: 'Practice' })
+    expect(screen.getByRole('region', { name: 'Practice' })).toBe(stage)
   })
 
   it('lets the sky start below a menu that is always shown', () => {
     const { redraw } = drawStage()
-    expect(screen.getByRole('tabpanel').className).toBe('stage')
+    expect(screen.getByRole('region').className).toBe('stage')
 
     redraw({ settings: withSettings({ autoHideMenu: false }) })
-    expect(screen.getByRole('tabpanel').className).toBe('stage stage--below-menu')
+    expect(screen.getByRole('region').className).toBe('stage stage--below-menu')
   })
 })
 

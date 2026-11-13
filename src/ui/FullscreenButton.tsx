@@ -2,15 +2,31 @@ import { useSyncExternalStore } from 'react'
 import type { JSX } from 'react'
 import './chrome.css'
 
+interface FullscreenButtonProps {
+  /**
+   * Drawn as a line of a list, with its name written out next to the icon,
+   * and given this class. Without it: a round button with the icon alone.
+   */
+  rowClassName?: string
+}
+
 /**
  * Makes the app fill the whole screen, without the browser around it, and
  * puts it back. Not drawn at all where the browser cannot do that.
  */
-export function FullscreenButton(): JSX.Element | null {
+export function FullscreenButton({ rowClassName }: FullscreenButtonProps = {}): JSX.Element | null {
   const fullscreen = useSyncExternalStore(followFullscreen, isFullscreen, notOnAPage)
   if (!canGoFullscreen()) return null
 
   const name = fullscreen ? 'Leave full screen' : 'Full screen'
+  if (rowClassName !== undefined) {
+    return (
+      <button type="button" className={rowClassName} onClick={toggleFullscreen}>
+        {fullscreen ? <LeaveIcon /> : <EnterIcon />}
+        {name}
+      </button>
+    )
+  }
   return (
     <button
       type="button"

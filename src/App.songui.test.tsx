@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 /**
- * Songs in the whole app (src/App.tsx with the Songs panel, the player line,
- * the drop overlay and the song glue behind them): what a player can do to a
- * song while everything else on the screen is there too, in any order.
+ * Songs in the whole app (src/App.tsx with the start box, the Songs panel, the
+ * player line, the drop overlay and the song glue behind them): what a player
+ * can do to a song while everything else on the screen is there too, in any
+ * order.
  *
  * The sound engine and the sky are replaced by stand-ins; each has tests of
  * its own. There is no layout here.
@@ -78,7 +79,7 @@ import { STARTER_SONGS } from './songs/starterSongs'
 import { settingsStore } from './state/settings'
 import { addSong, midiBytes, resetSongs, songFile } from './ui/songsTestKit'
 import { AUTO_HIDE_DELAY_MS } from './ui/useAutoHide'
-import { LEAD_IN_SECONDS, playSong } from './ui/useSongs'
+import { LEAD_IN_SECONDS, UNREADABLE_SONG_MESSAGE, playSong } from './ui/useSongs'
 
 const START_TEXT = 'Click or press any key to start'
 const TWINKLE = 'starter:twinkle-twinkle-little-star'
@@ -139,7 +140,7 @@ function pressEnterOn(target: HTMLElement): void {
   fireEvent.click(target, { detail: 0 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it with a key press: the start box it opens with goes away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -161,8 +162,25 @@ function panel(name: 'Settings' | 'Songs'): HTMLElement | null {
   return screen.queryByRole('dialog', { name })
 }
 
+/** The start box: the small menu the app opens with, and that the Menu button opens again. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** Opens the start box with a click on "Menu", if it is not open. */
+function openStartBox(): HTMLElement {
+  if (!startBox()) clickWithMouse(button('Menu'))
+  return screen.getByRole('dialog', { name: 'Menu' })
+}
+
+/** The line of the start box that opens each panel. */
+const LINE_OF_PANEL = { Settings: 'Settings', Songs: 'All songs…' } as const
+
+/** Opens a panel with the mouse, if it is not open: "Menu", then its line of the start box. */
 function openPanel(name: 'Settings' | 'Songs'): HTMLElement {
-  if (!panel(name)) clickWithMouse(button(name))
+  if (!panel(name)) {
+    clickWithMouse(within(openStartBox()).getByRole('button', { name: LINE_OF_PANEL[name] }))
+  }
   return screen.getByRole('dialog', { name })
 }
 
@@ -251,8 +269,9 @@ describe('files dropped on the page', () => {
     await dropFiles(songFile('Early.mid'))
     await screen.findByText('"Early" was added.')
 
-    // The drop took the start overlay away: the Songs panel is there to say how it went.
+    // The drop took the start box away: the Songs panel is there to say how it went.
     expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
     expect(document.querySelector('.app__screen')?.hasAttribute('inert')).toBe(false)
     expect(panel('Songs')).not.toBeNull()
     expect(messageLine().textContent).toBe('"Early" was added.')
@@ -286,6 +305,18 @@ describe('files dropped on the page', () => {
     key('keydown', 'KeyA')
     expect(heldNotes()).toEqual([60])
     key('keyup', 'KeyA')
+  })
+
+  it('open Songs in place of the start box that the Menu button opened', async () => {
+    startApp()
+    openStartBox()
+
+    await dropFiles(songFile('Dropped.mid'))
+    await screen.findByText('"Dropped" was added.')
+
+    expect(startBox()).toBeNull()
+    expect(panel('Songs')).not.toBeNull()
+    expect(messageLine().textContent).toBe('"Dropped" was added.')
   })
 
   it('do not interrupt the song that is playing, and the menu stays for the panel', async () => {
@@ -461,6 +492,95 @@ describe('a song started from the list', () => {
   })
 })
 
+/*
+ * The start box offers a few songs itself: the player's own, the newest
+ * first, and then the starter songs, three in all. The others are behind its
+ * "All songs…" line, in the Songs panel.
+ */
+describe('a song started from the start box', () => {
+  it('plays, and the box goes away so that the piano is in view', () => {
+    vi.useFakeTimers()
+    startApp()
+    const box = openStartBox()
+    clickWithMouse(within(box).getByRole('button', { name: /^Play Twinkle/ }))
+
+    expect(startBox()).toBeNull()
+    expect(panel('Songs')).toBeNull()
+    expect(player.getState()).toMatchObject({ status: 'playing', songId: TWINKLE })
+    const line = playerLine() as HTMLElement
+    expect(within(line).getByText('Twinkle, Twinkle, Little Star')).toBeTruthy()
+    expect(menu().contains(line)).toBe(true)
+
+    // Like a song from the list: its first note is seen falling, then it sounds.
+    wait(LEAD_IN_MS - 100)
+    expect(heldNotes()).toEqual([])
+    wait(200)
+    expect(heldNotes()).toEqual([60])
+    expect(litKeys()).toEqual([60])
+  })
+
+  it('is started by the very click that starts the app, while the app waits to start', () => {
+    render(<App />)
+    expect(screen.getByText(START_TEXT)).toBeTruthy()
+    const box = screen.getByRole('dialog', { name: 'Menu' })
+    clickWithMouse(within(box).getByRole('button', { name: /^Play Mary/ }))
+
+    expect(startBox()).toBeNull()
+    expect(document.querySelector('.app__screen')?.hasAttribute('inert')).toBe(false)
+    // A click is what the browser waits for before it plays sound.
+    expect(audio.state.status).toBe('ready')
+    expect(player.getState()).toMatchObject({ status: 'playing', songId: MARY })
+    expect(within(playerLine() as HTMLElement).getByText('Mary Had a Little Lamb')).toBeTruthy()
+  })
+
+  it('is one of three: the songs of the player, newest first, then the starter songs', async () => {
+    await addSong('First of mine.mid')
+    await addSong('Second of mine.mid')
+    startApp()
+    const box = openStartBox()
+    const lines = within(box).getAllByRole('button', { name: /^Play / })
+    expect(lines.map((line) => line.getAttribute('aria-label'))).toEqual([
+      'Play Second of mine',
+      'Play First of mine',
+      'Play Twinkle, Twinkle, Little Star',
+    ])
+
+    clickWithMouse(lines[1] as HTMLElement)
+    expect(startBox()).toBeNull()
+    expect(player.getState()).toMatchObject({ status: 'playing', title: 'First of mine' })
+  })
+
+  it('opens the Songs panel, which says why, when its saved notes are gone', async () => {
+    const song = await addSong('Lost.mid')
+    window.localStorage.removeItem(`pianoapp.song.v1.${song.id}`)
+    // The library may still have the notes at hand from adding the song. Reading
+    // another song makes it let go of them: from here on they are really gone.
+    const other = await addSong('Other.mid')
+    expect(songLibrary.get(other.id)).not.toBeNull()
+    expect(songLibrary.get(song.id)).toBeNull()
+    startApp()
+
+    clickWithMouse(within(openStartBox()).getByRole('button', { name: 'Play Lost' }))
+    expect(startBox()).toBeNull()
+    expect(player.getState().status).toBe('empty')
+    expect(playerLine()).toBeNull()
+    expect(panel('Songs')).not.toBeNull()
+    expect(messageLine().textContent).toBe(UNREADABLE_SONG_MESSAGE)
+  })
+
+  it('keeps playing when the start box is opened again and "Free Play" closes it', () => {
+    startApp()
+    playFromList(/^Play Twinkle/)
+    const box = openStartBox()
+    expect(player.getState().status).toBe('playing')
+
+    clickWithMouse(within(box).getByRole('button', { name: /^Free Play/ }))
+    expect(startBox()).toBeNull()
+    expect(player.getState()).toMatchObject({ status: 'playing', songId: TWINKLE })
+    expect(playerLine()).not.toBeNull()
+  })
+})
+
 describe('the two seconds before the first note of a song', () => {
   it('show the note falling before it sounds: no key is lit and nothing is heard until then', () => {
     vi.useFakeTimers()
@@ -581,7 +701,7 @@ describe('the computer keyboard while a song plays', () => {
     const badge = screen.getByText('Sustain on')
     expect(badge.className).toBe('stage__badge')
     expect(menu().contains(badge)).toBe(false)
-    expect(screen.getByRole('tabpanel').contains(badge)).toBe(true)
+    expect(screen.getByRole('region', { name: 'Free Play' }).contains(badge)).toBe(true)
     expect(menuIsHidden()).toBe(true)
     expect(player.getState().status).toBe('playing')
 
@@ -634,8 +754,9 @@ describe('the computer keyboard while a song plays', () => {
 
 /*
  * Escape takes back one thing at a time, in this order: the piano key that is
- * waiting for a computer key, the open song options, the open panel, the
- * keyboard focus in the menu. With none of them it is the browser's key.
+ * waiting for a computer key, the open song options, the open panel or the
+ * open start box, the keyboard focus in the menu. With none of them it is the
+ * browser's key.
  */
 describe('Escape, with a song in the player', () => {
   function escape(init: KeyboardEventInit = {}): KeyboardEvent {
@@ -685,6 +806,28 @@ describe('Escape, with a song in the player', () => {
     escape()
     expect(panel('Songs')).toBeNull()
     expect(player.getState().status).toBe('playing')
+  })
+
+  it('closes the song options first and the start box at the next press', () => {
+    startApp()
+    act(() => {
+      playSong(TWINKLE)
+    })
+    // With the keyboard alone both can be open at once: Enter on "Menu", then
+    // Enter on "Song options". (A press of the mouse there would close the box.)
+    pressEnterOn(button('Menu'))
+    pressEnterOn(button('Song options'))
+    expect(startBox()).not.toBeNull()
+    expect(songOptions()).not.toBeNull()
+
+    expect(escape().defaultPrevented).toBe(true)
+    expect(songOptions()).toBeNull()
+    expect(startBox()).not.toBeNull()
+
+    expect(escape().defaultPrevented).toBe(true)
+    expect(startBox()).toBeNull()
+    expect(player.getState().status).toBe('playing')
+    expect(playerLine()).not.toBeNull()
   })
 
   it('does one thing only while it is held down', () => {
@@ -1048,17 +1191,23 @@ describe('nothing is left playing or lit', () => {
 })
 
 describe('someone with the keyboard alone', () => {
-  it('goes from "Songs" through the list to a playing song, and on to its player line', () => {
+  it('goes from "Menu" by way of "All songs…" to a playing song, and on to its player line', () => {
     startApp()
-    pressEnterOn(button('Songs'))
+    pressEnterOn(button('Menu'))
+    const box = screen.getByRole('dialog', { name: 'Menu' })
+    // The focus is on the first line of the start box.
+    expect(document.activeElement).toBe(within(box).getByRole('button', { name: /^Free Play/ }))
+
+    pressEnterOn(within(box).getByRole('button', { name: 'All songs…' }))
+    expect(startBox()).toBeNull()
     const songs = screen.getByRole('dialog', { name: 'Songs' })
     // The focus is on the first thing to do in the panel.
     expect(document.activeElement).toBe(within(songs).getByRole('button', { name: 'Import a MIDI file' }))
 
     pressEnterOn(within(songs).getByRole('button', { name: /^Play Twinkle/ }))
     expect(panel('Songs')).toBeNull()
-    // Back on the button that opened the panel, in the menu, which therefore stays.
-    expect(document.activeElement).toBe(button('Songs'))
+    // On the Menu button, which the panel was opened through: in the menu, which therefore stays.
+    expect(document.activeElement).toBe(button('Menu'))
     expect(menuIsHidden()).toBe(false)
 
     // Every control of the player line can be reached with Tab, in the order they are drawn.
@@ -1072,6 +1221,23 @@ describe('someone with the keyboard alone', () => {
       'Song options',
       'Close',
     ])
+  })
+
+  it('plays a song straight from the start box, and is on "Menu" once the box has gone', () => {
+    vi.useFakeTimers()
+    startApp()
+    pressEnterOn(button('Menu'))
+    const box = screen.getByRole('dialog', { name: 'Menu' })
+    pressEnterOn(within(box).getByRole('button', { name: /^Play Twinkle/ }))
+
+    expect(startBox()).toBeNull()
+    expect(player.getState()).toMatchObject({ status: 'playing', songId: TWINKLE })
+    // The line that was pressed has left the page with the box. The focus is
+    // not lost with it: it is on the Menu button, in the menu, which stays.
+    expect(document.activeElement).toBe(button('Menu'))
+    wait(AUTO_HIDE_DELAY_MS * 2)
+    expect(menuIsHidden()).toBe(false)
+    expect(document.activeElement).toBe(button('Menu'))
   })
 
   it('does not lose the focus when it opens the song options, which belong to the player line', () => {
@@ -1104,7 +1270,9 @@ describe('someone with the keyboard alone', () => {
     pressEnterOn(part)
     expect(document.activeElement).toBe(part)
 
-    pressEnterOn(button('Songs'))
+    // To the Songs panel without a mouse: Enter on "Menu", then on "All songs…".
+    pressEnterOn(button('Menu'))
+    pressEnterOn(button('All songs…'))
     const songs = screen.getByRole('dialog', { name: 'Songs' })
     pressEnterOn(within(songs).getByRole('button', { name: 'Delete Mine' }))
     expect(document.activeElement).toBe(within(songs).getByRole('button', { name: 'No' }))
@@ -1275,7 +1443,13 @@ describe('a long session with songs, in any order', () => {
           clickWithMouse(within(settings).getByRole('tab', { name: 'Sound' }))
         },
         closePanel() {
-          if (panel('Songs') || panel('Settings')) tap('Escape', { key: 'Escape' })
+          if (panel('Songs') || panel('Settings') || startBox()) tap('Escape', { key: 'Escape' })
+        },
+        // The Menu button opens the start box, in place of a panel, and closes it again.
+        menuButton: () => clickWithMouse(button('Menu')),
+        playFromStartBox() {
+          const box = openStartBox()
+          clickWithMouse(pick(within(box).getAllByRole('button', { name: /^Play / })))
         },
       }
       const names = Object.keys(steps)

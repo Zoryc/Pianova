@@ -1,7 +1,8 @@
 /*
  * The chrome: everything on screen that is not the piano or the light. The
  * small controls every panel uses (buttons, switches, sliders, tabs…), the
- * top bar, the floating panel and the start overlay.
+ * top bar and the floating panel. (The start box has a stylesheet of its
+ * own, startBox.css.)
  *
  * This is the one place that decides how those look. A panel adds layout of
  * its own in its own stylesheet, and nothing else.
@@ -20,8 +21,7 @@
  *
  * The focus ring is drawn by theme.css, as a shadow around whatever has the
  * focus. So a control never gets a shadow of its own here (it would replace
- * the ring), and nothing here takes the ring away. Only the start overlay,
- * which covers the screen, moves it onto its line of text.
+ * the ring), and nothing here takes the ring away.
  */
 
 /* ---------- Icons ---------- */
@@ -471,19 +471,16 @@
 /* ---------- Tabs ---------- */
 
 /*
- * Plain words in a row; the chosen one is underlined with the light. Used by
- * the modes in the top bar (.mode-tabs) and free for any other row of tabs
- * (.tabs with .tab buttons inside).
+ * Plain words in a row; the chosen one is underlined with the light. For any
+ * row of tabs: .tabs with .tab buttons inside.
  */
-.tabs,
-.mode-tabs {
+.tabs {
   display: flex;
   gap: 4px;
   user-select: none;
 }
 
-.tab,
-.mode-tab {
+.tab {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -504,8 +501,7 @@
 }
 
 /* The line of light under the chosen tab. It grows out of the middle. */
-.tab::after,
-.mode-tab::after {
+.tab::after {
   content: '';
   position: absolute;
   right: 12px;
@@ -522,54 +518,39 @@
     transform 160ms ease-out;
 }
 
-.tab:hover,
-.mode-tab:hover {
+.tab:hover {
   background: var(--control);
   color: var(--text);
 }
 
-.tab[aria-selected='true'],
-.mode-tab[aria-selected='true'] {
+.tab[aria-selected='true'] {
   color: var(--text);
 }
 
-.tab[aria-selected='true']::after,
-.mode-tab[aria-selected='true']::after {
+.tab[aria-selected='true']::after {
   opacity: 1;
   transform: none;
 }
 
-/* A tab that cannot be chosen yet. */
-.tab[aria-disabled='true'],
-.mode-tab[aria-disabled='true'] {
-  background: transparent;
-  color: var(--text-faint);
-  cursor: not-allowed;
-}
-
-.mode-tab__badge {
-  padding: 0 8px;
-  border: 1px solid var(--control-line);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-}
-
-/* ---------- The menu: the top bar and what hangs under it ---------- */
+/* ---------- The menu: the top bar, with the player line in it ---------- */
 
 /*
- * The menu is the top bar with the player line under it. It hides when the
- * mouse is still (see useAutoHide.ts): it slides up a little and fades, and
- * once that is over it is truly gone, so that Tab does not stop in it. It
- * keeps its place while hidden: where it sits, over the sky or above it, is
- * decided by the app (src/styles/app.css).
+ * The menu is the top bar: the Menu button, the player line while a song is
+ * loaded, volume and sustain. It hides when the mouse is still (see
+ * useAutoHide.ts): it slides up a little and fades, and once that is over it
+ * is truly gone, so that Tab does not stop in it. It keeps its place while
+ * hidden: where it sits, over the sky or above it, is decided by the app
+ * (src/styles/app.css).
  */
 .menu {
   position: relative;
   z-index: var(--layer-menu);
   flex: none;
-  /* Black at the top edge, fading out downward, so that it reads as part of the stage. */
+  /*
+   * Black behind the controls, fading out under them, so that it reads as
+   * part of the stage and no falling note shows through a word.
+   */
+  padding-bottom: 8px;
   background: var(--bar-fade);
   transition:
     opacity 160ms ease-out,
@@ -591,30 +572,34 @@
   cursor: none !important;
 }
 
+/*
+ * Four things in a row: the Menu button, room, volume, sustain. The player
+ * line has a row of its own under them, in the middle. In a window wide
+ * enough for everything (1650px) it takes the room in the first row instead: one bar,
+ * not two (how it looks there is in songs.css).
+ */
 .top-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
-  height: var(--top-bar-height);
-  padding: 0 12px 0 20px;
+  min-height: var(--top-bar-height);
+  padding: 8px 12px;
   user-select: none;
 }
 
-.top-bar__name {
-  margin: 0 8px 0 0;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
+/* The door to everything that is not in the bar: it has an outline, so that it is not missed. */
+.top-bar__menu {
+  grid-area: 1 / 1;
 }
 
-/* Pushes everything after it to the right-hand end. */
 .top-bar__space {
-  flex: 1;
+  grid-area: 1 / 2;
 }
 
 .top-bar__volume {
   display: flex;
+  grid-area: 1 / 3;
   align-items: center;
   gap: 8px;
   margin-right: 8px;
@@ -632,22 +617,27 @@
 
 .top-bar__sustain {
   display: flex;
+  grid-area: 1 / 4;
   align-items: center;
   gap: 8px;
-  margin-right: 8px;
 }
 
-/*
- * A window too narrow for the whole bar. First the modes that are still to
- * come go (they only announce something), then the volume, which is also in
- * Settings. What is left fits a window 640px wide.
- */
-@media (max-width: 1179px) {
-  .top-bar .mode-tab[aria-disabled='true'] {
-    display: none;
+/* In its own row the line may be as wide as the bar: the bar has edges of its own. */
+.top-bar > .player-line {
+  grid-area: 2 / 1 / auto / -1;
+  width: min(1120px, 100%);
+}
+
+/* From here on the line has as much room in the first row as it has in a row of its own. */
+@media (min-width: 1650px) {
+  .top-bar > .player-line {
+    grid-area: 1 / 2;
+    width: auto;
+    margin: 0 16px 0 8px;
   }
 }
 
+/* A window too narrow for the whole bar: the volume goes, which is also in Settings. */
 @media (max-width: 899px) {
   .top-bar__volume {
     display: none;
@@ -739,13 +729,14 @@
 /* ---------- Scroll bars ---------- */
 
 /*
- * Whatever scrolls inside the chrome (a panel, the song options, a long list
+ * Whatever scrolls inside the chrome (a panel, the start box, the song options, a long list
  * of parts) gets a slim rounded thumb and nothing else: no arrows, no track.
  * Chrome and Edge draw it from the parts below, and stop reading those as
  * soon as the standard properties are set; so the standard properties are
  * kept for the browsers that do not have the parts.
  */
 .floating-panel__body::-webkit-scrollbar,
+.start-box__body::-webkit-scrollbar,
 .song-options::-webkit-scrollbar,
 .song-parts::-webkit-scrollbar {
   width: 12px;
@@ -753,6 +744,7 @@
 
 /* The see-through border leaves a thumb four pixels wide in the middle of the bar. */
 .floating-panel__body::-webkit-scrollbar-thumb,
+.start-box__body::-webkit-scrollbar-thumb,
 .song-options::-webkit-scrollbar-thumb,
 .song-parts::-webkit-scrollbar-thumb {
   border: 4px solid transparent;
@@ -761,6 +753,7 @@
 }
 
 .floating-panel__body::-webkit-scrollbar-thumb:hover,
+.start-box__body::-webkit-scrollbar-thumb:hover,
 .song-options::-webkit-scrollbar-thumb:hover,
 .song-parts::-webkit-scrollbar-thumb:hover {
   background-color: var(--text-faint);
@@ -768,89 +761,12 @@
 
 @supports not selector(::-webkit-scrollbar) {
   .floating-panel__body,
+  .start-box__body,
   .song-options,
   .song-parts {
     scrollbar-width: thin;
     scrollbar-color: var(--control-line-strong) transparent;
   }
-}
-
-/* ---------- Start overlay ---------- */
-
-/*
- * A button that covers the whole window until the first click or key press.
- * The stage shows through it, dimmed. A button does not stretch by itself,
- * so its width and height are set here.
- */
-.start-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--layer-overlay);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  width: 100%;
-  height: 100%;
-  padding: 24px;
-  border: 0;
-  background: var(--scrim);
-  backdrop-filter: none;
-  color: var(--text);
-  text-align: center;
-}
-
-.start-overlay__name {
-  font-size: clamp(32px, 6vw, 64px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-/* A short piece of the light line. It reaches out under the mouse. */
-.start-overlay__line {
-  width: 64px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--light-bright);
-  box-shadow:
-    0 0 calc(var(--glow) * 8px) var(--light),
-    0 0 calc(var(--glow) * 24px) var(--light);
-  transition: width 160ms ease-out;
-}
-
-.start-overlay:hover .start-overlay__line {
-  width: 128px;
-}
-
-.start-overlay__action {
-  padding: 4px 16px;
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 18px;
-  transition:
-    color 160ms ease-out,
-    box-shadow 120ms ease-out;
-}
-
-.start-overlay:hover .start-overlay__action {
-  color: var(--text);
-}
-
-/*
- * The overlay covers the screen, so a ring around it would only outline the
- * window. The ring goes around its line of text instead.
- */
-.start-overlay:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-.start-overlay:focus-visible .start-overlay__action {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-  box-shadow: var(--focus-ring);
 }
 
 /* ---------- Windows contrast themes ---------- */
@@ -875,8 +791,7 @@
     background: HighlightText;
   }
 
-  .tab[aria-selected='true']::after,
-  .mode-tab[aria-selected='true']::after {
+  .tab[aria-selected='true']::after {
     forced-color-adjust: none;
     background: Highlight;
   }

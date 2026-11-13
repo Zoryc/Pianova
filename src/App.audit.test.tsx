@@ -7,7 +7,8 @@
  *    at which it could be left sounding: the window losing the focus, the tab
  *    being hidden, the page going away, choosing the computer keys, a ready-made
  *    layout, the keys moving lower or higher, another piano on screen, a reset,
- *    and for a song: pause, stop, a jump, close, delete and its end.
+ *    the start box opening or closing, and for a song: pause, stop, a jump,
+ *    close, delete and its end.
  *
  * 2. What a song leaves behind, and what it respects: the computer keys it
  *    moved go back when it is closed, and it draws no falling notes for a
@@ -143,7 +144,7 @@ function clickWithMouse(target: HTMLElement): void {
   fireEvent.click(target, { detail: 1 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it: the first key press takes the start box away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -153,8 +154,20 @@ function button(name: string | RegExp): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/** The start box: the small menu that the Menu button opens, with its lines. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** Clicks a line of the start box, which the Menu button opens first when it is closed. */
+function clickInStartBox(line: string): void {
+  if (!startBox()) clickWithMouse(button('Menu'))
+  const box = screen.getByRole('dialog', { name: 'Menu' })
+  clickWithMouse(within(box).getByRole('button', { name: line }))
+}
+
 function openSettingsOn(tab: string): HTMLElement {
-  if (!screen.queryByRole('dialog', { name: 'Settings' })) clickWithMouse(button('Settings'))
+  if (!screen.queryByRole('dialog', { name: 'Settings' })) clickInStartBox('Settings')
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   clickWithMouse(within(settings).getByRole('tab', { name: tab }))
   return settings
@@ -162,6 +175,12 @@ function openSettingsOn(tab: string): HTMLElement {
 
 function closeSettings(): void {
   clickWithMouse(button('Close Settings'))
+}
+
+/** Opens the Songs panel: the list of all the songs. */
+function openSongs(): HTMLElement {
+  clickInStartBox('All songs…')
+  return screen.getByRole('dialog', { name: 'Songs' })
 }
 
 function piano(): HTMLElement {
@@ -436,10 +455,35 @@ describe('a note of the computer keyboard never stays stuck', () => {
     const song = await addSong('tune.mid')
     startApp()
     key('keydown', 'KeyA')
-    clickWithMouse(button('Songs'))
+    openSongs()
     clickWithMouse(button(`Rename ${song.title}`))
     const field = screen.getByRole('textbox')
     field.focus()
+
+    key('keyup', 'KeyA')
+    expectSilence()
+  })
+
+  it('goes on when the start box opens under its held key, and stops at its key-up', () => {
+    startApp()
+    key('keydown', 'KeyA')
+    clickWithMouse(button('Menu'))
+    expect(startBox()).not.toBeNull()
+    // The box takes nothing away from the piano: the note sounds until its key is let go.
+    expect(heldNotes()).toEqual([60])
+    expect(soundingInEngine()).toEqual([60])
+
+    key('keyup', 'KeyA')
+    expectSilence()
+  })
+
+  it('stops at its key-up when its key press was the one that took the start box away', () => {
+    startApp()
+    clickWithMouse(button('Menu'))
+    key('keydown', 'KeyA')
+    expect(startBox()).toBeNull()
+    expect(heldNotes()).toEqual([60])
+    expect(soundingInEngine()).toEqual([60])
 
     key('keyup', 'KeyA')
     expectSilence()
@@ -548,6 +592,19 @@ describe('a note of the mouse never stays stuck', () => {
     key('keyup', 'KeyA')
     expect(heldNotes()).toEqual([60])
     expect(soundingInEngine()).toEqual([60])
+    mouseUpOnKey(60)
+    expectSilence()
+  })
+
+  it('stops when the button is let go, after a press that also took the start box away', () => {
+    startApp()
+    clickWithMouse(button('Menu'))
+    // A press of the mouse outside the start box closes it. On the piano it plays as well.
+    mouseDownOnKey(60)
+    expect(startBox()).toBeNull()
+    expect(heldNotes()).toEqual([60])
+    expect(soundingInEngine()).toEqual([60])
+
     mouseUpOnKey(60)
     expectSilence()
   })
@@ -1018,13 +1075,19 @@ describe("what is written to the browser's storage", () => {
     expect(window.localStorage.getItem(STORAGE_KEY)?.length).toBeLessThan(2000)
   })
 
-  it('nothing for opening and closing the panels or changing the Settings tab', () => {
+  it('nothing for opening and closing the start box or a panel, or changing a Settings tab', () => {
     startApp()
     const { writes } = watchStorage()
+    // Each panel is opened from the start box, which the Menu button opens.
     for (const tab of ['Sound', 'Keys', 'Piano', 'Look', 'About']) openSettingsOn(tab)
     closeSettings()
-    clickWithMouse(button('Songs'))
+    openSongs()
     clickWithMouse(button('Close Songs'))
+    // And the start box alone, opened and closed with its button.
+    clickWithMouse(button('Menu'))
+    expect(startBox()).not.toBeNull()
+    clickWithMouse(button('Menu'))
+    expect(startBox()).toBeNull()
     expect(writes).toEqual([])
   })
 
@@ -1101,8 +1164,14 @@ describe('a long session', () => {
     for (const tab of ['Sound', 'Keys', 'Piano', 'Look', 'About']) openSettingsOn(tab)
     closeSettings()
 
-    clickWithMouse(button('Songs'))
-    clickWithMouse(button(/^Play Twinkle/))
+    // The start box alone: opened with its button, closed by a press of the mouse on the sky.
+    clickWithMouse(button('Menu'))
+    expect(startBox()).not.toBeNull()
+    fireEvent.pointerDown(document.querySelector('.stage__sky') as HTMLElement)
+    expect(startBox()).toBeNull()
+
+    const songs = openSongs()
+    clickWithMouse(within(songs).getByRole('button', { name: /^Play Twinkle/ }))
     // Into the second note of the song, which is the note of the A key.
     wait(LEAD_IN_MS + 700)
     expect(heldNotes()).toEqual([60])

@@ -1,5 +1,5 @@
 /**
- * The menu at the top of the screen (the top bar and the player line under
+ * The menu at the top of the screen (the top bar, with the player line in
  * it) hides when the mouse is still, so that nothing but the piano and the
  * light is left while playing. The rules are in docs/INTERFACE.md, 5.3.
  *
@@ -22,8 +22,8 @@ export interface AutoHideOptions {
   /** The "Hide the menu automatically" setting. While it is false the menu is always shown. */
   enabled: boolean
   /**
-   * True while something on screen needs the menu to stay: a panel is open,
-   * the start overlay is up, a song is loaded but not playing.
+   * True while something on screen needs the menu to stay: the start box or
+   * a panel is open, the app waits to start, a song is loaded but not playing.
    */
   pinned: boolean
 }
@@ -233,7 +233,7 @@ function watchPage(
   /*
    * The menu hears the mouse come and go (onMouseEnter and onMouseLeave), but
    * not always. When what is under the mouse is taken off the page (the player
-   * line at "Close", the picture on the full-screen button), nothing tells
+   * line at "Close"), nothing tells
    * the menu that the mouse has left it; and a mouse that rests on the menu
    * while the page is drawn never arrives. So where the mouse is, is also
    * read from whatever the browser says about it: that it is over something

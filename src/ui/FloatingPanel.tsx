@@ -4,7 +4,7 @@ import './chrome.css'
 import { controlsIn } from './useAutoHide'
 
 export interface FloatingPanelProps {
-  /** The element id, for aria-controls on the button that opens the panel. */
+  /** The element id, by which the app finds the panel when it moves the keyboard focus. */
   id: string
   title: string
   onClose(): void
@@ -86,7 +86,7 @@ export function FloatingPanel(props: FloatingPanelProps): JSX.Element {
 }
 
 /** The control that has the keyboard focus, when it is not part of `panel`. */
-function focusedOutside(panel: HTMLElement): HTMLElement | null {
+export function focusedOutside(panel: HTMLElement): HTMLElement | null {
   const focused = document.activeElement
   if (!(focused instanceof HTMLElement) || focused === document.body) return null
   return panel.contains(focused) ? null : focused

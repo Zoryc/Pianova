@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
  * The app shell under rough handling: Escape in every situation, clicks that
- * must and must not close a panel, going back and forth between Settings and
- * Songs, choosing keys while notes are held, the focus after a click with the
- * mouse, Space with every kind of control focused, the start overlay, the
- * sound status, what screen readers are told, and React drawing everything
- * twice.
+ * must and must not close a panel or the start box, going back and forth
+ * between Settings and Songs, choosing keys while notes are held, the focus
+ * after a click with the mouse, Space with every kind of control focused, the
+ * start box before the first click, the sound status, what screen readers
+ * are told, and React drawing everything twice.
  *
  * The sound engine and the sky are stand-ins; each has tests of its own.
  */
@@ -122,7 +122,7 @@ function pressEnterOn(target: HTMLElement): void {
   fireEvent.click(target, { detail: 0 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it: the first key press takes the start box away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -140,8 +140,32 @@ function panel(name: 'Settings' | 'Songs'): HTMLElement | null {
   return screen.queryByRole('dialog', { name })
 }
 
+/** The start box: the small menu the app opens with, and that the Menu button opens again. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** The start box, opened with a click on the Menu button when it is not open already. */
+function openStartBox(): HTMLElement {
+  if (!startBox()) clickWithMouse(button('Menu'))
+  return screen.getByRole('dialog', { name: 'Menu' })
+}
+
+/** The line of the start box that opens each panel. */
+const LINE_OF = { Settings: 'Settings', Songs: 'All songs…' } as const
+
+/** Opens a panel with the mouse: the Menu button, then the panel's line of the start box. */
 function openPanel(name: 'Settings' | 'Songs'): HTMLElement {
-  if (!panel(name)) clickWithMouse(button(name))
+  if (!panel(name)) {
+    clickWithMouse(within(openStartBox()).getByRole('button', { name: LINE_OF[name] }))
+  }
+  return screen.getByRole('dialog', { name })
+}
+
+/** Opens a panel with the keyboard alone: Enter on "Menu", then Enter on the panel's line. */
+function openPanelWithEnter(name: 'Settings' | 'Songs'): HTMLElement {
+  if (!startBox()) pressEnterOn(button('Menu'))
+  pressEnterOn(button(LINE_OF[name]))
   return screen.getByRole('dialog', { name })
 }
 
@@ -183,15 +207,38 @@ describe('Escape', () => {
     within(settings).getByRole('slider', { name: 'Volume' }).focus()
     expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
     expect(panel('Settings')).toBeNull()
-    // The slider went away with the panel: the focus is on the button that opens it, not lost.
-    expect(document.activeElement).toBe(button('Settings'))
+    // The slider went away with the panel: the focus is on the Menu button, which the
+    // panel was opened through, not lost.
+    expect(document.activeElement).toBe(button('Menu'))
     key('keyup', 'Escape')
 
     openSettingsOn('Sound')
     button('Close Settings').focus()
     tap('Escape')
     expect(panel('Settings')).toBeNull()
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(document.activeElement).toBe(button('Menu'))
+  })
+
+  it('closes the start box like a panel: a line that had the focus hands it to "Menu"', () => {
+    startApp()
+    // Opened with Enter, the box puts the focus on its first line.
+    pressEnterOn(button('Menu'))
+    expect(document.activeElement).toBe(button(/Free Play/))
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    expect(startBox()).toBeNull()
+    expect(document.activeElement).toBe(button('Menu'))
+    key('keyup', 'Escape')
+    expect(button('Menu').getAttribute('aria-expanded')).toBe('false')
+
+    // Opened with the mouse, the box holds the focus itself: nothing is given the
+    // focus when it closes, and nothing is left for a second press to take back.
+    clickWithMouse(button('Menu'))
+    expect(document.activeElement).toBe(startBox())
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+    key('keyup', 'Escape')
+    expect(startBox()).toBeNull()
+    expect(document.activeElement).toBe(document.body)
+    expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
   })
 
   it('pressed in the Labels drop-down belongs to the drop-down: the panel stays', () => {
@@ -285,6 +332,7 @@ describe('Escape', () => {
       if (piano().querySelector('.is-selected')) found.push('a piano key waiting')
       if (screen.queryByRole('group', { name: 'Song options' })) found.push('the song options')
       if (panel('Settings')) found.push('the panel')
+      if (startBox()) found.push('the start box')
       if (menu().contains(document.activeElement)) found.push('the focus in the menu')
       return found
     }
@@ -370,6 +418,37 @@ describe('Escape', () => {
       expect(holdEscape()).toBe(false)
       expect(open()).toEqual([])
     })
+
+    it('takes the start box back like a panel: after the song options, before the focus', () => {
+      // The box and a panel are never open together, and no piano key can wait without Settings.
+      startApp()
+      act(() => {
+        playSong(A_STARTER_SONG)
+      })
+      clickWithMouse(button('Menu'))
+      pressEnterOn(button('Song options'))
+      expect(open()).toEqual(['the song options', 'the start box', 'the focus in the menu'])
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(holdEscape()).toBe(true)
+      expect(open()).toEqual(['the start box', 'the focus in the menu'])
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(holdEscape()).toBe(true)
+      expect(open()).toEqual(['the focus in the menu'])
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
+      expect(holdEscape()).toBe(false)
+      expect(open()).toEqual([])
+      key('keyup', 'Escape')
+
+      expect(key('keydown', 'Escape').defaultPrevented).toBe(false)
+      // The song is still there: Escape is not a button of the player.
+      expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
+      expect(heldNotes()).toEqual([])
+    })
   })
 })
 
@@ -378,7 +457,9 @@ describe('what a click closes', () => {
     startApp()
     openPanel('Settings')
     fireEvent.click(menu().querySelector('.top-bar__space') as HTMLElement, { detail: 1 })
-    fireEvent.click(menu().querySelector('.top-bar__name') as HTMLElement, { detail: 1 })
+    // The edge of the bar around its controls, and the keycap that only says what Space does.
+    fireEvent.click(menu().querySelector('.top-bar') as HTMLElement, { detail: 1 })
+    fireEvent.click(within(menu()).getByText('Space'), { detail: 1 })
     fireEvent.click(menu(), { detail: 1 })
     expect(panel('Settings')).not.toBeNull()
   })
@@ -410,7 +491,7 @@ describe('what a click closes', () => {
     openPanel('Settings')
     fireEvent.mouseDown(emptySky())
     fireEvent.mouseUp(piano())
-    fireEvent.click(screen.getByRole('tabpanel', { name: 'Free Play' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('region', { name: 'Free Play' }), { detail: 1 })
     expect(panel('Settings')).not.toBeNull()
   })
 
@@ -445,53 +526,138 @@ describe('what a click closes', () => {
     expect(settingsStore.get()).toBe(before)
     expect(panel('Settings')).toBeNull()
     expect(panel('Songs')).toBeNull()
+    expect(startBox()).toBeNull()
+  })
+
+  it('the start box, at a press of the mouse anywhere but on it and on the Menu button', () => {
+    startApp()
+    const box = openStartBox()
+
+    // On the box: its name, the picture behind it, a heading, a way to play that is not built yet.
+    fireEvent.pointerDown(box)
+    fireEvent.pointerDown(within(box).getByRole('heading', { level: 1 }))
+    fireEvent.pointerDown(box.querySelector('.start-box__picture') as SVGElement)
+    fireEvent.pointerDown(within(box).getByRole('heading', { name: 'Play' }))
+    const practice = within(box).getByRole('button', { name: /Practice/ })
+    fireEvent.pointerDown(practice)
+    clickWithMouse(practice)
+    expect(startBox()).toBe(box)
+
+    // The Menu button closes the box with its click. The press that comes before
+    // the click must not close it first, or the click would open it again.
+    fireEvent.pointerDown(button('Menu'))
+    expect(startBox()).toBe(box)
+    clickWithMouse(button('Menu'))
+    expect(startBox()).toBeNull()
+
+    // Anywhere else: the empty part of the top bar, which leaves a panel open, and the sky.
+    openStartBox()
+    fireEvent.pointerDown(menu().querySelector('.top-bar__space') as HTMLElement)
+    expect(startBox()).toBeNull()
+    openStartBox()
+    fireEvent.pointerDown(emptySky())
+    expect(startBox()).toBeNull()
+    expect(panel('Settings')).toBeNull()
+    expect(panel('Songs')).toBeNull()
   })
 })
 
-describe('going back and forth between Settings and Songs', () => {
-  it('never shows two panels, and never leaves a piano key waiting', () => {
+describe('going back and forth between Settings and Songs, through the start box', () => {
+  /** The names of the start box ("Menu") and of the panels that are on the page right now. */
+  function dialogs(): string[] {
+    return screen.getAllByRole('dialog').map((dialog) => {
+      const title = document.getElementById(dialog.getAttribute('aria-labelledby') ?? '')
+      return dialog.getAttribute('aria-label') ?? title?.textContent ?? ''
+    })
+  }
+
+  it('never shows two of the box and the panels, and never leaves a piano key waiting', () => {
     startApp()
     openSettingsOn('Keys')
     fireEvent.click(pianoKey(64))
 
     for (let round = 0; round < 3; round++) {
-      clickWithMouse(button('Songs'))
-      expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      // The Menu button puts the start box in the place of Settings.
+      clickWithMouse(button('Menu'))
+      expect(dialogs()).toEqual(['Menu'])
+      expect(button('Menu').getAttribute('aria-expanded')).toBe('true')
       expect(isChoosingKeys()).toBe(false)
       expect(piano().querySelector('.is-selected')).toBeNull()
 
+      clickWithMouse(button('All songs…'))
+      expect(dialogs()).toEqual(['Songs'])
+      expect(button('Menu').getAttribute('aria-expanded')).toBe('false')
+      expect(isChoosingKeys()).toBe(false)
+      expect(piano().querySelector('.is-selected')).toBeNull()
+
+      clickWithMouse(button('Menu'))
+      expect(dialogs()).toEqual(['Menu'])
+      expect(button('Menu').getAttribute('aria-expanded')).toBe('true')
+
       clickWithMouse(button('Settings'))
-      expect(screen.getAllByRole('dialog')).toHaveLength(1)
+      expect(dialogs()).toEqual(['Settings'])
+      expect(button('Menu').getAttribute('aria-expanded')).toBe('false')
       expect(isChoosingKeys()).toBe(true)
       expect(piano().querySelector('.is-selected')).toBeNull()
     }
-    expect(button('Settings').getAttribute('aria-expanded')).toBe('true')
-    expect(button('Songs').getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('with the keyboard, puts the focus in the panel that opens and gives it back to its button', () => {
+  it('with the keyboard, puts the focus in what opens and gives it back to the Menu button', () => {
     startApp()
+    // Enter on "Menu": the focus is on the first line of the start box.
+    pressEnterOn(button('Menu'))
+    expect(document.activeElement).toBe(button(/Free Play/))
     pressEnterOn(button('Settings'))
+    expect(startBox()).toBeNull()
     expect(panel('Settings')?.contains(document.activeElement)).toBe(true)
 
-    // Shift+Tab back to the menu, then Enter on "Songs".
-    pressEnterOn(button('Songs'))
+    // Shift+Tab back to the menu, then Enter on "Menu" and on "All songs…".
+    pressEnterOn(button('Menu'))
     expect(panel('Settings')).toBeNull()
+    expect(document.activeElement).toBe(button(/Free Play/))
+    pressEnterOn(button('All songs…'))
+    expect(startBox()).toBeNull()
     expect(panel('Songs')?.contains(document.activeElement)).toBe(true)
 
     tap('Escape')
-    expect(document.activeElement).toBe(button('Songs'))
+    expect(document.activeElement).toBe(button('Menu'))
   })
 
-  it('keeps a note that is held on the keyboard while the panels change', () => {
+  it('keeps a note that is held on the keyboard while the box and the panels change', () => {
     startApp()
     openSettingsOn('Sound')
     key('keydown', 'KeyA')
-    clickWithMouse(button('Songs'))
+    clickWithMouse(button('Menu'))
+    clickWithMouse(button('All songs…'))
+    expect(panel('Songs')).not.toBeNull()
+    clickWithMouse(button('Menu'))
     clickWithMouse(button('Settings'))
     clickWithMouse(button('Close Settings'))
     expect(heldNotes()).toEqual([60])
     key('keyup', 'KeyA')
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('keeps the start box open while a held key repeats: only a new press closes it', () => {
+    startApp()
+    key('keydown', 'KeyA')
+    clickWithMouse(button('Menu'))
+    expect(startBox()).not.toBeNull()
+
+    // The key is still down, and the computer sends its press again and again.
+    // That is not playing the piano: the note goes on, and the box stays.
+    for (let repeat = 0; repeat < 4; repeat++) {
+      expect(key('keydown', 'KeyA', { repeat: true }).defaultPrevented).toBe(true)
+    }
+    expect(startBox()).not.toBeNull()
+    expect(heldNotes()).toEqual([60])
+
+    // A key that is pressed now is played, and takes the box away.
+    key('keydown', 'KeyS')
+    expect(startBox()).toBeNull()
+    expect(heldNotes()).toEqual([60, 62])
+    key('keyup', 'KeyA')
+    key('keyup', 'KeyS')
     expect(heldNotes()).toEqual([])
   })
 })
@@ -560,6 +726,9 @@ describe('choosing the computer keys while notes are held', () => {
     fireEvent.pointerDown(piano(), { button: 0, pointerId: 1, clientX: 50, clientY: 90 })
     expect(heldNotes()).toEqual([48])
 
+    // The start box on the way to Settings leaves the note alone.
+    pressEnterOn(button('Menu'))
+    expect(heldNotes()).toEqual([48])
     pressEnterOn(button('Settings'))
     expect(isChoosingKeys()).toBe(true)
     expect(heldNotes()).toEqual([])
@@ -746,8 +915,7 @@ describe('the keyboard focus after a click with the mouse', () => {
 
   it('stays where it is for someone who works with Enter, in the panels too', () => {
     startApp()
-    pressEnterOn(button('Settings'))
-    const settings = screen.getByRole('dialog', { name: 'Settings' })
+    const settings = openPanelWithEnter('Settings')
     const sound = within(settings).getByRole('tab', { name: 'Sound' })
     pressEnterOn(sound)
     expect(document.activeElement).toBe(sound)
@@ -771,7 +939,7 @@ describe('the keyboard focus after a click with the mouse', () => {
     expect(panel('Settings')).not.toBeNull()
   })
 
-  it('is not put on "Songs" when a song is closed with the mouse after a picker was opened', () => {
+  it('is not put on "Menu" when a song is closed with the mouse after a picker was opened', () => {
     // Opening the colour picker or the file picker makes a second click that
     // no mouse button made. It must not be taken for the keyboard.
     startApp()
@@ -780,7 +948,7 @@ describe('the keyboard focus after a click with the mouse', () => {
     })
     const settings = openSettingsOn('Look')
     clickWithMouse(within(settings).getByRole('radio', { name: 'Your colour' }))
-    clickWithMouse(button('Songs'))
+    openPanel('Songs')
     clickWithMouse(button('Import a MIDI file'))
     clickWithMouse(button('Close Songs'))
 
@@ -806,16 +974,21 @@ describe('Space, the sustain key', () => {
     expect(sustain()).toBe(false)
   })
 
-  it('does so once per tap with any control of the menu focused, and never presses that control', () => {
+  it('does so once per tap on any control of the menu or the start box, and presses none', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    const controls = menu().querySelectorAll<HTMLElement>('button, input')
-    expect(controls.length).toBeGreaterThanOrEqual(12)
+    const box = openStartBox()
+    // The Menu button, the six controls of the song, volume and sustain.
+    const inMenu = [...menu().querySelectorAll<HTMLElement>('button, input')]
+    expect(inMenu.length).toBeGreaterThanOrEqual(9)
+    // The three ways to play, three songs, "All songs…", "Settings" and "About".
+    const inBox = [...box.querySelectorAll<HTMLElement>('button')]
+    expect(inBox.length).toBeGreaterThanOrEqual(9)
 
     let expected = sustain()
-    for (const control of controls) {
+    for (const control of [...inMenu, ...inBox]) {
       const pressed = vi.fn()
       control.addEventListener('click', pressed)
       control.focus()
@@ -824,6 +997,8 @@ describe('Space, the sustain key', () => {
       expect(sustain()).toBe(expected)
       expect(pressed).not.toHaveBeenCalled()
     }
+    // Space is not a key of the piano: the start box is still open, and nothing took its place.
+    expect(startBox()).toBe(box)
     expect(panel('Settings')).toBeNull()
     expect(panel('Songs')).toBeNull()
   })
@@ -847,6 +1022,17 @@ describe('Space, the sustain key', () => {
       expect(panel('Settings')).not.toBeNull()
     },
   )
+
+  it('does so with the start box itself focused (opened with the mouse)', () => {
+    startApp()
+    const box = openStartBox()
+    expect(document.activeElement).toBe(box)
+    expect(tapSpace()).toBe(true)
+    expect(sustain()).toBe(true)
+    expect(tapSpace()).toBe(true)
+    expect(sustain()).toBe(false)
+    expect(startBox()).toBe(box)
+  })
 
   it('does so with the panel itself focused (opened with the mouse), and on a piano key being chosen', () => {
     startApp()
@@ -910,9 +1096,20 @@ describe('someone with the keyboard alone', () => {
       key('keyup', 'Enter', { key: 'Enter' })
     }
 
+    // The lines of the start box, which Enter on "Menu" opens.
+    pressEnterOn(button('Menu'))
+    const lines = (startBox() as HTMLElement).querySelectorAll<HTMLElement>('button')
+    expect(lines.length).toBeGreaterThanOrEqual(9)
+    for (const line of lines) {
+      line.focus()
+      expect(key('keydown', 'Enter', { key: 'Enter' }).defaultPrevented).toBe(false)
+      key('keyup', 'Enter', { key: 'Enter' })
+    }
+    // Enter is not a key of the piano either: the box is still open.
+    expect(startBox()).not.toBeNull()
+
     for (const tab of ['Sound', 'Keys', 'Piano', 'Look', 'About']) {
-      pressEnterOn(button('Settings'))
-      const settings = screen.getByRole('dialog', { name: 'Settings' })
+      const settings = openPanelWithEnter('Settings')
       pressEnterOn(within(settings).getByRole('tab', { name: tab }))
       for (const control of settings.querySelectorAll<HTMLElement>('button, a')) {
         control.focus()
@@ -953,7 +1150,7 @@ describe('someone with the keyboard alone', () => {
   // Dozens of presses of Tab, each of which works out what can take the focus: slow when
   // many test files run side by side, so it gets more time than the usual five seconds.
   it(
-    'goes with Tab through the menu, then the open panel, then the piano keys being chosen',
+    'goes with Tab through the menu, the start box, the open panel and the piano keys being chosen',
     { timeout: 20_000 },
     async () => {
       const user = userEvent.setup()
@@ -975,24 +1172,43 @@ describe('someone with the keyboard alone', () => {
       const names = (stops: HTMLElement[]): string[] =>
         stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent ?? '')
 
-      // No panel: the top bar, then the player line under it. The piano is not a stop.
+      // Nothing open: the Menu button, the controls of the song, then volume and
+      // sustain. The piano is not a stop.
       expect(names(await tabStops())).toEqual([
-        'Free Play',
-        'Volume',
-        'Sustain',
-        'Songs',
-        'Settings',
+        'Menu',
         'Pause',
         'Restart',
         'Position in the song',
         'Speed',
         'Song options▾',
         'Close',
+        'Volume',
+        'Sustain',
+      ])
+
+      // The start box, opened with Enter: the focus is on its first line, and Tab
+      // carries on through the others. The ways to play that are not built yet are
+      // not stops, and nothing comes after the box.
+      button('Menu').focus()
+      await user.keyboard('[Enter]')
+      const box = screen.getByRole('dialog', { name: 'Menu' })
+      expect(document.activeElement).toBe(within(box).getByRole('button', { name: /Free Play/ }))
+      const lines = await tabStops()
+      expect(lines.every((line) => box.contains(line))).toBe(true)
+      expect(names(lines)).toEqual([
+        'Play Twinkle, Twinkle, Little Star',
+        'Play Mary Had a Little Lamb',
+        'Play Ode to Joy',
+        'All songs…',
+        'Settings',
+        'About',
       ])
 
       // Settings, opened with Enter: the focus is on its chosen tab; Tab carries on inside it.
       openSettingsOn('Keys')
       clickWithMouse(button('Close Settings'))
+      button('Menu').focus()
+      await user.keyboard('[Enter]')
       button('Settings').focus()
       await user.keyboard('[Enter]')
       const settings = screen.getByRole('dialog', { name: 'Settings' })
@@ -1043,19 +1259,28 @@ describe('someone with the keyboard alone', () => {
   })
 })
 
-describe('the start overlay', () => {
-  it('is the only thing that can be reached until the first click or key press', () => {
+describe('the start box, while the app waits for the first click or key press', () => {
+  it('is all that can be reached, with the window around it: the screen behind them cannot', () => {
     render(<App />)
     const screenBehind = document.querySelector('.app__screen') as HTMLElement
     expect(screenBehind.hasAttribute('inert')).toBe(true)
-    expect(screenBehind.contains(button(new RegExp(START_TEXT)))).toBe(false)
-    expect(button(new RegExp(START_TEXT)).textContent).toContain(APP_NAME)
+    expect(screenBehind.contains(document.querySelector('.top-bar__menu'))).toBe(true)
+
+    // The window around the box is one button, named after what it does. The box
+    // carries the name of the app, and says the same in so many words.
+    const box = startBox() as HTMLElement
+    expect(screenBehind.contains(button(START_TEXT))).toBe(false)
+    expect(screenBehind.contains(box)).toBe(false)
+    expect(button(START_TEXT).contains(box)).toBe(false)
+    expect(within(box).getByRole('heading', { level: 1 }).textContent).toBe(APP_NAME)
+    expect(within(box).getByText(START_TEXT)).toBeTruthy()
   })
 
   it('takes Space as the first key: sustain stays off, also when Space is let go after it is gone', () => {
     render(<App />)
     expect(key('keydown', 'Space').defaultPrevented).toBe(true)
     expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
     expect(key('keyup', 'Space').defaultPrevented).toBe(true)
     expect(sustain()).toBe(false)
 
@@ -1079,16 +1304,119 @@ describe('the start overlay', () => {
     expect(heldNotes()).toEqual([60])
   })
 
-  it('takes Escape and Tab as a start like any key, and opens or closes nothing with them', () => {
+  it('takes Escape as a start like any key, and opens or closes nothing else with it', () => {
     render(<App />)
     expect(key('keydown', 'Escape').defaultPrevented).toBe(true)
     expect(screen.queryByText(START_TEXT)).toBeNull()
-    cleanup()
-
-    render(<App />)
-    expect(key('keydown', 'Tab', { key: 'Tab' }).defaultPrevented).toBe(true)
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
+    expect(panel('Settings')).toBeNull()
+    expect(panel('Songs')).toBeNull()
     expect(document.activeElement).toBe(document.body)
+  })
+
+  it('leaves Tab to the browser, which moves through the box: the app goes on waiting', () => {
+    render(<App />)
+    expect(key('keydown', 'Tab', { key: 'Tab' }).defaultPrevented).toBe(false)
+    key('keyup', 'Tab', { key: 'Tab' })
+    expect(key('keydown', 'Tab', { key: 'Tab', shiftKey: true }).defaultPrevented).toBe(false)
+    key('keyup', 'Tab', { key: 'Tab', shiftKey: true })
+
+    expect(screen.getByText(START_TEXT)).toBeTruthy()
+    expect(startBox()).not.toBeNull()
+    expect((document.querySelector('.app__screen') as HTMLElement).hasAttribute('inert')).toBe(true)
+    expect(audio.state.starts).toBe(0)
+    expect(heldNotes()).toEqual([])
+
+    // What Tab stops at: the window around the box, then the lines of the box that
+    // can be chosen. Nothing of the screen behind them is among these.
+    const layer = document.querySelector('.start-layer') as HTMLElement
+    const stops = [...layer.querySelectorAll<HTMLElement>('button')].filter(
+      (control) => control.tabIndex >= 0,
+    )
+    expect(stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent)).toEqual([
+      START_TEXT,
+      'Free PlayPlay anything you like',
+      'Play Twinkle, Twinkle, Little Star',
+      'Play Mary Had a Little Lamb',
+      'Play Ode to Joy',
+      'All songs…',
+      'Settings',
+      'About',
+    ])
+  })
+
+  it('leaves Enter to the line of the box that has the focus: its click starts the app', () => {
+    render(<App />)
+    const settingsLine = button('Settings')
+    settingsLine.focus()
+    // The key itself starts nothing; the browser then clicks the line.
+    expect(key('keydown', 'Enter', { key: 'Enter' }).defaultPrevented).toBe(false)
+    expect(key('keydown', 'NumpadEnter', { key: 'Enter' }).defaultPrevented).toBe(false)
+    expect(screen.getByText(START_TEXT)).toBeTruthy()
+    expect(audio.state.starts).toBe(0)
+
+    pressEnterOn(settingsLine)
+    key('keyup', 'Enter', { key: 'Enter' })
+    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
+    expect((document.querySelector('.app__screen') as HTMLElement).hasAttribute('inert')).toBe(false)
+    expect(audio.state.starts).toBe(1)
+    // The line did what it says, and the key played nothing.
+    expect(panel('Settings')).not.toBeNull()
+    expect(heldNotes()).toEqual([])
+  })
+
+  it('takes Enter as a start like any key when the focus is on the window around the box', () => {
+    render(<App />)
+    button(START_TEXT).focus()
+    expect(key('keydown', 'Enter', { key: 'Enter' }).defaultPrevented).toBe(true)
+    key('keyup', 'Enter', { key: 'Enter' })
+    expect(startBox()).toBeNull()
+    expect(panel('Settings')).toBeNull()
+    expect(panel('Songs')).toBeNull()
+    expect(audio.state.starts).toBe(1)
+  })
+
+  /** The panels that are open. */
+  function openPanels(): string[] {
+    return (['Settings', 'Songs'] as const).filter((name) => panel(name) !== null)
+  }
+
+  it.each<[string, string | RegExp, () => void]>([
+    ['"Free Play"', /Free Play/, () => expect(openPanels()).toEqual([])],
+    [
+      'of a song',
+      'Play Ode to Joy',
+      () => {
+        expect(openPanels()).toEqual([])
+        expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
+        expect(player.getState().status).toBe('playing')
+      },
+    ],
+    ['"All songs…"', 'All songs…', () => expect(openPanels()).toEqual(['Songs'])],
+    ['"Settings"', 'Settings', () => expect(openPanels()).toEqual(['Settings'])],
+    [
+      '"About"',
+      'About',
+      () => {
+        expect(openPanels()).toEqual(['Settings'])
+        const about = screen.getByRole('tab', { name: 'About' })
+        expect(about.getAttribute('aria-selected')).toBe('true')
+      },
+    ],
+  ])('is started by a click on its line %s, which does what it says', (_line, name, itDid) => {
+    render(<App />)
+    clickWithMouse(button(name))
+    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
+    expect((document.querySelector('.app__screen') as HTMLElement).hasAttribute('inert')).toBe(false)
+    expect(audio.state.starts).toBe(1)
+    expect(heldNotes()).toEqual([])
+    itDid()
+
+    // The app has started: the next key is a note.
+    key('keydown', 'KeyA')
+    expect(heldNotes()).toEqual([60])
   })
 
   it('does not start at Ctrl, Alt or the Windows key, alone or with a letter', () => {
@@ -1101,10 +1429,11 @@ describe('the start overlay', () => {
     expect(audio.state.starts).toBe(0)
   })
 
-  it('is taken away by a click, and the click plays nothing and opens nothing', () => {
+  it('is taken away by a click on the window around it, which plays and opens nothing', () => {
     render(<App />)
-    clickWithMouse(button(new RegExp(START_TEXT)))
+    clickWithMouse(button(START_TEXT))
     expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
     expect(heldNotes()).toEqual([])
     expect(panel('Settings')).toBeNull()
     expect(panel('Songs')).toBeNull()
@@ -1118,14 +1447,15 @@ describe('the start overlay', () => {
       audio.tell()
     })
     expect(screen.queryByText(START_TEXT)).toBeNull()
+    expect(startBox()).toBeNull()
     expect((document.querySelector('.app__screen') as HTMLElement).hasAttribute('inert')).toBe(false)
   })
 
   it('asks for sound again at each key until the browser has counted one', () => {
     vi.stubGlobal('navigator', { userActivation: { hasBeenActive: false } })
     render(<App />)
-    key('keydown', 'ShiftLeft', { key: 'Shift', shiftKey: true })
-    key('keyup', 'ShiftLeft', { key: 'Shift' })
+    // Escape starts the app, but no browser counts it as a go-ahead for sound.
+    tap('Escape')
     expect(screen.queryByText(START_TEXT)).toBeNull()
     expect(audio.state.starts).toBe(0)
 
@@ -1171,7 +1501,7 @@ describe('the sound status', () => {
     ['the sky', () => emptySky()],
     ['a piano key', () => pianoKey(60)],
     ['the top bar', () => menu()],
-    ['a button', () => button('Songs')],
+    ['the Menu button', () => button('Menu')],
   ])('tries again at a click on %s after the sound could not start', (_where, target) => {
     startApp()
     setStatus('error')
@@ -1294,8 +1624,15 @@ describe('the words over the sky, in the whole app', () => {
   })
 
   it('say how to play until the first note, and never again: not after a panel, not after a song', () => {
-    startApp()
+    render(<App />)
     const hint = (): string => screen.getByText(HINT).className
+    // Not before the app has started, and not while the start box is open over the sky.
+    expect(hint()).toBe('stage__hint stage__hint--gone')
+    tap('Enter')
+    expect(hint()).toBe('stage__hint')
+    clickWithMouse(button('Menu'))
+    expect(hint()).toBe('stage__hint stage__hint--gone')
+    tap('Escape')
     expect(hint()).toBe('stage__hint')
 
     openSettingsOn('Keys')
@@ -1316,33 +1653,70 @@ describe('the words over the sky, in the whole app', () => {
 })
 
 describe('what screen readers are told', () => {
-  it('the modes are tabs, and the stage is the page of the one that is chosen', () => {
+  it('the modes are lines of the start box; the stage is named after the one that is on', () => {
     startApp()
-    const modes = screen.getByRole('tablist', { name: 'Modes' })
-    const tabs = within(modes).getAllByRole('tab')
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Free Play', 'PracticeSoon', 'Real-timeSoon'])
+    // They are not tabs: with no panel open, the page has no tabs and no page of a tab.
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByRole('tabpanel')).toBeNull()
+    const box = openStartBox()
+    const modes = within(within(box).getByRole('region', { name: 'Play' })).getAllByRole('button')
+    expect(modes.map((mode) => mode.textContent)).toEqual([
+      'Free PlayPlay anything you like',
+      'PracticeThe song waits for youSoon',
+      'Real-timeYour timing is scoredSoon',
+    ])
 
-    const [freePlay, ...coming] = tabs
-    const stage = screen.getByRole('tabpanel', { name: 'Free Play' })
-    expect(freePlay?.getAttribute('aria-selected')).toBe('true')
-    expect(freePlay?.getAttribute('aria-controls')).toBe(stage.id)
-    expect(stage.getAttribute('aria-labelledby')).toBe(freePlay?.id)
+    const [freePlay, ...coming] = modes
+    expect(freePlay?.getAttribute('aria-pressed')).toBe('true')
+    expect(freePlay?.hasAttribute('aria-disabled')).toBe(false)
+    expect(freePlay?.tabIndex).toBe(0)
+    // The stage is a part of the page with a name of its own: the name of that line.
+    const stage = screen.getByRole('region', { name: 'Free Play' })
     expect(stage.contains(piano())).toBe(true)
+    expect(stage.contains(box)).toBe(false)
 
-    for (const tab of coming) {
-      expect(tab.getAttribute('aria-selected')).toBe('false')
-      expect(tab.getAttribute('aria-disabled')).toBe('true')
-      expect(tab.tabIndex).toBe(-1)
-      expect(tab.title).toBe('Coming in a later update')
+    for (const mode of coming) {
+      expect(mode.hasAttribute('aria-pressed')).toBe(false)
+      expect(mode.getAttribute('aria-disabled')).toBe('true')
+      expect(mode.tabIndex).toBe(-1)
+      expect(mode.title).toBe('Coming in a later update')
     }
   })
 
-  it('every control of the menu has a name, with a song loaded too', () => {
+  it('the start box is a dialog that the Menu button points at for as long as it is open', () => {
+    render(<App />)
+    const menuButton = document.querySelector('.top-bar__menu') as HTMLElement
+    // The app opens with it, and the Menu button says so behind it.
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true')
+    expect(menuButton.getAttribute('aria-controls')).toBe(startBox()?.id)
+
+    tap('Enter')
+    expect(button('Menu')).toBe(menuButton)
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false')
+    expect(menuButton.hasAttribute('aria-controls')).toBe(false)
+
+    clickWithMouse(menuButton)
+    expect(menuButton.getAttribute('aria-expanded')).toBe('true')
+    expect(menuButton.getAttribute('aria-controls')).toBe(startBox()?.id)
+    expect(startBox()?.id).toBeTruthy()
+
+    // A panel is not the start box: while one is open, the Menu button points at nothing.
+    clickWithMouse(button('Settings'))
+    expect(menuButton.getAttribute('aria-expanded')).toBe('false')
+    expect(menuButton.hasAttribute('aria-controls')).toBe(false)
+  })
+
+  it('every control of the menu and of the start box has a name, with a song loaded too', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    const names = [...menu().querySelectorAll<HTMLElement>('button, input')].map(
+    const controls = [
+      ...menu().querySelectorAll<HTMLElement>('button, input'),
+      ...openStartBox().querySelectorAll<HTMLElement>('button'),
+    ]
+    expect(controls.length).toBeGreaterThanOrEqual(18)
+    const names = controls.map(
       (control) => control.getAttribute('aria-label') ?? control.textContent ?? '',
     )
     expect(names.every((name) => name.trim() !== '')).toBe(true)
@@ -1354,18 +1728,29 @@ describe('what screen readers are told', () => {
     )
   })
 
-  it('the name of the app is the one main heading, and a panel has its own below it', () => {
-    startApp()
-    expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([APP_NAME])
+  it('the name of the app, in the start box, is the one main heading; a panel has its own', () => {
+    const headings = (level: number): (string | null)[] =>
+      screen.queryAllByRole('heading', { level }).map((heading) => heading.textContent)
+
+    // The app opens with the start box: the name, and under it the headings of its two lists.
+    render(<App />)
+    expect(headings(1)).toEqual([APP_NAME])
+    expect(headings(2)).toEqual(['Play', 'Songs'])
+    expect(startBox()?.contains(screen.getByRole('heading', { level: 1 }))).toBe(true)
+
+    // The name is in the box and nowhere else: it goes away with the box, and comes back with it.
+    tap('Enter')
+    expect(screen.queryAllByRole('heading')).toEqual([])
+    openStartBox()
+    expect(headings(1)).toEqual([APP_NAME])
+    expect(headings(2)).toEqual(['Play', 'Songs'])
+
     openPanel('Songs')
+    expect(headings(1)).toEqual([])
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Songs')
   })
 
   it('ids that point from one element to another all lead somewhere, whatever is open', () => {
-    startApp()
-    act(() => {
-      playSong(A_STARTER_SONG)
-    })
     const dangling = (): string[] =>
       [...document.querySelectorAll('[aria-controls], [aria-labelledby], [aria-describedby]')]
         .flatMap((element) =>
@@ -1374,19 +1759,35 @@ describe('what screen readers are told', () => {
           ),
         )
         .filter((id) => document.getElementById(id) === null)
+    /** The ids that more than one element has. */
+    const repeated = (): string[] => {
+      const ids = [...document.querySelectorAll('[id]')].map((element) => element.id)
+      return ids.filter((id, index) => ids.indexOf(id) !== index)
+    }
+
+    // The app opens with the start box, which the Menu button behind it points at.
+    render(<App />)
+    expect(dangling()).toEqual([])
+    expect(repeated()).toEqual([])
+    tap('Enter')
+    act(() => {
+      playSong(A_STARTER_SONG)
+    })
 
     expect(dangling()).toEqual([])
     clickWithMouse(button('Song options'))
     expect(dangling()).toEqual([])
+    // The start box again, this time opened with the Menu button.
+    openStartBox()
+    expect(dangling()).toEqual([])
+    expect(repeated()).toEqual([])
     for (const tab of ['Sound', 'Keys', 'Piano', 'Look', 'About']) {
       openSettingsOn(tab)
       expect(dangling()).toEqual([])
     }
     openPanel('Songs')
     expect(dangling()).toEqual([])
-
-    const ids = [...document.querySelectorAll('[id]')].map((element) => element.id)
-    expect(new Set(ids).size).toBe(ids.length)
+    expect(repeated()).toEqual([])
   })
 })
 
@@ -1417,7 +1818,8 @@ describe('when React draws everything twice (StrictMode), as the real page does'
     expect(audio.state.starts).toBe(1)
   })
 
-  it('leaves no listener on the window or the document when the app goes away', () => {
+  /** Writes down each listener put on the window or the document, and each one taken off. */
+  function followListeners(): { added: string[]; removed: string[] } {
     const added: string[] = []
     const removed: string[] = []
     for (const [name, target] of [
@@ -1435,21 +1837,50 @@ describe('when React draws everything twice (StrictMode), as the real page does'
         remove(type, listener, options)
       })
     }
+    return { added, removed }
+  }
+
+  // React itself listens on the document for as long as the page lives: only the app's own count.
+  function ours(list: string[]): string[] {
+    const isOurs = (entry: string): boolean =>
+      !entry.startsWith('document ') || /visibilitychange|fullscreen/.test(entry)
+    return list.filter(isOurs).sort()
+  }
+
+  it('leaves no listener on the window or the document when the app goes away', () => {
+    const { added, removed } = followListeners()
 
     drawTwice()
     tap('Enter')
     openSettingsOn('Keys')
-    clickWithMouse(button('Songs'))
+    openPanel('Songs')
     act(() => {
       playSong(A_STARTER_SONG)
     })
     clickWithMouse(button('Song options'))
     cleanup()
 
-    // React itself listens on the document for as long as the page lives: only the app's own count.
-    const ours = (list: string[]): string[] =>
-      list.filter((entry) => !entry.startsWith('document ') || /visibilitychange|fullscreen/.test(entry)).sort()
     expect(ours(added).length).toBeGreaterThan(0)
+    expect(ours(removed)).toEqual(ours(added))
+  })
+
+  it('nor when it goes away with the start box open, which listens to the mouse', () => {
+    const { added, removed } = followListeners()
+
+    // Before the first click the box does not listen: the window around it is a button.
+    drawTwice()
+    cleanup()
+    expect(added).not.toContain('window pointerdown')
+    expect(ours(added).length).toBeGreaterThan(0)
+    expect(ours(removed)).toEqual(ours(added))
+
+    // Opened with the Menu button, it listens for a press of the mouse anywhere else.
+    drawTwice()
+    tap('Enter')
+    openPanel('Songs')
+    openStartBox()
+    expect(added).toContain('window pointerdown')
+    cleanup()
     expect(ours(removed)).toEqual(ours(added))
   })
 

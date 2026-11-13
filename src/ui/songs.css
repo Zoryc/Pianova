@@ -118,8 +118,9 @@
 /* ---------- Player line ---------- */
 
 /*
- * A strip of glass as wide as its parent allows, centred. The app puts it
- * under the top bar. Its options open below it without moving anything.
+ * A strip of glass as wide as its parent allows, centred. The top bar puts
+ * it in a row of its own under the Menu button, or, in a wide window, in the
+ * same row (chrome.css). Its options open below it without moving anything.
  */
 .player-line {
   position: relative;
@@ -225,6 +226,23 @@
   }
 }
 
+/*
+ * A window wide enough for one bar: the line stands in the top bar's own row,
+ * between the Menu button and the volume. It needs no glass of its own
+ * there, since the bar is dark behind it, and a little more air between its
+ * parts, which no longer have an edge around them.
+ */
+@media (min-width: 1650px) {
+  .player-line__controls {
+    gap: 4px 16px;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+}
+
 /* ---------- Song options ---------- */
 
 /*
@@ -256,6 +274,13 @@
   background: var(--panel-glass);
   box-shadow: var(--shadow-float);
   backdrop-filter: blur(12px);
+}
+
+/* In one bar the options start right under the top bar: there is no second row above them. */
+@media (min-width: 1650px) {
+  .song-options {
+    max-height: min(340px, 64dvh - var(--top-bar-height) - 16px);
+  }
 }
 
 /* In a narrow window the player line has two rows, 90px high: the options start 40px lower. */

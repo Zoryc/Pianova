@@ -2,14 +2,16 @@
 /**
  * Long random sessions on the assembled app (src/App.tsx): computer keys
  * going down and up in any order, repeats of held keys, the mouse pressing,
- * dragging and letting go on the piano, clicks on the Settings tabs, the
- * ready-made layouts, Lower and Higher, the piano size, the keyboard type,
- * clicks on the sky, another window coming in front.
+ * dragging and letting go on the piano, the Menu button and the start box it
+ * opens, clicks on the Settings tabs, the ready-made layouts, Lower and
+ * Higher, the piano size, the keyboard type, clicks on the sky, another
+ * window coming in front.
  *
  * Whatever happens, three things must hold after every step: no note sounds
  * that no held key and no pressed mouse button explains (a stuck note), every
  * computer key plays at most one note and every note has at most one key, and
  * the piano is in selection mode exactly while Settings shows its Keys tab.
+ * (Settings and the start box, for their part, are never open together.)
  *
  * The runs are seeded, so a failure can be played again.
  */
@@ -126,6 +128,15 @@ function clickWithMouse(target: HTMLElement): void {
 
 function piano(): HTMLElement {
   return screen.getByRole('group', { name: 'Piano' })
+}
+
+/** The start box: the small menu that the Menu button opens. "Settings" is one of its lines. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+function menuButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'Menu' })
 }
 
 /** The notes the piano shows right now. */
@@ -310,6 +321,8 @@ describe('a long random session with the computer keys and the mouse', () => {
         expect(piano().querySelectorAll('.is-selected').length, lately()).toBeLessThanOrEqual(
           editing ? 1 : 0,
         )
+        // Settings takes the place of the start box, and the box that of Settings.
+        expect(dialog !== null && startBox() !== null, lately()).toBe(false)
 
         // A note that neither a held key nor the pressed mouse explains is a stuck note.
         const holders = [...down].filter(isBindableCode).length + (mouse.isDown ? 1 : 0)
@@ -384,7 +397,10 @@ describe('a long random session with the computer keys and the mouse', () => {
         } else if (action < 100) {
           const dialog = screen.queryByRole('dialog', { name: 'Settings' })
           if (dialog === null) {
-            clickWithMouse(screen.getByRole('button', { name: 'Settings' }))
+            // Settings is a line of the start box, which the Menu button opens.
+            if (startBox() === null) clickWithMouse(menuButton())
+            const box = screen.getByRole('dialog', { name: 'Menu' })
+            clickWithMouse(within(box).getByRole('button', { name: 'Settings' }))
             log.push('open Settings')
           } else {
             const tabs = ['Sound', 'Keys', 'Piano', 'Keys', 'Keys']
@@ -413,9 +429,18 @@ describe('a long random session with the computer keys and the mouse', () => {
           if (target) {
             clickWithMouse(target)
             log.push('click reset / Yes')
+          } else if (screen.queryByRole('dialog', { name: 'Settings' }) === null) {
+            // With Settings closed there is nothing to answer. The mouse goes
+            // to the Menu button instead: the start box opens, or closes, under
+            // whatever is held down, and the steps that follow meet it open.
+            clickWithMouse(menuButton())
+            log.push('click Menu')
           }
         } else {
-          clickWithMouse(document.querySelector('.stage__sky') as HTMLElement)
+          const sky = document.querySelector('.stage__sky') as HTMLElement
+          // The press of the button comes first: that is what closes an open start box.
+          fireEvent.pointerDown(sky)
+          clickWithMouse(sky)
           log.push('click sky')
         }
         check()

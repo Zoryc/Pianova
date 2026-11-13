@@ -126,7 +126,10 @@ function key(type: 'keydown' | 'keyup', code: string, init: KeyboardEventInit = 
   })
 }
 
-/** Draws the app, counts every time React commits a change to the page, and gets past the start overlay. */
+/**
+ * Draws the app, counts every time React commits a change to the page, and
+ * starts the app with a key press, which also closes the start box.
+ */
 function startApp(): { commits: () => number } {
   let commits = 0
   render(
@@ -142,6 +145,12 @@ function startApp(): { commits: () => number } {
 /** A click with the mouse (`detail: 1` is what a real one carries). */
 function click(role: 'button' | 'tab', name: string | RegExp): void {
   fireEvent.click(screen.getByRole(role, { name }), { detail: 1 })
+}
+
+/** Opens the start box with the Menu button and clicks one of its lines. */
+function clickInMenu(line: string): void {
+  click('button', 'Menu')
+  click('button', line)
 }
 
 describe('React work per note', () => {
@@ -164,7 +173,8 @@ describe('React work per note', () => {
     const atStart = drawn.topBar
     act(() => settingsStore.set({ volume: 0.5 }))
     expect(drawn.topBar).toBeGreaterThan(atStart)
-    click('button', 'Settings')
+    clickInMenu('Settings')
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
 
     const before = drawn.topBar
     // The very first note also takes "how to play" off the screen.
@@ -440,9 +450,10 @@ describe('listeners', () => {
       key('keydown', 'Enter')
       key('keyup', 'Enter')
       key('keydown', 'KeyA')
-      // Both panels, one after the other, then the Keys tab, where the computer keys are chosen.
-      click('button', 'Songs')
-      click('button', 'Settings')
+      // Both panels, one after the other, each through the start box, then the
+      // Keys tab, where the computer keys are chosen.
+      clickInMenu('All songs…')
+      clickInMenu('Settings')
       click('tab', 'Keys')
       expect(document.querySelector('.piano--editing')).not.toBeNull()
       // A note is being held, and its light is rising, when the app goes away.
@@ -481,8 +492,14 @@ describe('listeners', () => {
     for (let round = 0; round < 5; round++) {
       key('keydown', 'KeyA')
       key('keyup', 'KeyA')
+      // The start box, which watches the whole window for a press of the mouse
+      // while it is open: opened with the Menu button, and closed with it again.
+      click('button', 'Menu')
+      expect(screen.getByRole('dialog', { name: 'Menu' })).toBeTruthy()
+      click('button', 'Menu')
+      expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
       // Settings, on the tab where the computer keys are chosen and moved, and closed again.
-      click('button', 'Settings')
+      clickInMenu('Settings')
       click('tab', 'Keys')
       expect(document.querySelector('.piano--editing')).not.toBeNull()
       click('button', /Higher/)
@@ -490,10 +507,10 @@ describe('listeners', () => {
       click('button', 'Close Settings')
       expect(document.querySelector('.piano--editing')).toBeNull()
       // The other panel, and closed again.
-      click('button', 'Songs')
+      clickInMenu('All songs…')
       click('button', 'Close Songs')
       // A song: played from the Songs panel, its options opened, and closed.
-      click('button', 'Songs')
+      clickInMenu('All songs…')
       click('button', /^Play Twinkle/)
       expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
       click('button', /^Song options/)

@@ -55,6 +55,8 @@ function inWindows(condition: string): string {
 
 const NARROW = inWindows('max-width: 959px')
 const WIDE = inWindows('min-width: 960px')
+/** Wide enough for the player line to stand in the top bar's own row: one bar, not two. */
+const ONE_BAR = inWindows('min-width: 1650px')
 
 /** The variables the stylesheet reads that it does not get from theme.css. */
 const SET_BY_THE_COMPONENTS = ['--song-progress']
@@ -89,11 +91,17 @@ describe('songs.css', () => {
 })
 
 describe('the player line', () => {
-  it('knows two kinds of window, narrow and wide, and one ends where the other begins', () => {
+  it('knows narrow and wide windows, which meet at 960px, and one-bar windows from 1650px', () => {
     const widths = [...songsCss.matchAll(/@media \(((?:min|max)-width: [^)]+)\)/g)].map(
       (match) => match[1],
     )
-    expect([...new Set(widths)].sort()).toEqual(['max-width: 959px', 'min-width: 960px'])
+    // Narrow ends where wide begins. From 1650px, still a wide window, the
+    // line stands in the top bar's own row.
+    expect([...new Set(widths)].sort()).toEqual([
+      'max-width: 959px',
+      'min-width: 1650px',
+      'min-width: 960px',
+    ])
   })
 
   it('gives the title of a wide window its own width, so that a title that fits is not cut', () => {
@@ -113,6 +121,21 @@ describe('the player line', () => {
     expect(value('.player-line__title', 'flex')).toBe('2 1 0')
     expect(value('.player-line__position', 'flex-basis', NARROW)).toBe('100%')
     expect(value('.player-line__position', 'order', NARROW)).toBe('1')
+  })
+
+  it('is a strip of glass in a row of its own, and bare in the one bar, dark behind it', () => {
+    expect(value('.player-line__controls', 'background')).toBe('var(--panel-glass)')
+    expect(value('.player-line__controls', 'border')).toBe('1px solid var(--control-line)')
+    expect(value('.player-line__controls', 'padding')).toBe('6px 12px')
+
+    expect(value('.player-line__controls', 'background', ONE_BAR)).toBe('none')
+    expect(value('.player-line__controls', 'border', ONE_BAR)).toBe('0')
+    expect(value('.player-line__controls', 'padding', ONE_BAR)).toBe('0')
+    expect(value('.player-line__controls', 'box-shadow', ONE_BAR)).toBe('none')
+    expect(value('.player-line__controls', 'backdrop-filter', ONE_BAR)).toBe('none')
+    // Its parts have no edge around them there, and a little more air between them.
+    expect(value('.player-line__controls', 'gap')).toBe('4px 12px')
+    expect(value('.player-line__controls', 'gap', ONE_BAR)).toBe('4px 16px')
   })
 })
 
@@ -158,17 +181,41 @@ describe('the song options', () => {
   })
 
   it('end above the piano, whose top edge is never higher than 64% of the way down the window', () => {
-    // From the top of the window: the top bar, the player line (50px), a gap of 8px, the
-    // options, and 8px that stay free above the piano.
+    // From the top of the window: the first row of the top bar, the player line in the
+    // row under it (50px), a gap of 8px, the options, and 8px that stay free above the piano.
     expect(value('.song-options', 'top')).toBe('calc(100% + 8px)')
     expect(value('.song-options', 'max-height')).toBe(
       'min(340px, 64dvh - var(--top-bar-height) - 66px)',
     )
   })
 
+  // The sum above takes the player line to start as far down as the top bar
+  // is high without it. That is so while the bar's room at its top, one row
+  // of controls and the gap under that row add up to that height.
+  it('count on a player line that starts where a top bar of one row would end', () => {
+    const chromeCss = readStyles('./chrome.css')
+    const [roomAtTheTop = ''] = value('.top-bar', 'padding', chromeCss).split(' ')
+    const fromTheTop =
+      Number.parseFloat(roomAtTheTop) +
+      Number.parseFloat(value('.button', 'min-height', chromeCss)) +
+      Number.parseFloat(value('.top-bar', 'gap', chromeCss))
+    expect(`${fromTheTop}px`).toBe(value(':root', '--top-bar-height', themeCss))
+    // The Menu button is one of those controls, and the line is in the row under it.
+    expect(value('.top-bar__menu', 'grid-area', chromeCss)).toBe('1 / 1')
+    expect(value('.top-bar > .player-line', 'grid-area', chromeCss)).toBe('2 / 1 / auto / -1')
+  })
+
   it('start 40px lower in a narrow window, where the player line has two rows, and end as high', () => {
     expect(value('.song-options', 'max-height', NARROW)).toBe(
       'min(340px, 64dvh - var(--top-bar-height) - 106px)',
+    )
+  })
+
+  it('start right under the top bar in a window of one bar, and end above the piano too', () => {
+    // The line is in the bar's own row there, with no row above it: the options start
+    // where the bar ends, 8px under the line, and 16px stay free above the piano.
+    expect(value('.song-options', 'max-height', ONE_BAR)).toBe(
+      'min(340px, 64dvh - var(--top-bar-height) - 16px)',
     )
   })
 

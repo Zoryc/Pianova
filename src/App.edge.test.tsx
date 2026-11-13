@@ -203,10 +203,32 @@ async function audioIs(status: string): Promise<void> {
   await vi.waitFor(() => expect(engine.getStatus()).toBe(status))
 }
 
-/** The app with the overlay gone and audio running on the basic sound (samples still loading). */
+/**
+ * The window around the start box. While the app waits for the first click
+ * or key press it is one button, named after what the box says.
+ */
+function startButton(): HTMLElement {
+  return screen.getByRole('button', { name: START_TEXT })
+}
+
+/** The app has started: the window is no longer a start button, and the start box is gone. */
+function expectStarted(): void {
+  expect(screen.queryByRole('button', { name: START_TEXT })).toBeNull()
+  expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
+}
+
+/** The Menu button of the top bar, which opens the start box. */
+function menuButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'Menu' })
+}
+
+/**
+ * The app started with a click beside the start box, and audio running on the
+ * basic sound (samples still loading).
+ */
 async function startApp(): Promise<User> {
   const user = drawApp()
-  await user.click(screen.getByText(START_TEXT))
+  await user.click(startButton())
   await audioIs('loading')
   return user
 }
@@ -288,7 +310,7 @@ describe('from the first key press to the first sound', () => {
     expect(status.getAttribute('role')).toBe('status')
     expect(status.textContent).toBe('')
 
-    await user.click(screen.getByText(START_TEXT))
+    await user.click(startButton())
     await audioIs('loading')
     await vi.waitFor(() => expect(soundStatusText()).toBe('Loading piano sound…'))
     act(() => fake.world.samplers.at(-1)?.finishLoading())
@@ -316,7 +338,7 @@ describe('from the first key press to the first sound', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     fake.world.context.resume.mockRejectedValueOnce(new Error('blocked by the browser'))
     const user = drawApp()
-    await user.click(screen.getByText(START_TEXT))
+    await user.click(startButton())
     await audioIs('error')
     await vi.waitFor(() =>
       expect(soundStatusText()).toBe('Sound could not start. Click anywhere to try again.'),
@@ -370,11 +392,11 @@ describe('a first key press that the browser does not count as a user gesture', 
       Reflect.deleteProperty(navigator, 'userActivation')
     })
 
-    it('removes the overlay on Escape without asking for sound, and starts it at the first key that counts', async () => {
+    it('closes the start box on Escape without asking for sound, and starts it at the first key that counts', async () => {
       fake.world.pageActivated = false
       const user = drawApp()
       await user.keyboard('[Escape]')
-      expect(screen.queryByText(START_TEXT)).toBeNull()
+      expectStarted()
       expect(fake.world.context.resume).not.toHaveBeenCalled()
       expect(engine.getStatus()).toBe('idle')
 
@@ -390,12 +412,36 @@ describe('a first key press that the browser does not count as a user gesture', 
     it('starts the sound with a click as well, once it counts', async () => {
       fake.world.pageActivated = false
       const user = drawApp()
-      await user.keyboard('[ShiftLeft]')
+      // Escape starts the app, and the browser does not count it: no sound is asked for.
+      await user.keyboard('[Escape]')
+      expectStarted()
       expect(fake.world.context.resume).not.toHaveBeenCalled()
+      expect(engine.getStatus()).toBe('idle')
+
+      // A click on the menu, which is in reach now that the app has started.
+      activation.hasBeenActive = true
+      fake.world.pageActivated = true
+      await user.click(menuButton())
+      await audioIs('loading')
+      expect(fake.world.context.resume).toHaveBeenCalledTimes(1)
+    })
+
+    // Shift alone is not "any key": it goes down before Tab on the way back
+    // through the start box. The app goes on waiting, and the click that
+    // starts it is then the one that starts the sound.
+    it('goes on waiting at a lone Shift, and the starting click starts the sound', async () => {
+      fake.world.pageActivated = false
+      const user = drawApp()
+      await user.keyboard('[ShiftLeft]')
+      expect(startButton()).toBeTruthy()
+      expect(screen.getByRole('dialog', { name: 'Menu' })).toBeTruthy()
+      expect(fake.world.context.resume).not.toHaveBeenCalled()
+      expect(engine.getStatus()).toBe('idle')
 
       activation.hasBeenActive = true
       fake.world.pageActivated = true
-      await user.click(screen.getByRole('button', { name: 'Settings' }))
+      await user.click(startButton())
+      expectStarted()
       await audioIs('loading')
       expect(fake.world.context.resume).toHaveBeenCalledTimes(1)
     })
@@ -468,6 +514,8 @@ describe('sustain, from the Space key to the instrument', () => {
   it('lets notes ring on when the computer keys move higher, and stops them when sustain goes off', async () => {
     const user = await startAppWithPiano()
     // "Higher" is in Settings, on the Keys tab, where the keyboard still plays.
+    // Settings is a line of the start box, which the Menu button opens.
+    await user.click(menuButton())
     await user.click(screen.getByRole('button', { name: 'Settings' }))
     await user.click(screen.getByRole('tab', { name: 'Keys' }))
     await user.keyboard('[Space]')

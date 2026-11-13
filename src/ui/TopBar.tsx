@@ -1,77 +1,62 @@
 import type { JSX, ReactNode, RefObject } from 'react'
-import { APP_NAME } from '../app/appInfo'
 import { settingsStore } from '../state/settings'
 import type { Settings } from '../state/settings'
 import './chrome.css'
-import { FullscreenButton } from './FullscreenButton'
-import { ModeTabs } from './ModeTabs'
 import { formatPercent, toPercent } from './format'
 import type { AutoHideMenu } from './useAutoHide'
-
-/** The two panels that open from the top bar. Only one is open at a time. */
-export type PanelName = 'songs' | 'settings'
 
 export interface TopBarProps {
   /** Volume and sustain are shown and changed here. */
   settings: Settings
-  /** The panel that is open right now, or null. */
-  openPanel: PanelName | null
-  /** The ids of the two panels (what FloatingPanel gets as `id`). */
-  songsPanelId: string
-  settingsPanelId: string
-  onToggleSongs(): void
-  onToggleSettings(): void
+  /** Whether the start box, which the Menu button opens and closes, is open. */
+  startBoxOpen: boolean
+  /** The id of the start box (what StartBox gets as `id`). */
+  startBoxId: string
+  onToggleStartBox(): void
   /**
    * What useAutoHide returned: whether the menu is shown, and what follows the
    * mouse and the keyboard focus over it.
    */
   menu: AutoHideMenu
-  /** The id to give the Free Play tab, and the id of the part of the page it stands for. */
-  modeTabId: string
-  modePanelId: string
-  /** Let the app put the keyboard focus on the "Songs" and "Settings" buttons. */
-  songsButtonRef?: RefObject<HTMLButtonElement | null>
-  settingsButtonRef?: RefObject<HTMLButtonElement | null>
-  /** Drawn under the bar, and hidden and shown with it: the player line. */
+  /** Lets the app put the keyboard focus on the Menu button. */
+  startBoxButtonRef?: RefObject<HTMLButtonElement | null>
+  /** Drawn in the bar, and hidden and shown with it: the player line. */
   children?: ReactNode
 }
 
 /**
- * The menu at the top of the stage: the bar itself, and under it whatever it
- * is given as children. Both hide together when the mouse is still.
+ * The menu at the top of the stage: what is needed while playing, and
+ * nothing else. It hides when the mouse is still.
  *
- * Left to right: the app's name, the modes, then volume, sustain, the buttons
- * that open the Songs and Settings panels, and full screen. Volume and
- * sustain are written straight to the settings.
+ * Left to right: the Menu button, which opens the start box with everything
+ * that is used now and then; whatever it is given as children (the controls
+ * of the song, in the same row when the window is wide enough and in a row of
+ * their own under it otherwise); then volume and sustain, which are written
+ * straight to the settings.
  */
 export function TopBar(props: TopBarProps): JSX.Element {
-  const { settings, openPanel, menu, children } = props
+  const { settings, startBoxOpen, menu, children } = props
 
   return (
     <header className={menu.visible ? 'menu' : 'menu menu--hidden'} {...menu.menuProps}>
       <div className="top-bar">
-        <h1 className="top-bar__name">{APP_NAME}</h1>
-        <ModeTabs tabId={props.modeTabId} panelId={props.modePanelId} />
+        <button
+          ref={props.startBoxButtonRef}
+          type="button"
+          className="button top-bar__menu"
+          aria-expanded={startBoxOpen}
+          // A closed box is not on the page, and there is nothing to point at.
+          aria-controls={startBoxOpen ? props.startBoxId : undefined}
+          onClick={props.onToggleStartBox}
+        >
+          <MenuIcon />
+          Menu
+        </button>
+        {children}
         <div className="top-bar__space" />
         <Volume volume={settings.volume} />
         <Sustain on={settings.sustain} />
-        <PanelButton
-          label="Songs"
-          open={openPanel === 'songs'}
-          panelId={props.songsPanelId}
-          onToggle={props.onToggleSongs}
-          buttonRef={props.songsButtonRef}
-        />
-        <PanelButton
-          label="Settings"
-          open={openPanel === 'settings'}
-          panelId={props.settingsPanelId}
-          onToggle={props.onToggleSettings}
-          buttonRef={props.settingsButtonRef}
-        />
-        <FullscreenButton />
       </div>
-      {children}
     </header>
   )
 }
@@ -119,27 +104,12 @@ function Sustain({ on }: { on: boolean }): JSX.Element {
   )
 }
 
-interface PanelButtonProps {
-  label: string
-  open: boolean
-  panelId: string
-  onToggle(): void
-  buttonRef?: RefObject<HTMLButtonElement | null>
-}
-
-function PanelButton({ label, open, panelId, onToggle, buttonRef }: PanelButtonProps): JSX.Element {
+/** Three lines: a list to open. */
+function MenuIcon(): JSX.Element {
   return (
-    <button
-      ref={buttonRef}
-      type="button"
-      className="button button--quiet"
-      aria-expanded={open}
-      // A closed panel is not on the page, and there is nothing to point at.
-      aria-controls={open ? panelId : undefined}
-      onClick={onToggle}
-    >
-      {label}
-    </button>
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+    </svg>
   )
 }
 

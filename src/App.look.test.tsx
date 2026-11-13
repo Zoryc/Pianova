@@ -124,7 +124,7 @@ function pressEnterOn(target: HTMLElement): void {
   fireEvent.click(target, { detail: 0 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it with a key press, which also closes the start box. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -142,11 +142,32 @@ function settingsPanel(): HTMLElement {
   return screen.getByRole('dialog', { name: 'Settings' })
 }
 
+/** The Menu button of the top bar. It opens the start box, and Settings is one of its lines. */
+function menuButton(): HTMLElement {
+  return within(menu()).getByRole('button', { name: 'Menu' })
+}
+
+/** A line of the start box, which must be open. */
+function startBoxLine(name: string): HTMLElement {
+  const startBox = screen.getByRole('dialog', { name: 'Menu' })
+  return within(startBox).getByRole('button', { name })
+}
+
+/** Opens Settings with the mouse: the Menu button, then the "Settings" line of the start box. */
+function openSettingsWithMouse(): void {
+  clickWithMouse(menuButton())
+  clickWithMouse(startBoxLine('Settings'))
+}
+
+/** The same with the keyboard alone: Enter on the Menu button, then on the "Settings" line. */
+function openSettingsWithEnter(): void {
+  pressEnterOn(menuButton())
+  pressEnterOn(startBoxLine('Settings'))
+}
+
 /** Opens Settings on one of its tabs. (The panel remembers its last tab from test to test.) */
 function openSettingsOn(tab: string): HTMLElement {
-  if (!screen.queryByRole('dialog', { name: 'Settings' })) {
-    clickWithMouse(screen.getByRole('button', { name: 'Settings' }))
-  }
+  if (!screen.queryByRole('dialog', { name: 'Settings' })) openSettingsWithMouse()
   clickWithMouse(within(settingsPanel()).getByRole('tab', { name: tab }))
   return settingsPanel()
 }
@@ -595,7 +616,7 @@ describe('the tabs of Settings, in the app', () => {
   it('move with the arrow keys without playing a note or closing anything', async () => {
     const user = userEvent.setup()
     startApp()
-    pressEnterOn(screen.getByRole('button', { name: 'Settings' }))
+    openSettingsWithEnter()
     openSettingsOn('Sound')
     tabNamed('Sound').focus()
     vi.clearAllMocks()
@@ -661,7 +682,22 @@ describe('the tabs of Settings, in the app', () => {
     tap('Escape')
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
 
-    clickWithMouse(screen.getByRole('button', { name: 'Settings' }))
+    openSettingsWithMouse()
+    expect(shownTab()).toBe('About')
+  })
+
+  it('open on About from the "About" line of the start box, whatever tab was last used', () => {
+    startApp()
+    openSettingsOn('Look')
+    tap('Escape')
+
+    clickWithMouse(menuButton())
+    clickWithMouse(startBoxLine('About'))
+    expect(shownTab()).toBe('About')
+
+    // That is then the tab last used: the "Settings" line opens on it too.
+    tap('Escape')
+    openSettingsWithMouse()
     expect(shownTab()).toBe('About')
   })
 })
@@ -729,7 +765,7 @@ describe('after a click with the mouse in Settings', () => {
 describe('with the keyboard alone in Settings', () => {
   it('Enter on a control keeps the focus on it', () => {
     startApp()
-    pressEnterOn(screen.getByRole('button', { name: 'Settings' }))
+    openSettingsWithEnter()
     openSettingsOn('Look')
 
     for (const control of [
@@ -785,25 +821,21 @@ describe('with the keyboard alone in Settings', () => {
 })
 
 describe('closing Settings after working in it with the keyboard', () => {
-  function settingsButton(): HTMLElement {
-    return screen.getByRole('button', { name: 'Settings' })
-  }
-
-  it('gives the focus back to the Settings button when it was opened with Enter', () => {
+  it('gives the focus back to the Menu button when it was opened with Enter', () => {
     startApp()
-    pressEnterOn(settingsButton())
+    openSettingsWithEnter()
     openSettingsOn('Look')
     switchOf('Light bars').focus()
 
     tap('Escape')
 
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    expect(document.activeElement).toBe(settingsButton())
+    expect(document.activeElement).toBe(menuButton())
   })
 
-  it('gives the focus back to the Settings button when it was opened with the mouse and then used with Tab', () => {
+  it('puts the focus on the Menu button when opened with the mouse and then used with Tab', () => {
     startApp()
-    clickWithMouse(settingsButton())
+    openSettingsWithMouse()
     // The panel was opened with the mouse; from here on the player uses the
     // keyboard: Tab goes to the tabs, the arrow keys to the Look tab.
     const tab = tabNamed(shownTab())
@@ -813,14 +845,14 @@ describe('closing Settings after working in it with the keyboard', () => {
     tap('Escape')
 
     // The control that had the focus is gone with the panel. The focus is not
-    // lost: it is on the button that opens the panel again.
+    // lost: it is on the Menu button, through which the panel is opened again.
     expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull()
-    expect(document.activeElement).toBe(settingsButton())
+    expect(document.activeElement).toBe(menuButton())
   })
 
   it('leaves the keyboard to the piano when the panel was only ever used with the mouse', () => {
     startApp()
-    clickWithMouse(settingsButton())
+    openSettingsWithMouse()
     openSettingsOn('Look')
     clickWithMouse(switchOf('Light bars'))
 

@@ -14,7 +14,7 @@ import type { KeyEditor } from './useKeyEditor'
 import './settings/settings.css'
 
 export interface SettingsPanelProps {
-  /** The element id, for aria-controls on the button that opens the panel. */
+  /** The element id, by which the app finds the panel when it moves the keyboard focus. */
   id: string
   settings: Settings
   /** What `useKeyEditor` returns; the Keys tab shows its state and calls its actions. */
@@ -24,7 +24,8 @@ export interface SettingsPanelProps {
   onClose(): void
 }
 
-type TabId = 'sound' | 'keys' | 'piano' | 'look' | 'about'
+export type SettingsTabId = 'sound' | 'keys' | 'piano' | 'look' | 'about'
+type TabId = SettingsTabId
 
 const TABS: readonly TabItem<TabId>[] = [
   { id: 'sound', label: 'Sound' },
@@ -39,6 +40,11 @@ const TABS: readonly TabItem<TabId>[] = [
  * is remembered from one opening of the panel to the next while the app is open.
  */
 let lastTab: TabId = 'sound'
+
+/** Makes the panel open on `tab` the next time it is opened ("About", in the start box). */
+export function openSettingsOn(tab: SettingsTabId): void {
+  lastTab = tab
+}
 
 /**
  * Every option of the app, in five tabs. The panel floats over the sky and

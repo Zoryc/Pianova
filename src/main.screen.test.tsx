@@ -49,8 +49,20 @@ function wholePage(): string {
   return document.documentElement.outerHTML
 }
 
+/**
+ * What the first-level heading of the page says. It is at the head of the
+ * start box, the small menu the app opens with and that the Menu button opens
+ * again; the box must be open.
+ */
+function nameInStartBox(): string | null {
+  const heading = screen.getByRole('heading', { level: 1 })
+  const startBox = screen.getByRole('dialog', { name: 'Menu' })
+  expect(startBox.contains(heading)).toBe(true)
+  return heading.textContent
+}
+
 describe('main.tsx', () => {
-  it('draws the app in #root and puts APP_NAME in the browser tab, the heading and the start overlay', async () => {
+  it('draws the app in #root; APP_NAME is in the browser tab and heads the start box', async () => {
     document.title = 'not set yet'
     const root = document.createElement('div')
     root.id = 'root'
@@ -61,20 +73,29 @@ describe('main.tsx', () => {
     })
 
     expect(document.title).toBe(MADE_UP_NAME)
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(MADE_UP_NAME)
-    const overlay = screen.getByRole('button', { name: /Click or press any key to start/ })
-    expect(overlay.textContent).toContain(MADE_UP_NAME)
+    // The app opens with the start box. The name is at its head, as the one
+    // first-level heading of the page.
+    expect(nameInStartBox()).toBe(MADE_UP_NAME)
     expect(root.querySelector('.app')).not.toBeNull()
 
-    // Nowhere on the screen is the name typed in by hand, also with every
-    // panel open. (The name of today is a placeholder that no other word on
-    // the screen contains, which is what lets this tell a hand-typed copy.)
+    // Nowhere on the screen is the name typed in by hand, also with the start
+    // box and every panel open. (The name of today is a placeholder that no
+    // other word on the screen contains, which is what lets this tell a
+    // hand-typed copy.)
     expect(realName).not.toBe('')
     expect(wholePage()).not.toContain(realName)
 
-    fireEvent.click(overlay)
+    // The whole window around the start box is the button that starts the app.
+    fireEvent.click(screen.getByRole('button', { name: /Click or press any key to start/ }))
     expect(screen.queryByRole('button', { name: /Click or press any key to start/ })).toBeNull()
+    expect(screen.queryByRole('dialog', { name: 'Menu' })).toBeNull()
     expect(wholePage()).not.toContain(realName)
+
+    // The Menu button opens the start box again, with the name at its head.
+    const menuButton = screen.getByRole('button', { name: 'Menu' })
+    fireEvent.click(menuButton)
+    expect(nameInStartBox()).toBe(MADE_UP_NAME)
+    expect(wholePage(), 'the start box').not.toContain(realName)
 
     // Settings, on each of its tabs. "About" names the app, from APP_NAME too.
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
@@ -88,7 +109,8 @@ describe('main.tsx', () => {
     expect(within(settings).getByRole('heading', { level: 3 }).textContent).toBe(MADE_UP_NAME)
 
     // Songs, then the player line of a song and its options.
-    fireEvent.click(screen.getByRole('button', { name: 'Songs' }))
+    fireEvent.click(menuButton)
+    fireEvent.click(screen.getByRole('button', { name: 'All songs…' }))
     const songs = screen.getByRole('dialog', { name: 'Songs' })
     expect(wholePage(), 'Songs').not.toContain(realName)
     const playButtons = within(songs).getAllByRole('button', { name: /^Play / })
@@ -103,9 +125,11 @@ describe('main.tsx', () => {
     fireEvent.click(within(playerLine).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
 
-    // With all of that on the page, the name still showed in its three places.
+    // After all of that the name is still in its two places: the browser tab,
+    // and the head of the start box whenever that is open.
     expect(document.title).toBe(MADE_UP_NAME)
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(MADE_UP_NAME)
+    fireEvent.click(menuButton)
+    expect(nameInStartBox()).toBe(MADE_UP_NAME)
   })
 })
 

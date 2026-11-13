@@ -11,7 +11,7 @@ import type { SongMessage } from './useSongs'
 import './songs.css'
 
 export interface SongsPanelProps {
-  /** The element id, for aria-controls on the button that opens the panel. */
+  /** The element id, by which the app finds the panel when it moves the keyboard focus. */
   id: string
   onClose(): void
 }

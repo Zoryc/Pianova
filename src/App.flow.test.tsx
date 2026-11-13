@@ -120,7 +120,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   stopRecording()
-  // No test here plays a song. One that started by mistake must not play on into the next test.
+  // A song that was started from the start box must not play on into the next test.
   closeSong()
   bus.allOff()
   startFromDefaultSettings()
@@ -137,10 +137,34 @@ function drawApp(): User {
   return userEvent.setup()
 }
 
-/** Draws the app and gets past the start overlay with a click, as most players do. */
+/**
+ * The window around the start box. While the app waits for the first click
+ * or key press it is one button, named after what the box says.
+ */
+function startButton(): HTMLElement {
+  return screen.getByRole('button', { name: START_TEXT })
+}
+
+/** True while the app waits for the first click or key press. */
+function isWaitingToStart(): boolean {
+  return screen.queryByRole('button', { name: START_TEXT }) !== null
+}
+
+/** The start box: the small menu the app opens with, and that the Menu button opens later. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** The app has started: the window is no longer a start button, and the start box is gone. */
+function expectStarted(): void {
+  expect(isWaitingToStart()).toBe(false)
+  expect(startBox()).toBeNull()
+}
+
+/** Draws the app and starts it with a click beside the start box, as most players do. */
 async function startApp(): Promise<User> {
   const user = drawApp()
-  await user.click(screen.getByText(START_TEXT))
+  await user.click(startButton())
   notes.length = 0
   audio.calls.length = 0
   return user
@@ -196,12 +220,33 @@ function emptySky(): HTMLElement {
   return element
 }
 
-function settingsButton(): HTMLElement {
-  return screen.getByRole('button', { name: 'Settings' })
+/** The Menu button of the top bar, which opens and closes the start box. */
+function menuButton(): HTMLElement {
+  return screen.getByRole('button', { name: 'Menu' })
+}
+
+/** Opens the start box with the Menu button, unless it is open already. */
+async function openStartBox(user: User): Promise<HTMLElement> {
+  if (startBox() === null) await user.click(menuButton())
+  return screen.getByRole('dialog', { name: 'Menu' })
 }
 
 function settingsPanel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
+}
+
+/** Opens Settings the way a player does: the Menu button, then "Settings" in the start box. */
+async function openSettings(user: User): Promise<HTMLElement> {
+  const box = await openStartBox(user)
+  await user.click(within(box).getByRole('button', { name: 'Settings' }))
+  return screen.getByRole('dialog', { name: 'Settings' })
+}
+
+/** Opens the Songs panel the same way: the Menu button, then "All songs…" in the start box. */
+async function openSongs(user: User): Promise<HTMLElement> {
+  const box = await openStartBox(user)
+  await user.click(within(box).getByRole('button', { name: 'All songs…' }))
+  return screen.getByRole('dialog', { name: 'Songs' })
 }
 
 /**
@@ -209,8 +254,7 @@ function settingsPanel(): HTMLElement | null {
  * on the tab it was last on, also when that was in the test before.)
  */
 async function openSettingsOn(user: User, tab: SettingsTab): Promise<HTMLElement> {
-  if (settingsPanel() === null) await user.click(settingsButton())
-  const panel = screen.getByRole('dialog', { name: 'Settings' })
+  const panel = settingsPanel() ?? (await openSettings(user))
   await user.click(within(panel).getByRole('tab', { name: tab }))
   return panel
 }
@@ -315,17 +359,17 @@ async function tabTo(user: User, target: () => HTMLElement): Promise<void> {
   expect(document.activeElement).toBe(target())
 }
 
-describe('the start overlay', () => {
+describe('the start box, while the app waits to start', () => {
   it('starts the sound on the first key press, which plays nothing, even once released', async () => {
     const user = drawApp()
 
     await user.keyboard('[KeyA>]')
 
     expect(audio.calls.filter((call) => call === 'start')).toHaveLength(1)
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expectStarted()
     expect(notes).toEqual([])
 
-    // The key goes up after the overlay is gone.
+    // The key goes up after the start box is gone.
     await user.keyboard('[/KeyA]')
     expect(notes).toEqual([])
     expect(held()).toEqual([])
@@ -340,7 +384,7 @@ describe('the start overlay', () => {
     const user = drawApp()
 
     await user.keyboard('[KeyA>5]')
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expectStarted()
     expect(notes).toEqual([])
 
     await user.keyboard('[/KeyA]')
@@ -352,21 +396,23 @@ describe('the start overlay', () => {
 
     await user.keyboard('[Space>3/]')
 
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expectStarted()
     expect(isSustainOn()).toBe(false)
 
     await user.keyboard('[Space]')
     expect(isSustainOn()).toBe(true)
   })
 
-  it.each(['Enter', 'Escape', 'Tab', 'ArrowDown', 'ShiftLeft'])(
+  // Enter is pressed here with nothing focused. (On a line of the start box
+  // it presses that line: see further down.)
+  it.each(['Enter', 'Escape', 'ArrowDown'])(
     'starts on %s without doing anything else',
     async (code) => {
       const user = drawApp()
 
       await user.keyboard(`[${code}]`)
 
-      expect(screen.queryByText(START_TEXT)).toBeNull()
+      expectStarted()
       // No panel opened, nothing took the keyboard focus, and the piano is there to be played.
       expect(screen.queryByRole('dialog')).toBeNull()
       expect(document.activeElement).toBe(document.body)
@@ -376,12 +422,66 @@ describe('the start overlay', () => {
     },
   )
 
+  // Shift goes down before Tab on the way back through the start box. Alone
+  // it is the first half of that, and starts nothing.
+  it.each(['ShiftLeft', 'ShiftRight'])('does not start on %s alone', async (code) => {
+    const user = drawApp()
+
+    await user.keyboard(`[${code}]`)
+
+    expect(isWaitingToStart()).toBe(true)
+    expect(startBox()).not.toBeNull()
+    expect(audio.calls).toEqual([])
+    expect(notes).toEqual([])
+  })
+
+  /*
+   * Tab is how someone without a mouse gets to the lines of the start box.
+   * So it does not start the app: it is left to the browser, and the app goes
+   * on waiting.
+   */
+  it('does not start on Tab, which is left to the browser to reach the start box', async () => {
+    const user = drawApp()
+
+    expect(fireEvent.keyDown(document.body, { code: 'Tab', key: 'Tab' })).toBe(true)
+    expect(fireEvent.keyUp(document.body, { code: 'Tab', key: 'Tab' })).toBe(true)
+
+    expect(isWaitingToStart()).toBe(true)
+    expect(startBox()).not.toBeNull()
+    expect(audio.calls).toEqual([])
+    expect(isChoosingKeys()).toBe(false)
+    expect(notes).toEqual([])
+    expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+
+    // The next key starts the app, as if Tab had not been pressed.
+    await user.keyboard('[KeyA]')
+    expectStarted()
+    expect(audio.calls).toEqual(['start'])
+    expect(notes).toEqual([])
+  })
+
+  // On a line of the start box, Enter is that line's own click: it starts the
+  // app and does what the line says.
+  it('leaves Enter to the focused line of the start box, which starts the app', async () => {
+    const user = drawApp()
+    const box = screen.getByRole('dialog', { name: 'Menu' })
+    within(box).getByRole('button', { name: 'Settings' }).focus()
+
+    await user.keyboard('[Enter]')
+
+    expectStarted()
+    expect(audio.calls).toEqual(['start'])
+    expect(settingsPanel()).not.toBeNull()
+    expect(notes).toEqual([])
+    expect(settingsStore.get()).toEqual(DEFAULT_SETTINGS)
+  })
+
   /*
    * A browser does not count every key as the player's go-ahead for sound:
-   * Escape and Shift are not. Asking for sound then would fail, so the app
-   * waits for the next key press, which also plays its note.
+   * Escape is not. Asking for sound then would fail, so the app waits for the
+   * next key press, which also plays its note.
    */
-  it.each(['Escape', 'ShiftLeft'])(
+  it.each(['Escape'])(
     'starts the sound at the next key when the browser does not count %s',
     async (code) => {
       const activation = { hasBeenActive: false }
@@ -390,7 +490,7 @@ describe('the start overlay', () => {
         const user = drawApp()
 
         await user.keyboard(`[${code}]`)
-        expect(screen.queryByText(START_TEXT)).toBeNull()
+        expectStarted()
         expect(audio.calls).toEqual([])
 
         activation.hasBeenActive = true
@@ -402,11 +502,20 @@ describe('the start overlay', () => {
     },
   )
 
-  it('starts on a click and leaves the keyboard to the piano', async () => {
+  // The whole window around the start box is the start button. A line of the
+  // box starts the app too: "Free Play" does that and nothing more.
+  it.each<[string, () => HTMLElement]>([
+    ['the window around the start box', startButton],
+    [
+      'the "Free Play" line of the start box',
+      () => screen.getByRole('button', { name: /Free Play/ }),
+    ],
+  ])('starts on a click on %s and leaves the keyboard to the piano', async (_where, target) => {
     const user = drawApp()
 
-    await user.click(screen.getByText(START_TEXT))
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    await user.click(target())
+    expectStarted()
+    expect(audio.calls).toEqual(['start'])
     expect(document.activeElement).toBe(document.body)
 
     await user.keyboard('[KeyA>]')
@@ -419,11 +528,11 @@ describe('the start overlay', () => {
     fireEvent.keyDown(document.body, { code: '', key: 'a' })
     fireEvent.keyUp(document.body, { code: '', key: 'a' })
 
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expectStarted()
     expect(notes).toEqual([])
   })
 
-  it('leaves browser shortcuts alone while the overlay is up', async () => {
+  it('leaves browser shortcuts alone while the app waits to start', async () => {
     drawApp()
 
     const unprevented = fireEvent.keyDown(document.body, { code: 'KeyR', key: 'r', ctrlKey: true })
@@ -576,15 +685,44 @@ describe('from a computer key to the screen', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
     'does not take "%s" for a key that plays a note',
     async (code) => {
-      await startApp()
+      const user = await startApp()
 
       expect(fireEvent.keyDown(document.body, { code })).toBe(true)
       fireEvent.keyUp(document.body, { code })
 
       expect(notes).toEqual([])
       expect(held()).toEqual([])
+
+      // A key that plays a note takes the open start box away. This one does not.
+      const box = await openStartBox(user)
+      expect(fireEvent.keyDown(document.body, { code })).toBe(true)
+      fireEvent.keyUp(document.body, { code })
+      expect(startBox()).toBe(box)
+      expect(notes).toEqual([])
     },
   )
+
+  /*
+   * A computer key that plays a note takes the open start box away. A key
+   * that was down before the box was opened plays nothing more: the keyboard
+   * only sends it again and again for as long as it is held. The box stays,
+   * or nobody could open it with a finger resting on a key.
+   */
+  it('leaves the start box open while a key that was already down keeps repeating', async () => {
+    const user = await startApp()
+    await user.keyboard('[KeyA>]')
+    await openStartBox(user)
+
+    repeatKey('KeyA', 'a')
+    repeatKey('KeyA', 'a')
+    expect(startBox(), 'the start box').not.toBeNull()
+    expect(notes).toEqual(['on:60'])
+
+    // Let go and pressed again, the key is played: its note sounds, and the box goes.
+    await user.keyboard('[/KeyA][KeyA>]')
+    expect(notes).toEqual(['on:60', 'off:60', 'on:60'])
+    expect(startBox()).toBeNull()
+  })
 })
 
 describe('no stuck notes', () => {
@@ -744,8 +882,10 @@ describe('no stuck notes', () => {
     await leaveSettingsOn(user, 'Sound')
     await user.keyboard('[KeyA>]')
 
-    // Settings alone does not stop the piano…
-    await user.click(settingsButton())
+    // Neither the start box nor Settings alone stops the piano…
+    await openStartBox(user)
+    expect(notes).toEqual(['on:60'])
+    await openSettings(user)
     expect(isChoosingKeys()).toBe(false)
     expect(notes).toEqual(['on:60'])
 
@@ -765,7 +905,7 @@ describe('no stuck notes', () => {
     await user.keyboard('[KeyA>]')
     expect(notes).toEqual(['on:60'])
 
-    await user.click(settingsButton())
+    await openSettings(user)
 
     expect(isChoosingKeys()).toBe(true)
     expect(notes).toEqual(['on:60', 'off:60'])
@@ -908,18 +1048,33 @@ describe('Space, the sustain key', () => {
     expect(notes).toEqual([])
   })
 
-  it.each(['Settings', 'Songs'])(
-    'toggles once and does not press the %s button that has focus',
+  it('toggles once and does not press the Menu button that has focus', async () => {
+    const user = await startApp()
+    const button = menuButton()
+    button.focus()
+
+    await user.keyboard('[Space]')
+
+    expect(isSustainOn()).toBe(true)
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  // What opens the Settings and Songs panels: two lines of the start box.
+  it.each(['Settings', 'All songs…'])(
+    'toggles once and does not press the "%s" line of the start box that has focus',
     async (name) => {
       const user = await startApp()
-      const button = screen.getByRole('button', { name })
-      button.focus()
+      const box = await openStartBox(user)
+      const line = within(box).getByRole('button', { name })
+      line.focus()
 
       await user.keyboard('[Space]')
 
       expect(isSustainOn()).toBe(true)
-      expect(button.getAttribute('aria-expanded')).toBe('false')
-      expect(screen.queryByRole('dialog')).toBeNull()
+      // The line was not pressed: the box is still there, and no panel took its place.
+      expect(screen.getAllByRole('dialog')).toEqual([box])
+      expect(document.activeElement).toBe(line)
     },
   )
 
@@ -949,7 +1104,7 @@ describe('Space, the sustain key', () => {
   it('still plays notes while a button or a slider has focus', async () => {
     const user = await startApp()
 
-    settingsButton().focus()
+    menuButton().focus()
     await user.keyboard('[KeyA]')
     screen.getByRole('slider', { name: 'Volume' }).focus()
     await user.keyboard('[KeyS]')
@@ -960,13 +1115,57 @@ describe('Space, the sustain key', () => {
   it('toggles once and plays, whatever has the focus in the menu', async () => {
     const user = await startApp()
     const controls = controlsIn(menu())
-    // The mode tabs, the volume, sustain, Songs and Settings.
-    expect(controls.length).toBeGreaterThanOrEqual(7)
+    // The Menu button, the volume and sustain.
+    expect(controls.length).toBeGreaterThanOrEqual(3)
 
     await expectThePianoKeepsItsKeys(user, controls)
 
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(areStillThere(controls, controlsIn(menu()))).toBe(true)
+  })
+
+  /*
+   * The ways to play, the songs, Settings and About are lines of the start
+   * box. Space is the sustain key on them too, and presses none of them. A
+   * key of the piano does more there than anywhere else: it plays its note
+   * and takes the box away. So each line is tried in a box that was opened
+   * again.
+   */
+  it('toggles once on every line of the start box, which a note then takes away', async () => {
+    const user = await startApp()
+    const lines = controlsIn(await openStartBox(user)).length
+    // Free Play and the two ways to play still to come, three songs,
+    // "All songs…", Settings and About.
+    expect(lines).toBeGreaterThanOrEqual(9)
+
+    for (let index = 0; index < lines; index += 1) {
+      const box = await openStartBox(user)
+      const controls = controlsIn(box)
+      const line = controls[index]
+      if (line === undefined) throw new Error(`The start box has no line ${index}.`)
+      const name = nameOf(line)
+      line.focus()
+      expect(document.activeElement, name).toBe(line)
+      const before = settingsStore.get()
+      notes.length = 0
+
+      await user.keyboard('[Space]')
+
+      expect(settingsStore.get(), name).toEqual({ ...before, sustain: !before.sustain })
+      expect(notes, name).toEqual([])
+      // The line was not pressed: it keeps the focus, in the same box, and no panel opened.
+      expect(document.activeElement, name).toBe(line)
+      expect(screen.getAllByRole('dialog'), name).toEqual([box])
+      expect(areStillThere(controls, controlsIn(startBox())), name).toBe(true)
+
+      await user.keyboard('[KeyA]')
+
+      expect(notes, name).toEqual(['on:60', 'off:60'])
+      // The box is gone and nothing took its place: no panel, and no song was started.
+      expect(screen.queryByRole('dialog'), name).toBeNull()
+      expect(screen.queryByRole('region', { name: 'Song player' }), name).toBeNull()
+      expect(settingsStore.get(), name).toEqual({ ...before, sustain: !before.sustain })
+    }
   })
 
   // INTERFACE.md 5.4: Settings "is not modal: the piano keeps playing from
@@ -993,8 +1192,7 @@ describe('Space, the sustain key', () => {
 
   it('toggles once and plays, whatever has the focus in the Songs panel', async () => {
     const user = await startApp()
-    await user.click(screen.getByRole('button', { name: 'Songs' }))
-    const songs = screen.getByRole('dialog', { name: 'Songs' })
+    const songs = await openSongs(user)
     const controls = controlsIn(songs)
     // The close button, "Import a MIDI file" and a Play button per starter song.
     expect(controls.length).toBeGreaterThan(2)
@@ -1119,12 +1317,15 @@ describe('focus goes back to the piano', () => {
    * holds, one after the other. After each click nothing may be left holding
    * the keyboard focus. Returns how many were clicked.
    */
-  async function clickEveryControl(user: User, place: () => Element): Promise<number> {
+  async function clickEveryControl(
+    user: User,
+    place: () => Element | Promise<Element>,
+  ): Promise<number> {
     let clicked = 0
-    // A click can swap buttons for others (a question and its answers), so
-    // they are looked up again each time.
-    for (let index = 0; index < controlsIn(place()).length; index += 1) {
-      const control = controlsIn(place())[index]
+    // A click can swap buttons for others (a question and its answers), or
+    // take the place away (the start box), so they are looked up again each time.
+    for (let index = 0; index < controlsIn(await place()).length; index += 1) {
+      const control = controlsIn(await place())[index]
       if (control === undefined) break
       const name = nameOf(control)
       if (control instanceof HTMLAnchorElement) control.addEventListener('click', stayOnThePage)
@@ -1153,8 +1354,25 @@ describe('focus goes back to the piano', () => {
   it('lets go of every control of the menu once it was clicked', async () => {
     const user = await startApp()
 
+    // The Menu button, the volume and sustain.
     const clicked = await clickEveryControl(user, menu)
-    expect(clicked).toBeGreaterThanOrEqual(7)
+    expect(clicked).toBeGreaterThanOrEqual(3)
+
+    // Straight back to playing: the next key is the piano's.
+    const sustain = isSustainOn()
+    await user.keyboard('[Space]')
+    expect(isSustainOn()).toBe(!sustain)
+  })
+
+  // A click on a line of the start box takes the box away, or puts a panel in
+  // its place. So the box is opened again, with the Menu button, for each line.
+  it('lets go of every line of the start box once it was clicked', async () => {
+    const user = await startApp()
+
+    // Free Play and the two ways to play still to come, three songs,
+    // "All songs…", Settings and About.
+    const clicked = await clickEveryControl(user, () => openStartBox(user))
+    expect(clicked).toBeGreaterThanOrEqual(9)
 
     // Straight back to playing: the next key is the piano's.
     const sustain = isSustainOn()
@@ -1542,11 +1760,21 @@ describe('choosing your own keys', () => {
       'Settings is closed with its close button',
       (user) => user.click(screen.getByRole('button', { name: 'Close Settings' })),
     ],
-    ['the "Settings" button closes the panel', (user) => user.click(settingsButton())],
+    [
+      'the Menu button puts the start box in the place of Settings',
+      async (user) => {
+        await user.click(menuButton())
+        expect(startBox()).not.toBeNull()
+      },
+    ],
     ['the empty sky is clicked', (user) => user.click(emptySky())],
     [
-      'the Songs panel takes the place of Settings',
-      (user) => user.click(screen.getByRole('button', { name: 'Songs' })),
+      // Two clicks: the Menu button takes Settings away, "All songs…" the start box.
+      'the start box, and then the Songs panel, takes the place of Settings',
+      async (user) => {
+        await openSongs(user)
+        expect(startBox()).toBeNull()
+      },
     ],
   ])('forgets the waiting piano key when %s', async (_way, leave) => {
     const user = await startApp()
@@ -1799,15 +2027,23 @@ describe('choosing your own keys', () => {
     expect(document.activeElement).toBe(key)
   })
 
-  // From the start overlay to a changed key and back to playing, with Tab,
-  // the arrow keys, Enter and Escape only.
+  // From the app waiting to start to a changed key and back to playing, with
+  // Tab, the arrow keys, Enter and Escape only.
   it('changes a key from start to finish without the mouse', async () => {
     const user = drawApp()
     await user.keyboard('[Enter]')
-    expect(screen.queryByText(START_TEXT)).toBeNull()
+    expectStarted()
 
-    await tabTo(user, settingsButton)
+    // Settings is a line of the start box, which the Menu button opens.
+    await tabTo(user, menuButton)
     await user.keyboard('[Enter]')
+    const box = screen.getByRole('dialog', { name: 'Menu' })
+    // The focus went into the box: onto its first line.
+    expect(document.activeElement).toBe(within(box).getByRole('button', { name: /Free Play/ }))
+
+    await tabTo(user, () => within(box).getByRole('button', { name: 'Settings' }))
+    await user.keyboard('[Enter]')
+    expect(startBox()).toBeNull()
     const settings = screen.getByRole('dialog', { name: 'Settings' })
     // The focus went into the panel: onto the tab that is showing.
     expect(document.activeElement).toBe(within(settings).getByRole('tab', { selected: true }))
@@ -1833,8 +2069,9 @@ describe('choosing your own keys', () => {
 
     await user.keyboard('[Escape]')
     expect(settingsPanel()).toBeNull()
-    // The focus is not lost with the panel: it is on the button that opens it.
-    expect(document.activeElement).toBe(settingsButton())
+    // The focus is not lost with the panel: it is on the Menu button, which it was opened through.
+    expect(document.activeElement).toBe(menuButton())
+    expect(startBox()).toBeNull()
 
     await user.keyboard('[KeyZ>]')
     expect(notes).toEqual(['on:60'])
@@ -1920,8 +2157,9 @@ describe('random sessions', () => {
 
   /*
    * Plays, moves the computer keys, changes them one by one and by layout,
-   * resizes the piano, opens and closes the panels, loses the window and
-   * hides the tab at random, with real key downs, repeats and key ups.
+   * resizes the piano, opens and closes the start box and the panels, loses
+   * the window and hides the tab at random, with real key downs, repeats and
+   * key ups.
    *
    * Nothing may be held right after the window lost the focus, the tab was
    * hidden or the computer keys moved; once every key is up again no note may
@@ -1961,15 +2199,32 @@ describe('random sessions', () => {
           fireEvent.click(element, { detail: 1 })
         }
       }
-      const openPanel = (): HTMLElement | null => document.querySelector('[role="dialog"]')
-      /** A button of the menu or of the open panel, by its name. (Not a key of the piano.) */
+      /** What is open under the menu: the start box or a panel. There is never more than one. */
+      const openBoxOrPanel = (): HTMLElement | null => document.querySelector('[role="dialog"]')
+      /**
+       * A button of the menu, of the start box or of the open panel, by its
+       * name. (Not a key of the piano.)
+       */
       const button = (name: string | RegExp): HTMLElement | null => {
-        for (const place of [menu(), openPanel()]) {
+        for (const place of [menu(), openBoxOrPanel()]) {
           if (place === null) continue
           const found = within(place).queryAllByRole('button', { name })[0]
           if (found !== undefined) return found
         }
         return null
+      }
+      /** Presses a line of the start box, which the Menu button opens first if it is closed. */
+      const pressLineOfStartBox = (name: string): void => {
+        if (startBox() === null) click(button('Menu'))
+        click(button(name))
+      }
+      /**
+       * Opens a panel with its line of the start box. When that panel is open
+       * already, the Menu button takes it away and puts the start box there.
+       */
+      const openOrTakeAway = (panel: 'Settings' | 'Songs', line: string): void => {
+        if (screen.queryByRole('dialog', { name: panel }) === null) pressLineOfStartBox(line)
+        else click(button('Menu'))
       }
       const tabOfSettings = (tab: SettingsTab): HTMLElement | null => {
         const settings = settingsPanel()
@@ -1977,11 +2232,12 @@ describe('random sessions', () => {
       }
       /** Opens Settings if it is closed, and shows one of its tabs. */
       const showTab = (tab: SettingsTab): void => {
-        if (settingsPanel() === null) click(button('Settings'))
+        if (settingsPanel() === null) pressLineOfStartBox('Settings')
         click(tabOfSettings(tab))
       }
       // What the screen showed on the way, to know that the session went where it was meant to.
       let stepsWithAKeyWaiting = 0
+      let stepsWithTheStartBoxOpen = 0
       let movesUnderAHeldNote = 0
       const pianosShown = new Set<number>()
 
@@ -2015,7 +2271,7 @@ describe('random sessions', () => {
               if (heldBefore > 0) movesUnderAHeldNote += 1
             }
           } else if (roll < 0.66) {
-            click(button('Settings'))
+            openOrTakeAway('Settings', 'Settings')
           } else if (roll < 0.7) {
             click(tabOfSettings(pick(SETTINGS_TABS)))
           } else if (roll < 0.78) {
@@ -2045,9 +2301,11 @@ describe('random sessions', () => {
               button(size)?.getAttribute('aria-pressed') === 'true'
             click(button(pick(PIANO_SIZES.filter((size) => !isChosen(size)))))
           } else if (roll < 0.94) {
+            // A click starts with a press of the mouse, which is what takes the start box away.
+            fireEvent.pointerDown(emptySky(), { button: 0 })
             fireEvent.click(emptySky(), { detail: 1 })
           } else if (roll < 0.95) {
-            click(button('Songs'))
+            openOrTakeAway('Songs', 'All songs…')
           } else if (roll < 0.98) {
             fireEvent.blur(window)
             expect(held()).toEqual([])
@@ -2063,6 +2321,7 @@ describe('random sessions', () => {
           expect(new Set(slots).size).toBe(slots.length)
 
           if (piano().querySelector('.piano-key.is-selected') !== null) stepsWithAKeyWaiting += 1
+          if (openBoxOrPanel()?.getAttribute('aria-label') === 'Menu') stepsWithTheStartBoxOpen += 1
           pianosShown.add(piano().querySelectorAll('.piano-key').length)
         }
 
@@ -2072,9 +2331,10 @@ describe('random sessions', () => {
       }
 
       // The session did go through the screen: a piano key waited for a
-      // computer key, the piano became another one, and the computer keys
-      // moved under a note that was held.
+      // computer key, the start box was open, the piano became another one,
+      // and the computer keys moved under a note that was held.
       expect(stepsWithAKeyWaiting).toBeGreaterThan(0)
+      expect(stepsWithTheStartBoxOpen).toBeGreaterThan(0)
       expect(pianosShown.size).toBeGreaterThan(1)
       expect(movesUnderAHeldNote).toBeGreaterThan(0)
 

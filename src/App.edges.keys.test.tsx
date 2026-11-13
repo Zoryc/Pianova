@@ -188,7 +188,7 @@ function pressEnterOn(target: HTMLElement): void {
   fireEvent.click(target, { detail: 0 })
 }
 
-/** Draws the app and gets past the start overlay. */
+/** Draws the app and starts it: the first key press takes the start box away. */
 function startApp(): void {
   render(<App />)
   tap('Enter')
@@ -202,9 +202,23 @@ function panel(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Settings' })
 }
 
+/** The start box: the small menu that the Menu button opens, with its lines. */
+function startBox(): HTMLElement | null {
+  return screen.queryByRole('dialog', { name: 'Menu' })
+}
+
+/** The "Settings" line of the start box, which must be open. */
+function settingsLine(): HTMLElement {
+  const box = screen.getByRole('dialog', { name: 'Menu' })
+  return within(box).getByRole('button', { name: 'Settings' })
+}
+
 /** Opens Settings on one of its tabs. (The panel remembers its last tab from test to test.) */
 function openSettingsOn(tab: string): HTMLElement {
-  if (!panel()) clickWithMouse(button('Settings'))
+  if (!panel()) {
+    if (!startBox()) clickWithMouse(button('Menu'))
+    clickWithMouse(settingsLine())
+  }
   const settings = screen.getByRole('dialog', { name: 'Settings' })
   clickWithMouse(within(settings).getByRole('tab', { name: tab }))
   return settings
@@ -665,7 +679,9 @@ describe('choosing keys with the keyboard alone', () => {
     const user = userEvent.setup()
     act(() => settingsStore.set({ pianoSize: 88 }))
     startApp()
-    pressEnterOn(button('Settings'))
+    // Settings is a line of the start box, which the Menu button opens.
+    pressEnterOn(button('Menu'))
+    pressEnterOn(settingsLine())
     pressEnterOn(screen.getByRole('tab', { name: 'Keys' }))
 
     // The last control of the panel, then Tab: the first key of the zone, not the first of the piano.
@@ -708,10 +724,11 @@ describe('choosing keys with the keyboard alone', () => {
     await user.tab()
     expect(piano().contains(document.activeElement)).toBe(false)
 
+    // The piano key that had the focus can no longer hold it: the Menu button gets it.
     pianoKey(84).focus()
     await user.keyboard('{Escape}')
     expect(panel()).toBeNull()
-    expect(document.activeElement).toBe(button('Settings'))
+    expect(document.activeElement).toBe(button('Menu'))
   })
 
   it('leaves Space as the sustain key on a focused piano key, and Enter alone as the way to take it', async () => {

@@ -4,7 +4,7 @@
  * The window is the stage, and the page never scrolls. The screen is three
  * rows, top to bottom:
  *
- *   1. the menu (the top bar, and the player line under it while a song is
+ *   1. the menu (the top bar, with the player line in it while a song is
  *      loaded), as high as it needs to be;
  *   2. what is left;
  *   3. the piano, as high as its keys are long.
@@ -13,7 +13,8 @@
  * src/ui/stage.css): the piano in row 3 and the sky above it, under the menu
  * as well when the menu hides by itself, so that the light uses the whole
  * window. A panel (Settings or Songs) is in row 2: under the menu and above
- * the piano, which it can therefore never cover.
+ * the piano, which it can therefore never cover. So is the start box, once
+ * the app has started (src/ui/startBox.css says where it is before that).
  *
  * The look of the menu, the panels and every control is in src/ui/chrome.css.
  */

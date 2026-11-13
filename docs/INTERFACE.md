@@ -4,7 +4,7 @@ This document replaces the screen described in `docs/ARCHITECTURE.md` sections 5
 
 ## 1. What it should feel like
 
-A dark stage with a real-looking piano across the whole width of the window, and light above it. When the player presses a key, the key lights up, a glowing bar of light rises from it and sparks fly where the bar meets the keys. When a song plays, bars of light fall from the top and land on the keys exactly when each note sounds. Nothing else is on screen unless the player asks for it: a thin menu bar at the top appears when the mouse moves and hides again when it stops.
+A dark stage with a real-looking piano across the whole width of the window, and light above it. When the player presses a key, the key lights up, a glowing bar of light rises from it and sparks fly where the bar meets the keys. When a song plays, bars of light fall from the top and land on the keys exactly when each note sounds. Nothing else is on screen unless the player asks for it: a thin bar at the top, with only what is needed while playing, appears when the mouse moves and hides again when it stops. Everything that is used now and then is in one small menu, the start box, which is also how the app says hello: it is open when the app opens, and one click beside it takes it away.
 
 The two words that decide every choice here are **elegant** and **fun**. Elegant: dark, calm, one colour of light, nothing on screen that is not needed. Fun: the piano answers every touch at once and generously (the key dips and lights, light rises, sparks fly, a chord makes the whole line glow brighter), so that simply pressing keys is a pleasure even before playing a song.
 
@@ -21,8 +21,8 @@ Rules:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ top bar (auto-hides)                                          │
-│ player line (only while a song is loaded; hides with the bar) │
+│ top bar: Menu, the player line, Volume, Sustain (auto-hides)  │
+│ (the player line has a row of its own in a narrower window)   │
 │                                                               │
 │                       the sky (canvas)                        │
 │              rising bars / falling notes / sparks             │
@@ -32,9 +32,9 @@ Rules:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- The app root is exactly the viewport (`100dvh`), `overflow: hidden`. **Every pixel of the window is the stage**: the sky runs from the very top edge to the piano and from the left edge to the right edge, with no margins, so the notes use the whole screen. The Full screen button (top bar) goes one step further and hides the browser itself.
+- The app root is exactly the viewport (`100dvh`), `overflow: hidden`. **Every pixel of the window is the stage**: the sky runs from the very top edge to the piano and from the left edge to the right edge, with no margins, so the notes use the whole screen. "Full screen" (in the start box) goes one step further and hides the browser itself.
 - The **piano** is pinned to the bottom, full width, with a small margin under it (about 2% of the height, min 8 px). Its height follows its key width (white keys about 5.5 times as long as they are wide), clamped between 110 px and 34% of the viewport height.
-- The **sky** is everything between the top of the window and the top of the piano. One `<canvas>` fills it. The top bar and the panels float over it.
+- The **sky** is everything between the top of the window and the top of the piano. One `<canvas>` fills it. The top bar, the start box and the panels float over it.
 - The **light line**: a 2 px line of the accent colour with a soft glow, exactly on the top edge of the piano.
 
 ## 3. The piano's range (changes to `src/core`)
@@ -241,18 +241,18 @@ Priority: an explicit keyboard type (not 'auto') wins over everything for the ke
 | `src/ui/Stage.tsx` + `stage.css` | The sky canvas wrapper + the piano + the light line. Owns their shared geometry. |
 | `src/ui/sky/` | The canvas renderer: `Sky.tsx` (the component), `skyRunner.ts` (listens to the notes and runs the frame loop), `skyModel.ts` (pure: bars, falling notes, sparks), `skyDraw.ts` (drawing), `skySprites.ts` and `skyBackdrop.ts` (the ready-made pictures: glows, sparks, the background), `skyColour.ts`, `sky.css`. Replaces `NoteTrails*`. |
 | `src/ui/Piano.tsx` + `piano.css`, `src/ui/pianoHitTest.ts` | The piano, restyled, drawing a `PianoRange`; which key lies under the mouse (pure). |
-| `src/ui/TopBar.tsx`, `src/ui/ModeTabs.tsx`, `src/ui/FullscreenButton.tsx` | The auto-hiding menu bar, its mode tabs and its full-screen button. |
+| `src/ui/TopBar.tsx` | The auto-hiding bar: the Menu button, the player line, volume and sustain (5.3). |
+| `src/ui/StartBox.tsx` + `startBox.css`, `src/ui/FullscreenButton.tsx` | The start box, the small menu the app opens with (5.3a), and its full-screen line. |
 | `src/ui/useAutoHide.ts` | The hide-when-the-mouse-is-still logic (pure core + hook). |
 | `src/ui/SettingsPanel.tsx` + `src/ui/settings/*.tsx` + `settings.css` | The Settings panel and its five tabs (`SoundTab`, `KeysTab`, `PianoTab`, `LookTab`, `AboutTab`), with the pieces only they use (theme and layout cards, colour swatches, the tab strip…). |
 | `src/ui/useKeyEditor.ts`, `src/ui/keyEditorModel.ts` | Choosing the computer keys: the hook the app shell holds, and its rules (pure). |
 | `src/ui/FloatingPanel.tsx` | The panel that floats over the sky, used by Settings and Songs. |
 | `src/ui/SongsPanel.tsx`, `src/ui/PlayerLine.tsx`, `src/ui/useSongs.ts`, `src/ui/DropOverlay.tsx` + `songs.css` | The Songs panel, the player line and their glue (section 9). |
-| `src/ui/StartOverlay.tsx` | "Click or press any key to start". |
 | `src/ui/controls.tsx`, `src/ui/format.ts` | Shared small controls (kept, restyled); numbers written as the text shown on screen. |
 | `src/ui/hooks.ts` | The hooks that connect the app shell to the note bus, the sound engine and the settings. |
 | `src/styles/theme.css`, `src/styles/app.css`, `src/ui/chrome.css` | Tokens; how the menu, the panels and the stage share the window; the look of the menu, the panels and the shared controls. |
 
-Removed: `Toolbar.tsx`, `AdvancedPanel.tsx`, `KeyEditor.tsx`, `NoteTrails.tsx`, `noteTrailsModel.ts`, `noteTrails.css`, `NowPlaying.tsx` (its content moves into the stage), and the page footer.
+Removed: `Toolbar.tsx`, `AdvancedPanel.tsx`, `KeyEditor.tsx`, `NoteTrails.tsx`, `noteTrailsModel.ts`, `noteTrails.css`, `NowPlaying.tsx` (its content moves into the stage), and the page footer. Removed since: `ModeTabs.tsx` and `StartOverlay.tsx` (the ways to play and the start are in the start box).
 
 ### 5.0 Contracts between the components
 
@@ -311,6 +311,33 @@ export interface DropOverlayProps {
 }
 export function DropOverlay(props: DropOverlayProps): JSX.Element | null
 
+// src/ui/StartBox.tsx
+/** How many songs the box offers. All the others are behind "All songs…". */
+export const START_BOX_SONGS = 3
+export const START_SENTENCE = 'Click or press any key to start'
+export const CLOSE_SENTENCE = 'Click outside or play a key to close'
+export interface StartBoxProps {
+  /** The element id, for aria-controls on the Menu button. */
+  id: string
+  /** Whether the box hangs in a layer of its own over the whole window (how the app opens) or is put among the panels. */
+  overWindow: boolean
+  /** True until the first click or key press: the whole window around the box then starts the app. */
+  waitingToStart: boolean
+  /** The Menu button: a press of the mouse on it is not a press outside the box. */
+  opener: RefObject<HTMLElement | null>
+  /** "Free Play", the window around the box at the start, a press of the mouse outside it later. */
+  onClose(): void
+  onPlaySong(songId: string): void
+  onShowSongs(): void
+  onShowSettings(): void
+  onShowAbout(): void
+}
+/** Like the floating panel, it does not listen for Escape: the app shell does. It does close itself at a press of the mouse anywhere else. */
+export function StartBox(props: StartBoxProps): JSX.Element
+
+// src/ui/SettingsPanel.tsx: makes the panel open on `tab` the next time it is opened ("About", in the start box)
+export function openSettingsOn(tab: SettingsTabId): void
+
 // src/ui/useSongs.ts: whether the song options are open under the player line
 export function useSongOptionsOpen(): boolean
 /** Does nothing when no song is loaded. */
@@ -328,23 +355,23 @@ export { songLibrary } from '../songs/songLibrary'
 - **Escape** is handled in one place, the app shell's keyboard intercept. It takes back one thing at a time, the first of these that there is:
   1. the piano key that is waiting for a computer key is deselected;
   2. the open song options are closed;
-  3. the open panel is closed;
+  3. the open panel is closed, or else the open start box;
   4. when the keyboard focus is inside the menu, the focus is let go of, so that the menu can hide again;
   5. otherwise the key is left to the browser.
 
   A held Escape (auto-repeat) never does more than one of these: its repeats do nothing, and are used up for as long as something is left that a new press would take back. A text field handles its own Escape (for example cancelling a rename) and the app leaves it alone.
 - **The song options** are open or closed in a small store in `src/ui/useSongs.ts`: `useSongOptionsOpen()`, `openSongOptions()` and `closeSongOptions(): boolean`, which returns true when it closed them (that is how the shell knows a press of Escape was used up). The player line reads and sets that store. The options close at their own button, at a press of the mouse outside the player line, when the keyboard focus moves to a control outside it, when a file is dropped on the page, at Escape, when another song is played and when the song is closed. If one of their controls has the keyboard focus when they close, the focus goes to the "Song options" button.
 - **A click on the empty sky** closes an open panel; the stage reports it to the app shell.
-- **Closing a panel** (Escape, its close button, a click on the empty sky, "Play" in Songs) goes through one function of the app shell. When a control inside the panel has the keyboard focus at that moment, the focus is first put on the button that opens the panel ("Songs" or "Settings"), however the panel was opened. After a click with the mouse that button lets go of it again; a panel that holds the focus itself leaves it nowhere.
+- **Closing a panel** (Escape, its close button, a click on the empty sky, "Play" in Songs) goes through one function of the app shell. When a control inside the panel has the keyboard focus at that moment, the focus is first put on the Menu button, through which the panel was opened, however that was done. After a click with the mouse that button lets go of it again; a panel that holds the focus itself leaves it nowhere. The start box is closed by the same rule.
 - **Edit mode** (selecting piano keys) is on exactly while the Settings panel is open on the Keys tab.
 
 The stage, as built (`src/ui/Stage.tsx`):
 
 ```ts
 export interface StageProps {
-  /** The stage is the page of the Free Play tab: its own id, and the id of that tab. */
+  /** The stage's own id, and what it is called: the way of playing that is on ("Free Play"). */
   id: string
-  labelledBy: string
+  label: string
   bus: NoteBus
   settings: Settings
   /** slot -> label of the computer key that plays it (the keycaps on the piano). */
@@ -353,7 +380,7 @@ export interface StageProps {
   hints: ReadonlyMap<Midi, string>
   falling: FallingSource | null
   audioStatus: AudioStatus
-  /** Whether to say how to play, until the first note (off behind the start overlay and in edit mode). */
+  /** Whether to say how to play, until the first note (off while the start box is open and in edit mode). */
   showHint: boolean
   editMode: boolean
   selectedSlot: number | null
@@ -367,6 +394,7 @@ export interface StageProps {
 ```
 
 - The stage follows the bus itself for the lit keys and the note names, so the app shell (the menu, the panels) is not drawn again for every note.
+- The stage is a region (`role="region"`) named after the way of playing that is on. The ways to play are lines of the start box, not tabs, so the stage is no longer the page of a tab.
 - **How the window is shared** (`src/styles/app.css`, `src/ui/stage.css`): the screen is a grid of three rows: the menu, what is left, the piano. The stage lies on all three (`subgrid`): the piano on the last row, the sky on the rows above it (both when the menu hides by itself, only the middle one when it is always shown). An open panel is on the middle row, so it is under the menu and can never cover the piano, with no measuring in code.
 
 ### 5.1 Piano
@@ -487,30 +515,58 @@ The background reacts to the music, gently: while notes sound, it is drawn sligh
 
 ### 5.3 Top bar
 
-A bar 52 px high across the top: black fading to transparent downward (`linear-gradient`), so it reads as part of the stage.
+A bar across the top with only what is needed while playing. Behind it the stage is black as far down as its controls go and fades out under them (`--bar-fade`), so that it reads as part of the stage and no falling note shows through a word.
 
 Left to right:
 
-1. The app name (`APP_NAME`).
-2. The **modes** as tabs: "Free Play" (active), "Practice" and "Real-time" (disabled, "Soon" badge, tooltip "Coming in a later update"). Real tab semantics.
+1. **"Menu"**: a button with an outline, so that it is not missed. It opens and closes the start box (5.3a), where everything else is. It has `aria-expanded`, and `aria-controls` while the box is open.
+2. **The player line**, while a song is loaded (section 9).
 3. (flexible space)
 4. **Volume**: speaker icon and a short slider (about 110 px).
 5. **Sustain**: a small on/off pill showing its state, with the hint "Space".
-6. **"Songs"** button: opens the Songs panel.
-7. **"Settings"** button: opens the Settings panel.
-8. **Full screen** button (icon with an accessible name "Full screen" / "Leave full screen"): toggles the browser's full-screen mode, which is asked for the whole page (`document.documentElement`). Hidden when the browser does not support it.
 
-Below 1180 px wide the two coming modes are dropped from the bar (only the active mode tab stays); below 900 px the volume slider is dropped too (it is also in Settings).
+The app's name, the ways to play, Songs, Settings and full screen are not in the bar: they are in the start box.
 
-**Auto-hide** (`useAutoHide`): the bar (and the player line under it) is shown when the mouse moves or a mouse button is pressed, and hidden 2.5 seconds after that. It stays shown while: the pointer is over the bar or the player line; keyboard focus is inside them; a panel (Settings or Songs) is open; the start overlay is up; a song is loaded but not playing. Playing the piano with the computer keyboard does not show it. While it is hidden the mouse cursor is hidden too (`cursor: none` on the whole app: the class `cursor-hidden` on the app root) and comes back with it. It slides and fades (160 ms). The setting "Hide the menu automatically" (Look tab, default on) turns all of this off: the bar is then always shown and the sky starts below it. Hidden means `visibility: hidden` after the transition (not reachable by Tab); pressing Tab while it is hidden shows it and focuses its first control.
+The bar is a grid (`.top-bar`): Menu, room, volume and sustain in its first row (controls 36 px high with 8 px above and below, `min-height: var(--top-bar-height)`), and the player line in a second row, in the middle. In a window 1650 px wide or wider the player line stands in the first row instead, between Menu and the volume: one bar, not two. (Tab goes Menu, the player line, volume, sustain in both: the order of the one bar.) Below 900 px the volume slider is dropped (it is also in Settings).
+
+**Auto-hide** (`useAutoHide`): the bar is shown when the mouse moves or a mouse button is pressed, and hidden 2.5 seconds after that. It stays shown while: the pointer is over it; keyboard focus is inside it; the start box or a panel (Settings or Songs) is open; the app waits to start; a song is loaded but not playing. Playing the piano with the computer keyboard does not show it. While it is hidden the mouse cursor is hidden too (`cursor: none` on the whole app: the class `cursor-hidden` on the app root) and comes back with it. It slides and fades (160 ms). The setting "Hide the menu automatically" (Look tab, default on) turns all of this off: the bar is then always shown and the sky starts below it. Hidden means `visibility: hidden` after the transition (not reachable by Tab); pressing Tab while it is hidden shows it and focuses its first control, the Menu button.
 
 Whether the pointer is over the menu is read from everything the page hears from the mouse (over, move, press), not only from entering and leaving, because nothing says that the mouse has left when what was under it is taken off the page (the player line at "Close"). When the browser names the menu element itself as what the mouse is over, the page is asked what is at that place (`document.elementFromPoint`): Chrome names the menu in place of what was taken away, also where the menu no longer reaches. In the same way the keyboard focus is looked up again at every key press and mouse press, and when a panel closes (a focused control that is taken off the page sends no event). Escape, pressed while the focus is inside the menu and nothing else is open, lets go of the focus (5.0): the menu hides again 2.5 seconds later.
 
+### 5.3a The start box
+
+A small menu in the middle of the sky, a little under the top bar (`src/ui/StartBox.tsx`, `startBox.css`). It is open when the app opens, where it is also the welcome, and the Menu button opens it again. It holds what is used now and then, so that the bar keeps only what is needed while playing.
+
+It is made of the same glass as the floating panel, up to 660 px wide (max 94% of the window), and never covers the piano: what does not fit scrolls inside it. It is a `role="dialog"` named "Menu". Top to bottom:
+
+- **The head**: the app's name (`APP_NAME`, the page's `h1`) and "A piano you play with your computer keyboard." over a small picture of the stage: a piano with its black keys, the line of light and a few falling notes. The notes are at half strength, so that the only full light on screen is the stage's own. A window less than 860 px high leaves the picture out. One less than 760 px high also puts the sentence on the line of the name and makes the lines a little lower, so that the whole box is in view at 1366×633; opened with the Menu button there, the box has no head at all, since a loaded song leaves little room and that room is for the lists.
+- **Play**: the ways to play. "Free Play" ("Play anything you like") is marked as the one that is on (`aria-pressed`). "Practice" ("The song waits for you") and "Real-time" ("Your timing is scored") cannot be chosen yet: greyed out, a "Soon" badge, the tooltip "Coming in a later update", not reached with Tab.
+- **Songs**: the first three songs (`START_BOX_SONGS`): the player's own, newest first, then the starter songs, each with its length. A click plays one (its name for screen readers is "Play" and the title; its length is told after it). Then "All songs…", which opens the Songs panel.
+- **The foot**: "Settings"; "Full screen" / "Leave full screen" (not there when the browser cannot do it); "About" (Settings on its About tab); and one sentence that says how to leave: "Click or press any key to start" while the app waits to start, "Click outside or play a key to close" afterwards.
+
+**While the app waits to start** (until the first click or key press, which is what lets the browser play sound), the box hangs in a layer over the whole window, and the window around it is one unseen button named "Click or press any key to start". The screen behind it is not dimmed, and cannot be used (`inert`). What starts the app:
+
+- a click anywhere around the box: the box goes away;
+- a click on a line of the box: the app starts and does what the line says;
+- a click on the box itself, between its lines: the app starts, and the box stays open;
+- any key: the box goes away, and the key does nothing else (function keys are left to the browser). Tab is the exception: it does not start the app but moves through the lines of the box, and Enter on a line presses it, so that the box can be used with the keyboard alone. Shift alone starts nothing either: it goes down before Tab on the way back.
+
+**After that**, opened with the Menu button, the box is one of the things the app puts between the menu and the piano (`.app__panels`), like a floating panel. (When a line that leaves the box open started the app, "Full screen", the box stays where it hangs, with the focus where it was, until it is closed.) Of the box and the two panels only one is open at a time: the Menu button closes an open panel, and a line that opens a panel closes the box. The box goes away at:
+
+- "Free Play" (a loaded song stays loaded); a song (it plays; one that cannot be read opens the Songs panel, which says why); "All songs…", "Settings" and "About";
+- the Menu button, and Escape (5.0);
+- a press of the mouse anywhere outside the box and the Menu button, which still does what it would do (a click on the piano plays its note);
+- a computer key that plays a note, which plays it: the keyboard is the piano's as soon as it is played. A key that was already down when the box was opened does not close it by repeating. Other keys (Tab, Enter, Space…) leave the box open.
+
+"Full screen" leaves it open. The first-time hint in the sky (5.6) is not shown while the box is open. A held Enter does one thing. Its repeats press only what Enter went down on, never what the focus has moved to since (the first control of a panel that the press opened), and on the Menu button and on a line of the box they do nothing at all, or the box would open and close in turn.
+
+**Focus**, as for the floating panel: opened with the keyboard (the Menu button still has the focus), the focus goes to the first line of the box and back to the Menu button when it closes; opened with the mouse, the box itself takes the focus, so that Tab carries on inside it. While the app waits to start it takes no focus. When the box closes while one of its lines has the focus, the focus is put on the Menu button (after a click with the mouse the button lets go of it again). While the app waits to start the Menu button cannot take it, since the screen cannot be used yet, and the focus is let go.
+
 ### 5.4 Settings panel
 
-Opened by the "Settings" button. **It floats over the sky and never covers the piano**: a panel centred horizontally, up to 760 px wide (max 94% of the window), from just under the top bar (and the player line, while a song is loaded) down to a gap above the light line: 44 px in a window at least 560 px high, so that the line of words above the piano (the note names, the sound status and the badges) stays readable under the panel, and 12 px in a lower window (the `padding-bottom` of `.app__panels` in `src/styles/app.css`). Dark translucent (`--panel-glass`) with a blur behind it, rounded corners, a soft shadow. Its content scrolls inside it when it does not fit. Only the body of the panel scrolls: the panel itself cuts off what sticks out (`overflow: clip`), so that the heading never moves out of view. Because the piano stays visible and usable under it, every change (colour, key style, piano size, labels) shows on the real piano at once, and the keys can be customized right there.
+Opened from the start box ("Settings", or "About" for its About tab). **It floats over the sky and never covers the piano**: a panel centred horizontally, up to 760 px wide (max 94% of the window), from just under the top bar (and the player line, while a song is loaded) down to a gap above the light line: 44 px in a window at least 560 px high, so that the line of words above the piano (the note names, the sound status and the badges) stays readable under the panel, and 12 px in a lower window (the `padding-bottom` of `.app__panels` in `src/styles/app.css`). Dark translucent (`--panel-glass`) with a blur behind it, rounded corners, a soft shadow. Its content scrolls inside it when it does not fit. Only the body of the panel scrolls: the panel itself cuts off what sticks out (`overflow: clip`), so that the heading never moves out of view. Because the piano stays visible and usable under it, every change (colour, key style, piano size, labels) shows on the real piano at once, and the keys can be customized right there.
 
-Heading "Settings" and a close button. It is not modal: the piano keeps playing from the computer keyboard while it is open (text fields excepted). Escape closes it, unless something comes before it in the Escape order of 5.0 (a piano key that is waiting for a computer key, or the open song options: then Escape only takes that back); so does a click on the empty sky. Focus moves into the panel when it opens (after a click with the mouse the panel itself holds it). When it closes while one of its controls has the focus, the focus goes to the Settings button, however the panel was opened; a panel that was only used with the mouse leaves the focus nowhere, so the keyboard is the piano's. The same floating panel component (`FloatingPanel`) is used for Songs; only one of the two is open at a time.
+Heading "Settings" and a close button. It is not modal: the piano keeps playing from the computer keyboard while it is open (text fields excepted). Escape closes it, unless something comes before it in the Escape order of 5.0 (a piano key that is waiting for a computer key, or the open song options: then Escape only takes that back); so does a click on the empty sky. Focus moves into the panel when it opens (after a click with the mouse the panel itself holds it). When it closes while one of its controls has the focus, the focus goes to the Menu button, however the panel was opened; a panel that was only used with the mouse leaves the focus nowhere, so the keyboard is the piano's. The same floating panel component (`FloatingPanel`) is used for Songs; only one of the two is open at a time.
 
 Tabs along the top of the panel (real tab semantics, arrow keys move between them): **Sound**, **Keys**, **Piano**, **Look**, **About**. The last tab used is remembered while the app is open.
 
@@ -590,9 +646,9 @@ Everything about the computer keys is in this one tab, top to bottom:
 
 ### 5.6 Other pieces
 
-- **Start overlay**: unchanged behaviour, restyled: the stage is visible but dim behind it, the app name and "Click or press any key to start" in the centre. A file dropped on the page before the first click also takes the overlay away, so that the Songs panel does not open behind it; the sound still starts at the next click or key press.
+- **The start**: there is no start overlay any more. Until the first click or key press the start box is open over the whole window (5.3a). A file dropped on the page before the first click also takes the start box away, so that the Songs panel does not open behind it; the sound still starts at the next click or key press.
 - **The notes being played** (`showNoteNames`): the names of the held notes, small and quiet, centred just above the light line (inside the sky, drawn as HTML over the canvas, `role="status"` is NOT used: it changes too fast to be read out). At most 8 names, then "+3". Hidden while a song is loaded.
-- **A first-time hint**: until the first note is played, the sky shows, centred and quiet: "Press the keys shown on the piano, or click it". It fades out at the first note and does not come back.
+- **A first-time hint**: until the first note is played, the sky shows, centred and quiet: "Press the keys shown on the piano, or click it". It is not shown while the start box is open. It fades out at the first note and does not come back.
 - **Sound status**: while the sound is `loading`, on `fallback` or in `error`, a small quiet line at the bottom-left of the sky (above the light line), with the same three messages as on the first screen: "Loading piano sound…", "Using basic sound (piano sound could not be loaded)." and "Sound could not start. Click anywhere to try again." `role="status"`.
 - **Transposed badge**: next to the sound status line when transpose is not 0 ("Transposed +2").
 - **Sustain badge**: a quiet badge "Sustain on" next to the Transposed badge while sustain is on, so that the player knows why notes ring on (Space switches sustain without showing the menu). It is not part of the `role="status"` element.
@@ -605,7 +661,7 @@ Keep the existing tokens that are still used and add:
 ```
 --stage-bg: #000;
 --panel-glass: rgb(16 17 22 / 0.86);
---bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0));
+--bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.9) 60%, rgb(0 0 0 / 0));   /* black behind the controls of the menu, fading out under them */
 --key-ivory, --key-ivory-shine, --key-ivory-shade, --key-ebony, --key-ebony-edge
 --light, --light-bright, --light-deep, --light-ink     /* set on the app root from TypeScript (section 4.1); the values in the stylesheet are the Ember defaults */
 --glow: 0.6;                                           /* set on the app root from TypeScript */
@@ -616,7 +672,7 @@ The chrome's own accent (active tab, primary button, switches that are on, slide
 
 ## 7. Wiring changes
 
-- `App.tsx` becomes: start overlay, `TopBar` (with `PlayerLine` as its child, so that the two hide together), `Stage`, the Settings and Songs panels, `SongProgressLine` (outside the menu, so that it stays when the menu hides), and `DropOverlay`, whose `onFilesDropped` opens the Songs panel. No toolbar, no footer, no separate key-editor panel (it lives in the Keys tab).
+- `App.tsx` is: `TopBar` (with `PlayerLine` as its child, so that the two hide together), the start box (`StartBox`: over the whole window until the first click, among the panels afterwards), `Stage`, the Settings and Songs panels, `SongProgressLine` (outside the menu, so that it stays when the menu hides), and `DropOverlay`, whose `onFilesDropped` opens the Songs panel. No toolbar, no footer, no separate key-editor panel (it lives in the Keys tab).
 - The page must never scroll: the "light-trails area shrinks" mechanism of the first screen is gone; it is no longer needed.
 - `useNoStuckNotes` (`src/ui/hooks.ts`) also releases when the piano on screen changes (size setting, or Auto picking another size after the window is resized).
 - The stage measures its own width (ResizeObserver) to resolve the Auto piano size; the resolved `PianoRange` is computed once in `Stage` and handed to both the piano and the sky, so they always agree. The stage reports it to the app shell (`onRangeChange`), which hands it to `useSongSession`, so that the loaded song is arranged for the piano on screen.
@@ -637,9 +693,9 @@ Everything in `docs/ARCHITECTURE.md` section 7, plus:
 
 Replaces section 5 of `docs/SONGS.md`, whose exact wording (messages, labels, rules) still applies. The song modules are described in its section 4.
 
-- **"Songs" in the top bar** opens the **Songs panel** (the same `FloatingPanel` as Settings, floating over the sky; opening one closes the other). Content as in `docs/SONGS.md` 5.2: "Import a MIDI file" + "or drop a MIDI file anywhere on this page", the list (title, length, Play, Rename, Delete with inline confirm), the empty-list sentence, the message line. "Play" loads the song, starts it and closes the panel.
-- **Drop anywhere**: the full-page overlay "Drop the MIDI file to add it", as specified there. A drop opens the Songs panel to show the result; a drop before the first click also takes the start overlay away (5.6).
-- **The player line**, shown under the top bar whenever a song is loaded, hiding and showing with it: Play / Pause · Restart (back to the beginning, where the song waits for Play) · the title · the progress slider with elapsed and total time · Speed (50–150%) · "Song options" · "Close". Song options open as a small panel under the line: Parts, Melody only, Fit to the piano, and the off-piano line, exactly as in `docs/SONGS.md` 5.3. In a window 960 px wide or wider the line is always one row: the title is as wide as its words, up to 320 px, and is the only thing that gets cut; narrower windows have two rows, with the position on the second. The song options end above the piano: they are at most `min(340px, 64dvh - var(--top-bar-height) - 66px)` high (40 px less under a two-row line) and scroll inside. When they open and close is in 5.0.
+- **"All songs…" in the start box** opens the **Songs panel**; the first three songs can also be played straight from the box. It is the same `FloatingPanel` as Settings, floating over the sky; opening one closes the other. Content as in `docs/SONGS.md` 5.2: "Import a MIDI file" + "or drop a MIDI file anywhere on this page", the list (title, length, Play, Rename, Delete with inline confirm), the empty-list sentence, the message line. "Play" loads the song, starts it and closes the panel.
+- **Drop anywhere**: the full-page overlay "Drop the MIDI file to add it", as specified there. A drop opens the Songs panel to show the result; a drop before the first click also takes the start box away (5.6).
+- **The player line**, shown in the top bar whenever a song is loaded, hiding and showing with it (in a window 1650 px wide or wider in the bar's own row, between the Menu button and the volume, with no glass of its own, since the bar is dark behind it; in a narrower window as a strip of glass in a row of its own under them): Play / Pause · Restart (back to the beginning, where the song waits for Play) · the title · the progress slider with elapsed and total time · Speed (50–150%) · "Song options" · "Close". Song options open as a small panel under the line: Parts, Melody only, Fit to the piano, and the off-piano line, exactly as in `docs/SONGS.md` 5.3. In a window 960 px wide or wider the line is always one row: the title is as wide as its words, up to 320 px, and is the only thing that gets cut; narrower windows have two rows, with the position on the second. The song options end above the piano: they are at most `min(340px, 64dvh - var(--top-bar-height) - 66px)` high (40 px less under a two-row line, 50 px more where the line stands in the bar's own row) and scroll inside. When they open and close is in 5.0.
 - While a song is loaded a 2 px progress line in the accent colour runs along the very top edge of the window, always visible, even when the menu is hidden (`SongProgressLine`).
 - **Falling notes**: the stage's sky gets a `FallingSource` built from the player and the current arrangement.
 - **Lead-in**: a song never starts on its first note. When the earliest note of the song that is not percussion comes sooner than 2 seconds (`LEAD_IN_SECONDS` in `src/ui/useSongs.ts`), every note handed to the player and to the sky is moved later by the same amount, so that this note comes at 2 s and is seen falling; the arrangement's duration grows by that amount. The amount is worked out from the whole song, not from the chosen parts, so the notes do not jump when parts are switched. The player itself is unchanged: positions run from 0 to the duration, and Restart and the end of the song go back to 0, the start of the lead-in. The player line therefore shows a length up to 2 seconds longer than the Songs list, which keeps the song's own length.

@@ -377,9 +377,9 @@ All six are traditional tunes or were written before 1860; all are in the public
 
 Follow section 1 of `docs/ARCHITECTURE.md` and the look of `docs/INTERFACE.md`. Exact wording below.
 
-### 5.1 The Songs button
+### 5.1 Where the songs are opened
 
-A **"Songs"** button in the top bar, next to "Settings", in the same quiet style, with `aria-expanded`. It opens and closes the Songs panel, which floats over the sky as the Settings panel does (`docs/INTERFACE.md` 5.3 and 5.4). Only one of the two panels is open at a time: opening one closes the other.
+The Songs panel is opened from the start box, with its line "All songs…" (`docs/INTERFACE.md` 5.3a); the first three songs can also be played straight from the box. There is no "Songs" button in the top bar any more. The panel floats over the sky as the Settings panel does (`docs/INTERFACE.md` 5.4). Only one of the two panels is open at a time: opening one closes the other.
 
 ### 5.2 Songs panel (`SongsPanel`)
 
@@ -395,11 +395,11 @@ A **"Songs"** button in the top bar, next to "Settings", in the same quiet style
   - Files added while earlier files are still being read join the same report: the message line then says how every file of both lots went.
 - Importing the same file twice simply adds it twice.
 
-**Drop anywhere**: while a file is dragged over the page, a full-page overlay says "Drop the MIDI file to add it". Dropping imports it and opens the Songs panel to show the result. A file dropped on the page before the first click also takes the start overlay away, so that the Songs panel does not open behind it; the sound still starts at the next click or key press. Dragging things that are not files (text, links) shows nothing and is not blocked. The browser must never navigate away to the dropped file.
+**Drop anywhere**: while a file is dragged over the page, a full-page overlay says "Drop the MIDI file to add it". Dropping imports it and opens the Songs panel to show the result. A file dropped on the page before the first click also takes the start box away, so that the Songs panel does not open behind it; the sound still starts at the next click or key press. Dragging things that are not files (text, links) shows nothing and is not blocked. The browser must never navigate away to the dropped file.
 
 ### 5.3 Player line (`PlayerLine`)
 
-Shown under the top bar whenever a song is loaded:
+Shown in the top bar whenever a song is loaded (`docs/INTERFACE.md` section 9 says where in it):
 
 - **Play / Pause** (one button whose label and icon change), **Restart** (takes the song back to its beginning, where it waits: Play starts it again from there. In the player this is `stop()`; the button is not called "Stop" because, next to Pause and Close, players could not tell what it did).
 - The song title (cut with an ellipsis when long).

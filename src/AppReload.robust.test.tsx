@@ -83,6 +83,8 @@ interface Visit {
   tap(code: string, init?: KeyboardEventInit): void
   /** A click with the mouse on the button of that name. */
   click(name: string | RegExp): void
+  /** Opens Settings: the Menu button, then the "Settings" line of the start box it opens. */
+  openSettings(): void
   /** Opens Settings, if it is not open, and shows one of its tabs. */
   showSettingsTab(tab: SettingsTab): void
   /** The Settings panel, which must be open. */
@@ -125,8 +127,12 @@ async function visit(): Promise<Visit> {
     click(name) {
       fireEvent.click(screen.getByRole('button', { name }), { detail: 1 })
     },
+    openSettings() {
+      page.click('Menu')
+      page.click('Settings')
+    },
     showSettingsTab(tab) {
-      if (!screen.queryByRole('dialog', { name: 'Settings' })) page.click('Settings')
+      if (!screen.queryByRole('dialog', { name: 'Settings' })) page.openSettings()
       fireEvent.click(screen.getByRole('tab', { name: tab }), { detail: 1 })
     },
     settingsPanel: () => screen.getByRole('dialog', { name: 'Settings' }),
@@ -172,7 +178,7 @@ describe('from one visit to the next', () => {
 
   it('everything the player changed is back, on screen and in the sound', async () => {
     const first = await visit()
-    first.tap('Enter') // gets past the start overlay
+    first.tap('Enter') // starts the app, and closes the start box
     first.fireEvent.change(first.screen.getByRole('slider', { name: 'Volume' }), {
       target: { value: '50' },
     })
@@ -255,7 +261,7 @@ describe('from one visit to the next', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
 
     // Then Settings, which opens on its first tab: the tab last used is not remembered either.
-    second.click('Settings')
+    second.openSettings()
     const inSettings = second.within(second.settingsPanel())
     const isChosen = (name: string): string | null =>
       inSettings.getByRole('button', { name }).getAttribute('aria-pressed')

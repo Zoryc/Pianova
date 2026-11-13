@@ -14,7 +14,7 @@ Hard rules that follow from that:
 - **Nothing has to be held down to change how the piano behaves.** Sustain is an on/off toggle, not a held pedal.
 - Wording in the UI is plain and short. No jargon ("MIDI", "binding", "slot", "octave shift") in user-facing text. Say "key", "note", "lower / higher". (The one exception is "MIDI file", which is what the player has to look for: `docs/SONGS.md` section 1.)
 - The piano must feel instant: a key press makes sound with no noticeable delay.
-- **Easy to navigate.** One screen: the modes are tabs in the menu bar at the top, which hides while the mouse is still and comes back when it moves or Tab is pressed; every control is labelled with a plain word, and the same things stay in the same place. A first-time user should understand the whole screen in a few seconds.
+- **Easy to navigate.** One screen: the ways to play are in one small menu, the start box, which the app opens with; the bar at the top hides while the mouse is still and comes back when it moves or Tab is pressed; every control is labelled with a plain word, and the same things stay in the same place. A first-time user should understand the whole screen in a few seconds.
 - **Elegant and interactive with the piano.** The piano is the centre of the screen and reacts to everything: keys light up and dip when played, bars of light rise from the keys being played (`docs/INTERFACE.md` 5.2), hovering a key gives gentle feedback. Polished, restrained, never gaudy.
 
 - **Simple first, advanced on demand.** Easy for a beginner, customizable for an experienced pianist. The main screen stays simple and works with zero configuration. Everything an experienced player may want to tune lives in one **Settings** panel, grouped in tabs, where every option has a sensible default and can be reset, and every option that is not plain from its name has a one-line explanation. Later phases follow the same rule (their fine-tuning options go in the same panel).
@@ -80,7 +80,7 @@ Inputs never talk to the sound engine or the UI directly. They call the bus. Con
 | `src/ui/Piano.tsx`, `src/ui/piano.css` | The on-screen piano component (pointer input, lit keys, labels). |
 | `src/app/pianoApp.ts` | Creates the singletons (bus, engine) and wires bus → engine. |
 | `src/App.tsx`, `src/main.tsx`, `src/styles/app.css` | App shell and wiring. |
-| `src/ui/TopBar.tsx`, `src/ui/SettingsPanel.tsx`, `src/ui/StartOverlay.tsx` | The menu bar, the Settings panel (the computer keys are chosen in its Keys tab), the "click to start" overlay. |
+| `src/ui/TopBar.tsx`, `src/ui/SettingsPanel.tsx`, `src/ui/StartBox.tsx` | The menu bar, the Settings panel (the computer keys are chosen in its Keys tab), the start box (the small menu the app opens with). |
 | `src/app/appInfo.ts` | `APP_NAME`, the placeholder app name. |
 
 The files of the screen are listed in full in `docs/INTERFACE.md` section 5, and those of songs in `docs/SONGS.md` section 3.
@@ -435,7 +435,7 @@ Layout, top to bottom, centred, max width ~1280 px:
 
 Behaviour:
 
-- **Start overlay**: until the first click or key press, a full-screen overlay says "Click or press any key to start". Any click or key press removes the overlay and calls `engine.start()`. (A key the browser does not count as a gesture, such as Escape or Shift, only removes the overlay: the sound then starts at the next click or key press.) That first key press does not play a note and is not treated as anything else; a function key such as F5 is left to the browser. A file dropped on the page removes the overlay too (`docs/INTERFACE.md` 5.6).
+- **The start** (now the start box of `docs/INTERFACE.md` 5.3a, in place of the full-screen overlay of the first screen): until the first click or key press the app waits and says "Click or press any key to start". A click, or a key press other than Tab and Shift, starts it and calls `engine.start()`. (A key the browser does not count as a gesture, such as Escape or Shift, only removes the overlay: the sound then starts at the next click or key press.) That first key press does not play a note and is not treated as anything else; a function key such as F5 is left to the browser. A file dropped on the page removes the overlay too (`docs/INTERFACE.md` 5.6).
 - Settings (`useSettings`) drive everything: `engine.setVolume` / `setSustain` / `setTranspose` / `setReverb` / `setRelease(RELEASE_SECONDS[release])` follow the settings (also on first load); the top bar and the Settings panel write to `settingsStore`.
 - Keyboard: `attachKeyboardInput({ bus, resolveNote, intercept, onToggleSustain, getVelocity })` where `resolveNote(code)` and `getVelocity()` read the **current** settings (no stale closures: read from `settingsStore.get()`). Pointer notes use the same velocity.
 - A `<select>` or text field that keeps keyboard focus would stop the keyboard from playing (see `isTextEntryTarget`): blur the Labels select as soon as its value changes and when its list is dismissed without a change (Escape, or choosing the option it already shows), and blur buttons, sliders and links after they are clicked with the mouse, so the player can go straight back to playing. (Someone who presses a button with Enter keeps their place.)

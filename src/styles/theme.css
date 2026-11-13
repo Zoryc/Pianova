@@ -35,8 +35,9 @@
   /* The stage, and what floats over it */
   --stage-bg: #000;
   --panel-glass: rgb(16 17 22 / 0.86);
-  --bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.85), rgb(0 0 0 / 0));
-  /* Dims the stage behind the start overlay. */
+  /* Behind the menu: black as far down as its controls go, then fading out. */
+  --bar-fade: linear-gradient(to bottom, rgb(0 0 0 / 0.9) 60%, rgb(0 0 0 / 0));
+  /* Dims the stage behind the overlay that says where to drop a file. */
   --scrim: rgb(0 0 0 / 0.62);
   --shadow-float: 0 24px 64px rgb(0 0 0 / 0.6);
 
