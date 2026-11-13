@@ -5,7 +5,6 @@ import type { NoteNaming } from '../../core/types'
 import { settingsStore } from '../../state/settings'
 import type { Settings } from '../../state/settings'
 import { Field, Segmented } from '../controls'
-import { KeyStylePicker } from './KeyStylePicker'
 import { LabelsSelect } from './LabelsSelect'
 
 const SIZES: readonly PianoSizeSetting[] = ['auto', ...PIANO_SIZES]
@@ -21,7 +20,7 @@ const NAMING_OPTIONS: readonly { value: NoteNaming; label: string }[] = [
   { value: 'solfege', label: 'Do Ré Mi' },
 ]
 
-/** Everything about the piano itself: its size, its keys and what is written on them. */
+/** The piano itself: how many keys it has and what is written on them. */
 export function PianoTab({ settings }: { settings: Settings }): JSX.Element {
   function choosePianoSize(choice: string): void {
     const pianoSize = SIZES.find((size) => String(size) === choice)
@@ -40,16 +39,6 @@ export function PianoTab({ settings }: { settings: Settings }): JSX.Element {
           onChange={choosePianoSize}
         />
         <span className="settings-unit">keys</span>
-      </Field>
-
-      <Field
-        label="Key style"
-        hint="Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through."
-      >
-        <KeyStylePicker
-          value={settings.keyStyle}
-          onChange={(keyStyle) => settingsStore.set({ keyStyle })}
-        />
       </Field>
 
       <Field label="Labels on the keys">

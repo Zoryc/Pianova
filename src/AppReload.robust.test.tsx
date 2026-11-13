@@ -202,9 +202,9 @@ describe('from one visit to the next', () => {
     })
     first.click('Do Ré Mi')
     first.click('61')
-    first.click('Glass')
 
     first.showSettingsTab('Look')
+    first.click('Glass')
     first.fireEvent.click(first.screen.getByRole('radio', { name: 'Blue' }), { detail: 1 })
     first.fireEvent.click(first.screen.getByRole('switch', { name: 'Light bars' }), { detail: 1 })
 
@@ -286,9 +286,9 @@ describe('from one visit to the next', () => {
     )
     expect(isChosen('Do Ré Mi')).toBe('true')
     expect(isChosen('61')).toBe('true')
-    expect(isChosen('Glass')).toBe('true')
 
     second.showSettingsTab('Look')
+    expect(isChosen('Glass')).toBe('true')
     const blue = inSettings.getByRole('radio', { name: 'Blue' })
     expect(blue.getAttribute('aria-checked')).toBe('true')
     expect(isOn('Light bars')).toBe('false')

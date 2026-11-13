@@ -960,7 +960,7 @@ describe('top bar', () => {
     const names: Record<SettingsTab, string[]> = {
       Sound: ['Volume', 'Sustain', 'Advanced', 'Touch', 'Room echo', 'Note fade-out', 'Transpose'],
       Keys: ['Key layout', 'Change one key', 'Where your keys sit', 'Keyboard type'],
-      Piano: ['Piano size', 'Key style', 'Labels on the keys', 'Note names'],
+      Piano: ['Piano size', 'Labels on the keys', 'Note names'],
       Look: [
         'Theme',
         'Fine-tune',
@@ -970,6 +970,7 @@ describe('top bar', () => {
         'Light bars',
         'Bar style',
         'Sparks',
+        'Key style',
         'Key effect',
         'Key letters on falling notes',
         'Show the notes being played',
@@ -1689,13 +1690,13 @@ describe('Reset all settings', () => {
 
     await user.click(settingsTab('Piano'))
     expect(pressed('C D E')).toBe('true')
-    expect(pressed('Classic')).toBe('true')
     expect(pressed('Auto')).toBe('true')
     const labels = within(panel).getByRole('combobox', { name: 'Labels on the keys' })
     expect((labels as HTMLSelectElement).value).toBe('both')
 
     await user.click(settingsTab('Look'))
     expect(pressed('Ember')).toBe('true')
+    expect(pressed('Classic')).toBe('true')
     expect(within(panel).getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true')
     for (const name of ['Light bars', 'Show the notes being played']) {
       expect(within(panel).getByRole('switch', { name }).getAttribute('aria-checked')).toBe('true')
@@ -2343,8 +2344,10 @@ describe('after a click with the mouse the player can go straight back to playin
     ['Piano', 'Do Ré Mi', 'button', 'Do Ré Mi'],
     ['Piano', 'C D E', 'button', 'C D E'],
     ['Piano', 'a piano size', 'button', '61'],
-    ['Piano', 'a key style', 'button', 'Glass'],
-    ['Look', 'a theme', 'button', 'Midnight'],
+    // Not the Midnight theme: a key style has that name too, in the same tab.
+    ['Look', 'a theme', 'button', 'Gold'],
+    ['Look', 'a key style', 'button', 'Glass'],
+    ['Look', 'a key effect', 'button', 'Pop'],
     ['Look', 'a colour', 'radio', 'Blue'],
     ['Look', 'a background', 'button', 'Stars'],
     ['Look', 'the Light bars switch', 'switch', 'Light bars'],
@@ -3674,7 +3677,7 @@ describe('ARIA', () => {
 
   it('groups each control with its visible label and its explanation', async () => {
     const user = await startApp()
-    const rows: Record<SettingsTab, number> = { Sound: 6, Keys: 2, Piano: 4, Look: 10, About: 0 }
+    const rows: Record<SettingsTab, number> = { Sound: 6, Keys: 2, Piano: 3, Look: 11, About: 0 }
     const cardGroups: Record<SettingsTab, number> = { Sound: 0, Keys: 1, Piano: 0, Look: 1, About: 0 }
 
     for (const tab of SETTINGS_TABS) {
@@ -4140,10 +4143,10 @@ describe('no stuck notes and no lost settings', () => {
       'Keys only',
     )
     await user.click(within(panel).getByRole('button', { name: 'Do Ré Mi' }))
-    await user.click(within(panel).getByRole('button', { name: 'Glass' }))
     await user.click(within(panel).getByRole('button', { name: '49' }))
 
     await user.click(settingsTab('Look'))
+    await user.click(within(panel).getByRole('button', { name: 'Glass' }))
     await user.click(within(panel).getByRole('switch', { name: 'Light bars' }))
     await user.click(within(panel).getByRole('radio', { name: 'Blue' }))
     fireEvent.change(within(panel).getByRole('slider', { name: 'Glow' }), { target: { value: '90' } })
@@ -4243,9 +4246,10 @@ describe('no stuck notes and no lost settings', () => {
     await user.click(settingsTab('Piano'))
     const labels = within(panel).getByRole('combobox', { name: 'Labels on the keys' })
     expect((labels as HTMLSelectElement).value).toBe('notes')
-    expect(within(panel).getByRole('button', { name: 'Midnight' }).getAttribute('aria-pressed')).toBe(
-      'true',
-    )
+    await user.click(settingsTab('Look'))
+    // The key style, not the theme of the same name.
+    const keyStyle = within(option(panel, 'Key style')).getByRole('button', { name: 'Midnight' })
+    expect(keyStyle.getAttribute('aria-pressed')).toBe('true')
   })
 })
 

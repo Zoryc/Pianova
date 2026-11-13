@@ -181,11 +181,12 @@ describe('the Settings panel', () => {
 
     await user.click(screen.getByRole('switch', { name: 'Sustain' }))
     await user.click(tab('Piano'))
-    await user.click(screen.getByRole('button', { name: 'Glass' }))
+    await user.click(screen.getByRole('button', { name: 'Do Ré Mi' }))
     await user.click(tab('Look'))
+    await user.click(screen.getByRole('button', { name: 'Glass' }))
     await user.click(screen.getByRole('radio', { name: 'Blue' }))
 
-    expectSettings({ sustain: true, keyStyle: 'glass', accent: 'blue' })
+    expectSettings({ sustain: true, noteNaming: 'solfege', keyStyle: 'glass', accent: 'blue' })
   })
 })
 

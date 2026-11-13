@@ -584,16 +584,15 @@ Tabs along the top of the panel (real tab semantics, arrow keys move between the
 
 **Keys** (see 5.5: this tab is where the computer keys are chosen)
 
-**Piano** (everything about the piano itself)
+**Piano** (the piano itself: its size and what is written on its keys)
 
 | Option | Control | Explanation line |
 |---|---|---|
 | Piano size | Auto / 88 / 61 / 49 / 37 keys (segmented) | "How many keys the piano has. Auto picks the biggest piano that fits your window. 88 is a full piano." |
-| Key style | Classic / Midnight / Glass (segmented, each option with a tiny picture of three keys in that style) | "Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through." |
 | Labels on the keys | Keys and notes / Keys only / Notes only / No labels (select) | |
 | Note names | "C D E" / "Do Ré Mi" | "How notes are written on the piano." |
 
-**Look** (the light and the screen)
+**Look** (the light, the keys and the screen)
 
 | Option | Control | Explanation line |
 |---|---|---|
@@ -605,6 +604,7 @@ Tabs along the top of the panel (real tab semantics, arrow keys move between the
 | Light bars | on/off | "Bars of light for the notes you play and the falling notes of a song." |
 | Bar style | Solid / Neon (segmented) | "Solid bars are filled with light. Neon bars are glowing outlines." |
 | Sparks | Off / Some / Lots (segmented) | "Small sparks where the light meets the keys." |
+| Key style | Classic / Midnight / Glass (segmented, each option with a tiny picture of three keys in that style) | "Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through." |
 | Key effect | Glow / Press / Edge / Pop (segmented) | "What a key does when you play it. Try each one on the piano below." |
 | Key letters on falling notes | on/off | "Shows which computer key to press on each note of a song." |
 | Show the notes being played | on/off | "Writes the names of the notes you play above the piano." |

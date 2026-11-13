@@ -4,6 +4,7 @@ import { settingsStore } from '../../state/settings'
 import type { Settings } from '../../state/settings'
 import { Field, PercentSlider, Segmented, Switch } from '../controls'
 import { ColourSwatches } from './ColourSwatches'
+import { KeyStylePicker } from './KeyStylePicker'
 import { SectionTitle } from './SectionTitle'
 import { ThemeCards } from './ThemeCards'
 
@@ -33,7 +34,7 @@ const KEY_EFFECT_OPTIONS: readonly { value: KeyEffect; label: string }[] = [
   { value: 'pop', label: 'Pop' },
 ]
 
-/** The light and the screen: a theme to start from, then every part of it one by one. */
+/** The light, the keys and the screen: a theme to start from, then every part of it one by one. */
 export function LookTab({ settings }: { settings: Settings }): JSX.Element {
   return (
     <>
@@ -96,6 +97,16 @@ export function LookTab({ settings }: { settings: Settings }): JSX.Element {
           value={settings.sparks}
           options={SPARKS_OPTIONS}
           onChange={(sparks) => settingsStore.set({ sparks })}
+        />
+      </Field>
+
+      <Field
+        label="Key style"
+        hint="Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through."
+      >
+        <KeyStylePicker
+          value={settings.keyStyle}
+          onChange={(keyStyle) => settingsStore.set({ keyStyle })}
         />
       </Field>
 

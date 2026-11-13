@@ -93,6 +93,7 @@ describe('the Look tab', () => {
       'Light bars',
       'Bar style',
       'Sparks',
+      'Key style',
       'Key effect',
       'Key letters on falling notes',
       'Show the notes being played',
@@ -110,6 +111,7 @@ describe('the Look tab', () => {
       'Light bars': 'Bars of light for the notes you play and the falling notes of a song.',
       'Bar style': 'Solid bars are filled with light. Neon bars are glowing outlines.',
       Sparks: 'Small sparks where the light meets the keys.',
+      'Key style': 'Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through.',
       'Key effect': 'What a key does when you play it. Try each one on the piano below.',
       'Key letters on falling notes': 'Shows which computer key to press on each note of a song.',
       'Show the notes being played': 'Writes the names of the notes you play above the piano.',
@@ -456,6 +458,56 @@ describe('Colour', () => {
       await user.click(swatch('Your colour'))
       expectSettings({ accent: 'custom', customColour: '#00c2a8' })
     })
+  })
+})
+
+describe('Key style', () => {
+  it('offers the three styles, Classic chosen at first', () => {
+    render(<LiveTab />)
+    expect(choicesOf('Key style')).toEqual(['Classic', 'Midnight', 'Glass'])
+    expect(isChosen(choice('Key style', 'Classic'))).toBe(true)
+  })
+
+  it.each([
+    ['Midnight', 'midnight'],
+    ['Glass', 'glass'],
+  ] as const)('sets the %s keys', async (name, keyStyle) => {
+    const user = userEvent.setup()
+    render(<LiveTab />)
+
+    await user.click(choice('Key style', name))
+
+    expectSettings({ keyStyle })
+    expect(isChosen(choice('Key style', name))).toBe(true)
+    expect(isChosen(choice('Key style', 'Classic'))).toBe(false)
+  })
+
+  it.each([
+    ['Classic', 'classic'],
+    ['Midnight', 'midnight'],
+    ['Glass', 'glass'],
+  ])('draws three keys in the %s style next to its name', (name, keyStyle) => {
+    render(<LiveTab />)
+    const picture = choice('Key style', name).querySelector('.mini-keys')
+
+    expect(picture?.getAttribute('data-key-style')).toBe(keyStyle)
+    expect(picture?.querySelectorAll('.mini-keys__key--white')).toHaveLength(3)
+    expect(picture?.querySelectorAll('.mini-keys__key--black')).toHaveLength(2)
+    // A picture only: the name says it all to a screen reader.
+    expect(picture?.getAttribute('aria-hidden')).toBe('true')
+    expect(choice('Key style', name).textContent).toBe(name)
+  })
+
+  it('follows the theme, and a style of its own makes the look a custom one', async () => {
+    const user = userEvent.setup()
+    render(<LiveTab />)
+
+    await user.click(themeCard('Aurora'))
+    expect(isChosen(choice('Key style', 'Glass'))).toBe(true)
+
+    await user.click(choice('Key style', 'Classic'))
+    expect(isChosen(themeCard('Aurora'))).toBe(false)
+    expectSettings({ ...lookSavedBy('Aurora'), keyStyle: 'classic' })
   })
 })
 

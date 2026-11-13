@@ -41,7 +41,6 @@ describe('the Piano tab', () => {
     const { container } = render(<LiveTab />)
     expect(namesInOrder(container)).toEqual([
       'Piano size',
-      'Key style',
       'Labels on the keys',
       'Note names',
     ])
@@ -51,9 +50,6 @@ describe('the Piano tab', () => {
     render(<LiveTab />)
     expect(explanationOf(option('Piano size'))).toBe(
       'How many keys the piano has. Auto picks the biggest piano that fits your window. 88 is a full piano.',
-    )
-    expect(explanationOf(option('Key style'))).toBe(
-      'Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through.',
     )
     expect(explanationOf(option('Labels on the keys'))).toBe('')
     expect(explanationOf(option('Note names'))).toBe('How notes are written on the piano.')
@@ -88,44 +84,6 @@ describe('the Piano tab', () => {
       await user.click(choice('Piano size', 'Auto'))
 
       expectSettings({})
-    })
-  })
-
-  describe('Key style', () => {
-    it('offers the three styles, Classic chosen at first', () => {
-      render(<LiveTab />)
-      expect(choicesOf('Key style')).toEqual(['Classic', 'Midnight', 'Glass'])
-      expect(isChosen(choice('Key style', 'Classic'))).toBe(true)
-    })
-
-    it.each([
-      ['Midnight', 'midnight'],
-      ['Glass', 'glass'],
-    ] as const)('sets the %s keys', async (name, keyStyle) => {
-      const user = userEvent.setup()
-      render(<LiveTab />)
-
-      await user.click(choice('Key style', name))
-
-      expectSettings({ keyStyle })
-      expect(isChosen(choice('Key style', name))).toBe(true)
-      expect(isChosen(choice('Key style', 'Classic'))).toBe(false)
-    })
-
-    it.each([
-      ['Classic', 'classic'],
-      ['Midnight', 'midnight'],
-      ['Glass', 'glass'],
-    ])('draws three keys in the %s style next to its name', (name, keyStyle) => {
-      render(<LiveTab />)
-      const picture = choice('Key style', name).querySelector('.mini-keys')
-
-      expect(picture?.getAttribute('data-key-style')).toBe(keyStyle)
-      expect(picture?.querySelectorAll('.mini-keys__key--white')).toHaveLength(3)
-      expect(picture?.querySelectorAll('.mini-keys__key--black')).toHaveLength(2)
-      // A picture only: the name says it all to a screen reader.
-      expect(picture?.getAttribute('aria-hidden')).toBe('true')
-      expect(choice('Key style', name).textContent).toBe(name)
     })
   })
 

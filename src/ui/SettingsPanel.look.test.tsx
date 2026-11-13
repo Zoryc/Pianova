@@ -167,6 +167,11 @@ describe('the Look tab, word for word', () => {
         hint: 'Small sparks where the light meets the keys.',
       },
       {
+        name: 'Key style',
+        choices: ['Classic', 'Midnight', 'Glass'],
+        hint: 'Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through.',
+      },
+      {
         name: 'Key effect',
         choices: ['Glow', 'Press', 'Edge', 'Pop'],
         hint: 'What a key does when you play it. Try each one on the piano below.',
@@ -361,6 +366,7 @@ describe('without a mouse', () => {
       'Light bars',
       'Bar style',
       'Sparks',
+      'Key style',
       'Key effect',
       'Key letters on falling notes',
       'Show the notes being played',
