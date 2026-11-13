@@ -440,7 +440,7 @@ export const MAX_SPARKS = 600
  * MAX_SPARKS: 10 notes x 42 a second x about a second of life, plus their
  * strikes, is under 550.
  */
-const SPARKS_PER_SECOND: Readonly<Record<SparksLevel, number>> = { off: 0, some: 14, lots: 42 }
+const SPARKS_PER_SECOND: Readonly<Record<SparksLevel, number>> = { off: 0, some: 16, lots: 42 }
 const SPARKS_PER_STRIKE: Readonly<Record<SparksLevel, number>> = { off: 0, some: 8, lots: 12 }
 
 /** A spark lives between these two, in seconds. */
@@ -448,7 +448,7 @@ const SPARK_MIN_LIFE = 0.45
 const SPARK_MAX_LIFE = 1.05
 /** It leaves the line at between these speeds (pixels per second), drifting sideways by up to this much. */
 const SPARK_MIN_RISE = 60
-const SPARK_MAX_RISE = 180
+const SPARK_MAX_RISE = 200
 const SPARK_MAX_DRIFT = 38
 /** Sparks thrown by a strike leave faster than the steady ones. */
 const STRIKE_SPEED_UP = 1.9
@@ -456,9 +456,18 @@ const STRIKE_SPEED_UP = 1.9
 const SPARK_DRAG = 2.2
 /** Radius of the bright centre, in pixels. */
 const SPARK_MIN_RADIUS = 0.9
-const SPARK_MAX_RADIUS = 2.3
+const SPARK_MAX_RADIUS = 2.6
 /** Sparks are born across this share of the key's width, around its middle. */
 const SPARK_SPREAD = 0.7
+/**
+ * A spark does not fly straight: like an ember in warm air it sways from side
+ * to side, by up to this many pixels a second, about once a second. Each
+ * spark sways to its own beat (worked out from how long it lives, which is
+ * different for every spark).
+ */
+const SPARK_SWAY = 16
+const SPARK_SWAY_RATE = 7
+const SPARK_SWAY_SPREAD = 53
 
 /**
  * Every live spark, as columns of numbers: spark `i` is `x[i]`, `y[i]` and so
@@ -546,7 +555,8 @@ export function advanceSparks(sparks: Sparks, seconds: number): void {
     age[i] = lived
     vx[i] = (vx[i] ?? 0) * slowing
     vy[i] = (vy[i] ?? 0) * slowing
-    x[i] = (x[i] ?? 0) + (vx[i] ?? 0) * seconds
+    const sway = Math.sin(lived * SPARK_SWAY_RATE + (life[i] ?? 0) * SPARK_SWAY_SPREAD) * SPARK_SWAY
+    x[i] = (x[i] ?? 0) + ((vx[i] ?? 0) + sway) * seconds
     y[i] = (y[i] ?? 0) + (vy[i] ?? 0) * seconds
     i++
   }

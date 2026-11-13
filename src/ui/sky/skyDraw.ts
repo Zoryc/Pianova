@@ -123,6 +123,14 @@ const LINE_BAND_ALPHA = 0.85
 const SPARK_FADE_START = 0.55
 /** By the end of its life a spark has shrunk to this share of its size. */
 const SPARK_SMALLEST = 0.5
+/**
+ * A spark twinkles like an ember: it dims by up to this share of its
+ * brightness, a few times a second, each spark to its own beat (worked out
+ * from how long it lives).
+ */
+const SPARK_TWINKLE = 0.35
+const SPARK_TWINKLE_RATE = 31
+const SPARK_TWINKLE_SPREAD = 97
 
 /** Anything fainter than this cannot be seen and is not drawn. */
 const TOO_FAINT = 0.004
@@ -489,7 +497,9 @@ export class SkyPainter {
       const strength = sparkStrength(sparks, i)
       const shrink = SPARK_SMALLEST + (1 - SPARK_SMALLEST) * strength
       const half = ((sparks.radius[i] ?? 0) * shrink) / SPARK_CORE_SHARE
-      context.globalAlpha = Math.min(1, strength / SPARK_FADE_START)
+      const beat = (sparks.age[i] ?? 0) * SPARK_TWINKLE_RATE + (sparks.life[i] ?? 0) * SPARK_TWINKLE_SPREAD
+      const twinkle = 1 - SPARK_TWINKLE * (0.5 + 0.5 * Math.sin(beat))
+      context.globalAlpha = Math.min(1, strength / SPARK_FADE_START) * twinkle
       context.drawImage(
         spark,
         (sparks.x[i] ?? 0) - half,

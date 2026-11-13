@@ -134,16 +134,14 @@ describe('the Piano tab', () => {
   })
 
   describe('Key effect', () => {
-    it('offers the effect the piano has always had first, then the five others', () => {
+    it('offers the effect the piano has always had first, then the three others', () => {
       render(<LiveTab />)
-      expect(choicesOf('Key effect')).toEqual(['Glow', 'Press', 'Fill', 'Ripple', 'Edge', 'Pop'])
+      expect(choicesOf('Key effect')).toEqual(['Glow', 'Press', 'Edge', 'Pop'])
       expect(isChosen(choice('Key effect', 'Glow'))).toBe(true)
     })
 
     it.each([
       ['Press', 'press'],
-      ['Fill', 'fill'],
-      ['Ripple', 'ripple'],
       ['Edge', 'edge'],
       ['Pop', 'pop'],
     ] as const)('sets the %s effect', async (name, keyEffect) => {

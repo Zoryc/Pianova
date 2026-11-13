@@ -136,8 +136,6 @@ const KEY_STYLES: Readonly<Record<KeyStyle, true>> = { classic: true, midnight: 
 const KEY_EFFECTS: Readonly<Record<KeyEffect, true>> = {
   glow: true,
   press: true,
-  fill: true,
-  ripple: true,
   edge: true,
   pop: true,
 }

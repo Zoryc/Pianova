@@ -43,7 +43,7 @@ const LABEL_MODES: readonly LabelMode[] = ['both', 'keys', 'notes', 'none']
 const NAMINGS: readonly NoteNaming[] = ['letters', 'solfege']
 const KEY_STYLES: readonly KeyStyle[] = ['classic', 'midnight', 'glass']
 /** Glow is the effect the piano starts with; the stylesheet has a block of rules for each of the others. */
-const KEY_EFFECTS: readonly KeyEffect[] = ['glow', 'press', 'fill', 'ripple', 'edge', 'pop']
+const KEY_EFFECTS: readonly KeyEffect[] = ['glow', 'press', 'edge', 'pop']
 
 /**
  * Where the keys of a piano of 37 keys are. That piano is exactly the
@@ -1700,8 +1700,8 @@ describe('the look of the keys', () => {
       h.unmount()
     }
     const h = draw({ activeNotes: new Set([60]) })
-    h.update({ keyEffect: 'ripple' })
-    expect(h.piano.dataset.keyEffect).toBe('ripple')
+    h.update({ keyEffect: 'edge' })
+    expect(h.piano.dataset.keyEffect).toBe('edge')
     // The effect is the stylesheet's business alone: a played key is marked the same way in all of them.
     expect(h.key(C4).classList.contains('is-lit')).toBe(true)
   })
@@ -2020,7 +2020,7 @@ describe('what the stylesheet promises', () => {
     it('moves only what a browser can move without painting the piano again', () => {
       // Each step of an animation sets nothing but the tilt, the stretch or the strength of a layer.
       const frames = [...pianoCss.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g)]
-      expect(frames.map((found) => found[1]).sort()).toEqual(['piano-flash', 'piano-pop', 'piano-pour', 'piano-ripple'])
+      expect(frames.map((found) => found[1]).sort()).toEqual(['piano-flash', 'piano-pop'])
       for (const [, name, steps] of frames) {
         const properties = [...(steps ?? '').matchAll(/([\w-]+)\s*:/g)].map((found) => found[1])
         expect(properties.length, name).toBeGreaterThan(0)
@@ -2028,7 +2028,7 @@ describe('what the stylesheet promises', () => {
       }
       // And every animation that is used exists.
       const used = [...pianoCss.matchAll(/animation:\s*([\w-]+)/g)].map((found) => found[1]).filter((name) => name !== 'none')
-      expect([...new Set(used)].sort()).toEqual(['piano-flash', 'piano-pop', 'piano-pour', 'piano-ripple'])
+      expect([...new Set(used)].sort()).toEqual(['piano-flash', 'piano-pop'])
     })
 
     it('adds no wide soft shadow and nothing that only one browser has', () => {
@@ -2042,14 +2042,18 @@ describe('what the stylesheet promises', () => {
       }
     })
 
-    it('leaves the labels their own colours where the key keeps its own colour', () => {
+    it('keeps the labels readable where the key keeps its own colour: its own ink, on a solid keycap', () => {
       const quiet = effectSelectors.filter((selector) => selector.endsWith('.piano-key--white.is-lit'))
       expect(quiet).toHaveLength(1)
-      for (const effect of ['press', 'ripple', 'edge', 'pop']) expect(quiet[0]).toContain(`'${effect}'`)
-      // Fill floods the key with light, like Glow: its labels turn dark with it.
-      expect(quiet[0]).not.toContain("'fill'")
-      expect(styleValue(quiet[0] ?? '', '--piano-cap-ink')).toBe('var(--piano-white-cap-ink)')
-      expect(styleValue(quiet[0] ?? '', '--piano-note-ink')).toBe('var(--piano-white-note-ink)')
+      for (const effect of ['press', 'edge', 'pop']) expect(quiet[0]).toContain(`'${effect}'`)
+      // The names keep the ink of the key style; the keycap is a solid chip, whatever tint lies under it.
+      expect(styleValue(quiet[0] ?? '', '--piano-note-ink')).toBe('var(--piano-white-landmark-ink)')
+      expect(styleValue(quiet[0] ?? '', '--piano-cap-fill')).toBe('var(--piano-dark-cap-fill)')
+      expect(styleValue(quiet[0] ?? '', '--piano-cap-ink')).toBe('var(--piano-dark-cap-ink)')
+      const onBlack = effectSelectors.filter((selector) => selector.endsWith('.piano-key--black.is-lit'))
+      expect(onBlack).toHaveLength(1)
+      expect(styleValue(onBlack[0] ?? '', '--piano-cap-fill')).toBe('var(--key-ivory)')
+      expect(styleValue(onBlack[0] ?? '', '--piano-cap-ink')).toBe('var(--key-ebony)')
     })
 
     it('stands still for someone who asked for less movement', () => {

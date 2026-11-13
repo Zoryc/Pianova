@@ -20,8 +20,6 @@ const SIZE_OPTIONS: readonly { value: string; label: string }[] = SIZES.map((siz
 const KEY_EFFECT_OPTIONS: readonly { value: KeyEffect; label: string }[] = [
   { value: 'glow', label: 'Glow' },
   { value: 'press', label: 'Press' },
-  { value: 'fill', label: 'Fill' },
-  { value: 'ripple', label: 'Ripple' },
   { value: 'edge', label: 'Edge' },
   { value: 'pop', label: 'Pop' },
 ]

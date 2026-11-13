@@ -66,11 +66,9 @@ export type KeyStyle = 'classic' | 'midnight' | 'glass'
 /**
  * What a piano key does when it is played.
  *
- * - `glow`:   the key fills with light and glows onto its neighbours
- * - `press`:  the key dips deep, in shade, with only a little light
- * - `fill`:   light pours down the key while it is held and drains when it is let go
- * - `ripple`: a wave of light runs down the key; its far end stays lit while it is held
- * - `edge`:   only the outline of the key and a line at its far end light up
- * - `pop`:    a short flash and a small bounce, then a quiet steady light
+ * - `glow`:  the key fills with light and glows onto its neighbours
+ * - `press`: the key dips deep, in shade, with only a little light
+ * - `edge`:  only the outline of the key and a line at its far end light up
+ * - `pop`:   a short flash and a small bounce, then a quiet steady light
  */
-export type KeyEffect = 'glow' | 'press' | 'fill' | 'ripple' | 'edge' | 'pop'
+export type KeyEffect = 'glow' | 'press' | 'edge' | 'pop'

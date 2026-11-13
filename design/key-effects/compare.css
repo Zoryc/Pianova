@@ -1,0 +1,243 @@
+/*
+ * The page that shows the key effects side by side. Only the page itself is
+ * styled here: the pianos bring the app's own stylesheet, and the buttons
+ * and choices the app's shared look (src/ui/chrome.css). Colours come from
+ * the theme's tokens.
+ */
+
+/* The app never scrolls. This page may: it scrolls inside its root. */
+#root {
+  overflow: auto;
+}
+
+.fx-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+  padding: 16px 20px 32px;
+}
+
+/* ---------- The heading and the choices ---------- */
+
+.fx-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 32px;
+}
+
+.fx-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.fx-lead {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.fx-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+}
+
+.fx-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fx-control__name {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* What the sound is doing. It keeps its line when it has nothing to say, so the pianos do not jump. */
+.fx-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.fx-status__badge {
+  padding: 1px 8px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  color: var(--text);
+}
+
+/* ---------- The six pianos ---------- */
+
+/*
+ * On a wide screen all the pianos stand in one row, so that they are in view
+ * at once: --fx-columns is how many there are.
+ */
+.fx-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--fx-columns, 4), minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1500px) {
+  .fx-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .fx-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * A card is a piece of the app's stage: black, with the piano at the bottom.
+ * Light that spills past the piano is cut off at the card, as it is at the
+ * edge of the window in the app.
+ */
+.fx-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: clip;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  background: var(--stage-bg);
+}
+
+/* The name and the button on one line, and what the effect does under them. */
+.fx-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 92px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--control-line);
+  background: var(--panel-raised);
+}
+
+.fx-card__name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.fx-card__summary {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.fx-card__use {
+  white-space: nowrap;
+}
+
+/* Marks the effect the app uses now, in the colour of the light. */
+.fx-card__now {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--light);
+  color: var(--light-ink);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* The gap under the piano is the one the app leaves under its own. */
+.fx-card__stage {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 8px;
+}
+
+/* A strip of sky: the light of a played key spills up into it. */
+.fx-card__sky {
+  position: relative;
+  height: 40px;
+}
+
+/* The line of light along the top of the piano, as on the app's stage. */
+.fx-card__line {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--light);
+  box-shadow:
+    0 0 calc(var(--glow) * 6px) var(--light),
+    0 0 calc(var(--glow) * 18px) color-mix(in srgb, var(--light) 60%, transparent);
+  pointer-events: none;
+}
+
+/* ---------- The table ---------- */
+
+.fx-facts {
+  margin-top: 8px;
+}
+
+.fx-facts__title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* On a narrow window the table scrolls sideways by itself, not the page. */
+.fx-facts__scroll {
+  overflow-x: auto;
+}
+
+.fx-table {
+  width: 100%;
+  min-width: 860px;
+  /* Every effect gets a column of the same width. */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.fx-table th,
+.fx-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--control-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.fx-table thead th {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.fx-table thead td {
+  width: 19%;
+}
+
+.fx-table tbody th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.fx-facts__note {
+  max-width: 900px;
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}

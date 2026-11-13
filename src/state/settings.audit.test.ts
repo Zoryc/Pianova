@@ -194,7 +194,8 @@ describe('saved settings this version does not know', () => {
       ...PREVIOUS_VERSION_CUSTOMIZED,
       accent: 'pink',
       keyStyle: 'wood',
-      keyEffect: 'sparkle',
+      // An effect that was tried and taken out again: a setting saved with it goes back to the first one.
+      keyEffect: 'ripple',
       pianoSize: 76,
       background: 'sunset',
       sparks: 'fireworks',

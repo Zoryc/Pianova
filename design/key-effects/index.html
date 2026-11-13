@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Key effects, side by side</title>
+    <!--
+      A page for choosing between the key effects: one real piano per effect,
+      all playing the same notes. It is not part of the app and is
+      not in the built app. It works while the app runs in development (the
+      start file, or `npm run dev`), at this address:
+
+        http://localhost:5173/design/key-effects/
+
+      Add ?style=midnight (or glass, classic) and ?colour=rainbow (or red,
+      amber, blue, green, purple, white, custom) to start with that look, and
+      ?show=glow,edge to see only some of the effects.
+    -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./compare.tsx"></script>
+  </body>
+</html>
