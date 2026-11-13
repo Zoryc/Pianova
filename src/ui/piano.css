@@ -265,12 +265,14 @@
   /* A played key turns around its far end, like a real one. */
   transform-origin: top;
   /*
-   * Letting go is a little softer than pressing (see `.is-lit`). A key that
-   * was just released stays in front of its neighbours until its light has
-   * faded: that is the wait before z-index changes.
+   * A key has a spring under it. Let go, it comes back up a little past its
+   * place and settles; pressed, it goes a little too far down first (see
+   * `.is-lit`). Letting go is the softer of the two. A key that was just
+   * released stays in front of its neighbours until its light has faded: that
+   * is the wait before z-index changes.
    */
   transition:
-    transform 140ms ease-out,
+    transform 170ms cubic-bezier(0.3, 1.9, 0.5, 1),
     filter 160ms ease-out,
     z-index 0s linear 250ms;
 }
@@ -400,13 +402,15 @@
 }
 
 /*
- * Played: the near end dips, quickly, and the key comes in front of its
- * neighbours so that its glow falls on them. A white key stays under the
- * black keys, which keep their shape against the glow.
+ * Played: the near end dips, quickly, hits the bottom and settles, and the
+ * key comes in front of its neighbours so that its glow falls on them. A
+ * white key stays under the black keys, which keep their shape against the
+ * glow.
  */
 .piano-key.is-lit {
-  transform: perspective(420px) rotateX(-5deg);
-  transition-duration: 50ms, 160ms, 0s;
+  transform: perspective(420px) rotateX(-6deg);
+  transition-duration: 100ms, 160ms, 0s;
+  transition-timing-function: cubic-bezier(0.25, 2.6, 0.45, 1), ease-out, linear;
   transition-delay: 0s;
 }
 
@@ -435,6 +439,300 @@
   transition-duration: 50ms;
 }
 
+/*
+ * ---------- Key effects ----------
+ *
+ * What a key does when it is played is the player's choice: the `keyEffect`
+ * setting, `data-key-effect` on the piano. The rules above are the effect the
+ * piano starts with, Glow: the key fills with light and glows onto its
+ * neighbours. Each block below turns it into another effect, with the same
+ * two layers (::before on the face of the key, ::after around or over it). An
+ * effect the stylesheet does not know is drawn as Glow.
+ *
+ * What keeps a key press cheap holds for every effect: only `transform` and
+ * `opacity` change little by little, in a transition or in an animation (a
+ * browser moves those without painting the piano again), and no effect adds a
+ * wide soft shadow. A layer that is not showing has an opacity of 0, and is
+ * then not painted at all.
+ *
+ * An animation runs only while its key is played. When the key is let go
+ * before the animation is over, a transition carries on from wherever the
+ * animation had got to, so a short tap still shows the whole movement.
+ *
+ * `:where()` keeps these rules as weak as the ones above: the selected key,
+ * further down, still wins over all of them.
+ */
+
+/*
+ * Press, Ripple, Edge and Pop leave the face of the key in its own colour, or
+ * nearly so: the labels keep their own colours as well.
+ */
+:where(
+    .piano:is(
+        [data-key-effect='press'],
+        [data-key-effect='ripple'],
+        [data-key-effect='edge'],
+        [data-key-effect='pop']
+      )
+  )
+  .piano-key--white.is-lit {
+  --piano-cap-fill: var(--piano-white-cap-fill);
+  --piano-cap-ink: var(--piano-white-cap-ink);
+  --piano-note-ink: var(--piano-white-note-ink);
+  --piano-landmark-ink: var(--piano-white-landmark-ink);
+}
+
+:where(
+    .piano:is(
+        [data-key-effect='press'],
+        [data-key-effect='ripple'],
+        [data-key-effect='edge'],
+        [data-key-effect='pop']
+      )
+  )
+  .piano-key--black.is-lit {
+  --piano-cap-fill: var(--piano-black-cap-fill);
+  --piano-cap-ink: var(--piano-black-cap-ink);
+  --piano-note-ink: var(--piano-black-note-ink);
+}
+
+/* ----- Press: the key goes down like a real one, in shade, with only a little light ----- */
+
+/* Nearly twice as far down as in the other effects, and a little heavier both ways. */
+:where(.piano[data-key-effect='press']) .piano-key {
+  transition-duration: 190ms, 160ms, 0s;
+}
+
+:where(.piano[data-key-effect='press']) .piano-key.is-lit {
+  transform: perspective(420px) rotateX(-9deg);
+  transition-duration: 120ms, 160ms, 0s;
+}
+
+/* The light gathers at the near end, where the finger is, and the front edge of the key is lit. */
+:where(.piano[data-key-effect='press']) .piano-key--white::before {
+  background: linear-gradient(
+    to bottom in srgb,
+    color-mix(in srgb, var(--key-light) 8%, transparent),
+    color-mix(in srgb, var(--key-light) 34%, transparent)
+  );
+  box-shadow: inset 0 -4px 0 var(--key-light);
+}
+
+/* On a black key the lit front edge is its sloping front. */
+:where(.piano[data-key-effect='press']) .piano-key--black::before {
+  background: linear-gradient(
+    to top in srgb,
+    color-mix(in srgb, var(--key-light) 80%, transparent) var(--piano-black-front),
+    color-mix(in srgb, var(--key-light) 38%, transparent) var(--piano-black-front),
+    color-mix(in srgb, var(--key-light) 10%, transparent)
+  );
+}
+
+/* The shade of a key that lies lower than its neighbours: along its sides, and deeper toward the player. */
+:where(.piano[data-key-effect='press']) .piano-key::after {
+  background: linear-gradient(
+    to bottom in srgb,
+    transparent,
+    color-mix(in srgb, var(--stage-bg) 26%, transparent)
+  );
+  box-shadow:
+    inset 3px 0 4px -2px color-mix(in srgb, var(--stage-bg) 55%, transparent),
+    inset -3px 0 4px -2px color-mix(in srgb, var(--stage-bg) 55%, transparent);
+}
+
+/* ----- Fill: light pours down the key while it is held, and runs back out when it is let go ----- */
+
+/*
+ * The light is the same as in Glow, squeezed against the far end of the key.
+ * Let go: it runs back to the far end, and only then is it switched off.
+ */
+:where(.piano[data-key-effect='fill']) .piano-key::before {
+  transform: scaleY(0);
+  transform-origin: top;
+  /* As long as the wait before the key goes back behind its neighbours: one painting for both. */
+  transition:
+    transform 250ms linear,
+    opacity 0s linear 250ms;
+}
+
+/* Fast at first, so that a short note shows too. Every note starts from an empty key. */
+:where(.piano[data-key-effect='fill']) .piano-key.is-lit::before {
+  transform: none;
+  transition-duration: 0s;
+  transition-delay: 0s;
+  animation: piano-pour 380ms cubic-bezier(0.2, 0.6, 0.4, 1);
+}
+
+@keyframes piano-pour {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+/* The glow around the key grows with the light in it. */
+:where(.piano[data-key-effect='fill']) .piano-key.is-lit::after {
+  transition-duration: 380ms;
+}
+
+@media (hover: hover) {
+  /* The hint under the mouse is the whole face of the key, and fades in as in the other effects. */
+  :where(.piano[data-key-effect='fill']) .piano-key:not(.is-lit):hover::before {
+    transform: none;
+    transition: opacity 250ms ease-out;
+  }
+}
+
+/* ----- Ripple: a wave of light runs down the key; its far end stays lit while it is held ----- */
+
+/* What stays: light at the far end, where the note landed, fading out toward the player. */
+:where(.piano[data-key-effect='ripple']) .piano-key--white::before {
+  background: linear-gradient(
+    to bottom in srgb,
+    var(--key-light-bright),
+    color-mix(in srgb, var(--key-light) 85%, transparent) 10%,
+    color-mix(in srgb, var(--key-light) 30%, transparent) 30%,
+    transparent 55%
+  );
+  box-shadow: none;
+}
+
+:where(.piano[data-key-effect='ripple']) .piano-key--black::before {
+  background: linear-gradient(
+    to bottom in srgb,
+    var(--key-light-bright),
+    color-mix(in srgb, var(--key-light) 85%, transparent) 12%,
+    color-mix(in srgb, var(--key-light) 30%, transparent) 36%,
+    transparent 66%
+  );
+}
+
+/*
+ * The wave: a bright crest with a soft tail behind it. It is stretched from
+ * the far end of the key to its whole length, so the crest runs down the key,
+ * and it fades as it goes. At rest it is stretched out and cannot be seen.
+ */
+:where(.piano[data-key-effect='ripple']) .piano-key::after {
+  background: linear-gradient(
+    to bottom in srgb,
+    transparent 30%,
+    color-mix(in srgb, var(--key-light) 60%, transparent) 78%,
+    var(--key-light-bright) 96%,
+    transparent
+  );
+  box-shadow: none;
+  transform-origin: top;
+  transition:
+    transform 300ms ease-out,
+    opacity 300ms ease-out;
+}
+
+:where(.piano[data-key-effect='ripple']) .piano-key.is-lit::after {
+  opacity: 0;
+  animation: piano-ripple 420ms cubic-bezier(0.2, 0.6, 0.4, 1);
+}
+
+@keyframes piano-ripple {
+  from {
+    transform: scaleY(0.08);
+    opacity: 1;
+  }
+
+  55% {
+    opacity: 0.85;
+  }
+}
+
+/* ----- Edge: only the outline of the key and a line at its far end light up ----- */
+
+/*
+ * A bright line where the key meets the light, a short fall of light under
+ * it, and the outline. The dark hairline inside the outline sets it apart
+ * from a key that is nearly the colour of the light (white light on ivory).
+ */
+:where(.piano[data-key-effect='edge']) .piano-key::before {
+  background: linear-gradient(
+    to bottom in srgb,
+    var(--key-light-bright) 3px,
+    color-mix(in srgb, var(--key-light) 55%, transparent) 3px,
+    transparent 26%
+  );
+  box-shadow:
+    inset 0 0 0 2px var(--key-light),
+    inset 0 0 0 3px color-mix(in srgb, var(--key-ebony) 45%, transparent);
+}
+
+/* A tight glow, like a tube of neon. With --glow at 0 there is none. */
+:where(.piano[data-key-effect='edge']) .piano-key::after {
+  box-shadow: 0 0 calc(var(--glow) * 9px) 0 color-mix(in srgb, var(--key-light) 85%, transparent);
+}
+
+/* ----- Pop: a short bright flash and a small bounce, then a quiet steady light ----- */
+
+/* Held, the key is barely down. On the way there it goes too far and springs back. */
+:where(.piano[data-key-effect='pop']) .piano-key.is-lit {
+  transform: perspective(420px) rotateX(-3deg);
+  transition-duration: 0s, 160ms, 0s;
+  animation: piano-pop 280ms ease-out;
+}
+
+@keyframes piano-pop {
+  from {
+    transform: perspective(420px) rotateX(0deg);
+  }
+
+  30% {
+    transform: perspective(420px) rotateX(-9deg);
+  }
+
+  65% {
+    transform: perspective(420px) rotateX(-1deg);
+  }
+}
+
+/* The light of Glow, all of it for an instant, then about a third of it for as long as the key is held. */
+:where(.piano[data-key-effect='pop']) .piano-key.is-lit::before {
+  opacity: 0.36;
+  transition-duration: 0s;
+  animation: piano-flash 340ms ease-out;
+}
+
+:where(.piano[data-key-effect='pop']) .piano-key.is-lit::after {
+  opacity: 0.5;
+  transition-duration: 0s;
+  animation: piano-flash 340ms ease-out;
+}
+
+@keyframes piano-flash {
+  from {
+    opacity: 1;
+  }
+}
+
+/* ----- Every effect ----- */
+
+/* The layer over a white key leaves the gap to the next key dark, like the light on its face. */
+:where(.piano:is([data-key-effect='press'], [data-key-effect='ripple'])) .piano-key--white::after {
+  right: 1px;
+}
+
+/*
+ * For someone who asked their system for less movement nothing pours, runs,
+ * flashes or bounces: a key shows at once what it looks like while held, and
+ * Press goes down no further than the other effects. (The transitions are
+ * already cut short for the whole app, in theme.css.)
+ */
+@media (prefers-reduced-motion: reduce) {
+  :where(.piano) .piano-key.is-lit,
+  :where(.piano) .piano-key.is-lit::before,
+  :where(.piano) .piano-key.is-lit::after {
+    animation: none;
+  }
+
+  :where(.piano[data-key-effect='press']) .piano-key.is-lit {
+    transform: perspective(420px) rotateX(-6deg);
+  }
+}
+
 /* Selected in edit mode: the key waiting for the user to press a computer key. */
 .piano-key.is-selected {
   --piano-key-fill: var(--key-selected);
@@ -447,6 +745,8 @@
 .piano-key.is-selected::before,
 .piano-key.is-selected::after {
   opacity: 0;
+  /* No effect flashes on it either. */
+  animation: none;
 }
 
 /* ---------- Edit mode: only the keys of the keyboard zone can be chosen ---------- */
@@ -599,4 +899,10 @@
 .piano-key.is-lit .piano-key__cap,
 .piano-key.is-lit .piano-key__note {
   transition-delay: 0s;
+}
+
+/* With the Fill effect, a moment later: when the light running down the key reaches them. */
+:where(.piano[data-key-effect='fill']) .piano-key.is-lit .piano-key__cap,
+:where(.piano[data-key-effect='fill']) .piano-key.is-lit .piano-key__note {
+  transition-delay: 120ms;
 }

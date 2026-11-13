@@ -72,6 +72,7 @@ const PREVIOUS_VERSION_CUSTOMIZED = {
 const NEW_SETTINGS_AT_THEIR_DEFAULTS: Partial<Settings> = {
   pianoSize: 'auto',
   keyStyle: 'classic',
+  keyEffect: 'glow',
   keyboardType: 'auto',
   accent: 'red',
   customColour: '#ff2a2a',
@@ -193,6 +194,7 @@ describe('saved settings this version does not know', () => {
       ...PREVIOUS_VERSION_CUSTOMIZED,
       accent: 'pink',
       keyStyle: 'wood',
+      keyEffect: 'sparkle',
       pianoSize: 76,
       background: 'sunset',
       sparks: 'fireworks',

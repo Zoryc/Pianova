@@ -441,7 +441,7 @@ export const MAX_SPARKS = 600
  * strikes, is under 550.
  */
 const SPARKS_PER_SECOND: Readonly<Record<SparksLevel, number>> = { off: 0, some: 14, lots: 42 }
-const SPARKS_PER_STRIKE: Readonly<Record<SparksLevel, number>> = { off: 0, some: 5, lots: 12 }
+const SPARKS_PER_STRIKE: Readonly<Record<SparksLevel, number>> = { off: 0, some: 8, lots: 12 }
 
 /** A spark lives between these two, in seconds. */
 const SPARK_MIN_LIFE = 0.45
@@ -451,7 +451,7 @@ const SPARK_MIN_RISE = 60
 const SPARK_MAX_RISE = 180
 const SPARK_MAX_DRIFT = 38
 /** Sparks thrown by a strike leave faster than the steady ones. */
-const STRIKE_SPEED_UP = 1.5
+const STRIKE_SPEED_UP = 1.9
 /** How quickly a spark loses its speed: after 1 / SPARK_DRAG seconds it has lost about two thirds of it. */
 const SPARK_DRAG = 2.2
 /** Radius of the bright centre, in pixels. */

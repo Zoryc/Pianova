@@ -14,7 +14,14 @@ import type { PianoRange } from '../core/layout'
 import { noteName, pitchClass, pitchName } from '../core/notes'
 import { BLACK_KEY_WIDTH_RATIO, keyRectOf, keyRects, whiteKeyCount } from '../core/pianoGeometry'
 import type { KeyRect } from '../core/pianoGeometry'
-import type { AccentChoice, KeyStyle, LabelMode, Midi, NoteNaming } from '../core/types'
+import type {
+  AccentChoice,
+  KeyEffect,
+  KeyStyle,
+  LabelMode,
+  Midi,
+  NoteNaming,
+} from '../core/types'
 import { BLACK_KEY_HEIGHT, createPointerNotes, noteAtPoint, notesAlongLine } from './pianoHitTest'
 import './piano.css'
 
@@ -35,6 +42,8 @@ export interface PianoProps {
   keyLabels: ReadonlyMap<number, string>
   /** How the keys are drawn. piano.css has one block of variables per style. */
   keyStyle: KeyStyle
+  /** What a key does when it is played. piano.css has one block of rules per effect. */
+  keyEffect: KeyEffect
   /** The colour of the light, for the keys being played (`paletteForNote`). */
   accent: AccentChoice
   customColour: string
@@ -63,6 +72,7 @@ export function Piano(props: PianoProps): JSX.Element {
     noteNaming,
     keyLabels,
     keyStyle,
+    keyEffect,
     accent,
     customColour,
     editMode = false,
@@ -191,6 +201,7 @@ export function Piano(props: PianoProps): JSX.Element {
     <div
       className={editMode ? 'piano piano--editing' : 'piano'}
       data-key-style={keyStyle}
+      data-key-effect={keyEffect}
       style={pianoStyle(range)}
       role="group"
       aria-label="Piano"

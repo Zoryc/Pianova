@@ -111,8 +111,8 @@ const BLOOM_SMALLEST = 0.65
 /** More than 1, so that the bloom is already at its brightest a little before the glow is at its strongest. */
 const BLOOM_ALPHA = 1.25
 /** A new note makes its bloom this much bigger and brighter for a moment. */
-const FLASH_GROWTH = 0.4
-const FLASH_ALPHA = 0.5
+const FLASH_GROWTH = 0.55
+const FLASH_ALPHA = 0.65
 
 /** The band of light that lies on the line: its height with no glow and what full glow adds, in pixels. */
 const LINE_BAND_HEIGHT = 14

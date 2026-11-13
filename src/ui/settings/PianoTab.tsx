@@ -1,7 +1,7 @@
 import type { JSX } from 'react'
 import { PIANO_SIZES } from '../../core/layout'
 import type { PianoSizeSetting } from '../../core/layout'
-import type { NoteNaming } from '../../core/types'
+import type { KeyEffect, NoteNaming } from '../../core/types'
 import { settingsStore } from '../../state/settings'
 import type { Settings } from '../../state/settings'
 import { Field, Segmented } from '../controls'
@@ -15,6 +15,16 @@ const SIZE_OPTIONS: readonly { value: string; label: string }[] = SIZES.map((siz
   value: String(size),
   label: size === 'auto' ? 'Auto' : String(size),
 }))
+
+/** The effect the piano has always had comes first: it is the one a new player gets. */
+const KEY_EFFECT_OPTIONS: readonly { value: KeyEffect; label: string }[] = [
+  { value: 'glow', label: 'Glow' },
+  { value: 'press', label: 'Press' },
+  { value: 'fill', label: 'Fill' },
+  { value: 'ripple', label: 'Ripple' },
+  { value: 'edge', label: 'Edge' },
+  { value: 'pop', label: 'Pop' },
+]
 
 const NAMING_OPTIONS: readonly { value: NoteNaming; label: string }[] = [
   { value: 'letters', label: 'C D E' },
@@ -49,6 +59,17 @@ export function PianoTab({ settings }: { settings: Settings }): JSX.Element {
         <KeyStylePicker
           value={settings.keyStyle}
           onChange={(keyStyle) => settingsStore.set({ keyStyle })}
+        />
+      </Field>
+
+      <Field
+        label="Key effect"
+        hint="What a key does when you play it. Try each one on the piano below."
+      >
+        <Segmented
+          value={settings.keyEffect}
+          options={KEY_EFFECT_OPTIONS}
+          onChange={(keyEffect) => settingsStore.set({ keyEffect })}
         />
       </Field>
 

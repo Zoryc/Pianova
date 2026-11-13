@@ -6,6 +6,7 @@ import type {
   AccentChoice,
   BackgroundName,
   BarStyle,
+  KeyEffect,
   KeyStyle,
   KeyboardType,
   LabelMode,
@@ -51,6 +52,8 @@ export interface Settings {
   pianoSize: PianoSizeSetting
   /** How the piano keys are drawn. */
   keyStyle: KeyStyle
+  /** What a piano key does when it is played. */
+  keyEffect: KeyEffect
   /** Which letters are printed on the player's keyboard ('auto' = ask the browser). */
   keyboardType: KeyboardType
 
@@ -92,6 +95,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   showTrails: true,
   pianoSize: 'auto',
   keyStyle: 'classic',
+  keyEffect: 'glow',
   keyboardType: 'auto',
   accent: 'red',
   customColour: ACCENT_COLOURS.red,
@@ -129,6 +133,14 @@ const RELEASE_LENGTHS: Readonly<Record<ReleaseLength, true>> = {
   long: true,
 }
 const KEY_STYLES: Readonly<Record<KeyStyle, true>> = { classic: true, midnight: true, glass: true }
+const KEY_EFFECTS: Readonly<Record<KeyEffect, true>> = {
+  glow: true,
+  press: true,
+  fill: true,
+  ripple: true,
+  edge: true,
+  pop: true,
+}
 const KEYBOARD_TYPES: Readonly<Record<KeyboardType, true>> = {
   auto: true,
   qwerty: true,
@@ -184,6 +196,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     showTrails: booleanOr(read('showTrails'), defaults.showTrails),
     pianoSize: pianoSizeOr(read('pianoSize'), defaults.pianoSize),
     keyStyle: optionOr(read('keyStyle'), KEY_STYLES, defaults.keyStyle),
+    keyEffect: optionOr(read('keyEffect'), KEY_EFFECTS, defaults.keyEffect),
     keyboardType: optionOr(read('keyboardType'), KEYBOARD_TYPES, defaults.keyboardType),
     accent: optionOr(read('accent'), ACCENTS, defaults.accent),
     customColour: hexColourOr(read('customColour'), defaults.customColour),

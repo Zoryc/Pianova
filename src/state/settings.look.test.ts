@@ -83,6 +83,7 @@ function isUsable(settings: Settings): boolean {
     ['letters', 'solfege'].includes(settings.noteNaming) &&
     ['short', 'normal', 'long'].includes(settings.release) &&
     ['classic', 'midnight', 'glass'].includes(settings.keyStyle) &&
+    ['glow', 'press', 'fill', 'ripple', 'edge', 'pop'].includes(settings.keyEffect) &&
     ['auto', 'qwerty', 'azerty', 'qwertz'].includes(settings.keyboardType) &&
     ['red', 'amber', 'blue', 'green', 'purple', 'white', 'custom', 'rainbow'].includes(
       settings.accent,

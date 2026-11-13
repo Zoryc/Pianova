@@ -151,6 +151,7 @@ export function Stage(props: StageProps): JSX.Element {
           noteNaming={settings.noteNaming}
           keyLabels={props.keyLabels}
           keyStyle={settings.keyStyle}
+          keyEffect={settings.keyEffect}
           accent={settings.accent}
           customColour={settings.customColour}
           onNoteDown={props.onNoteDown}

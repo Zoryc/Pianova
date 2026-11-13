@@ -46,6 +46,7 @@ const SETTING_KEYS = [
   'showTrails',
   'pianoSize',
   'keyStyle',
+  'keyEffect',
   'keyboardType',
   'accent',
   'customColour',
@@ -78,6 +79,7 @@ const SAVED_BEFORE_THE_NEW_SCREEN = {
 const NEW_SCREEN_DEFAULTS = {
   pianoSize: 'auto',
   keyStyle: 'classic',
+  keyEffect: 'glow',
   keyboardType: 'auto',
   accent: 'red',
   customColour: '#ff2a2a',
@@ -97,6 +99,7 @@ const CHOICES = {
   release: ['short', 'normal', 'long'],
   pianoSize: ['auto', 88, 61, 49, 37],
   keyStyle: ['classic', 'midnight', 'glass'],
+  keyEffect: ['glow', 'press', 'fill', 'ripple', 'edge', 'pop'],
   keyboardType: ['auto', 'qwerty', 'azerty', 'qwertz'],
   accent: ['red', 'amber', 'blue', 'green', 'purple', 'white', 'custom', 'rainbow'],
   background: ['black', 'night', 'stars', 'aurora'],
@@ -196,6 +199,7 @@ describe('defaults', () => {
       showTrails: true,
       pianoSize: 'auto',
       keyStyle: 'classic',
+      keyEffect: 'glow',
       keyboardType: 'auto',
       accent: 'red',
       customColour: '#ff2a2a',
@@ -257,6 +261,7 @@ describe('sanitizeSettings', () => {
       showTrails: false,
       pianoSize: 61,
       keyStyle: 'glass',
+      keyEffect: 'ripple',
       keyboardType: 'azerty',
       accent: 'custom',
       customColour: '#12ab9f',
@@ -491,7 +496,7 @@ describe('sanitizeSettings', () => {
     const expected = { ...SAVED_BEFORE_THE_NEW_SCREEN, ...NEW_SCREEN_DEFAULTS }
     expect(sanitizeSettings(SAVED_BEFORE_THE_NEW_SCREEN)).toEqual(expected)
     expect(sanitizeSettings(JSON.parse(JSON.stringify(SAVED_BEFORE_THE_NEW_SCREEN)))).toEqual(expected)
-    expect(Object.keys(NEW_SCREEN_DEFAULTS)).toEqual(SETTING_KEYS.slice(-12))
+    expect(Object.keys(NEW_SCREEN_DEFAULTS)).toEqual(SETTING_KEYS.slice(-13))
   })
 
   it('fixes each field on its own: one bad value does not throw away the good ones', () => {

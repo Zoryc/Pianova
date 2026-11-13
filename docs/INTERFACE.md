@@ -101,6 +101,7 @@ A range may start on any white key (A0 for the full piano), not only on a C. Whi
 ```ts
 pianoSize: PianoSizeSetting     // default 'auto'
 keyStyle: KeyStyle              // default 'classic'
+keyEffect: KeyEffect            // what a key does when it is played; default 'glow'
 keyboardType: KeyboardType      // default 'auto'
 
 accent: AccentChoice            // default 'red'
@@ -128,6 +129,8 @@ export type SparksLevel = 'off' | 'some' | 'lots'
 export type KeyboardType = 'auto' | 'qwerty' | 'azerty' | 'qwertz'
 /** How the piano keys are drawn. */
 export type KeyStyle = 'classic' | 'midnight' | 'glass'
+/** What a piano key does when it is played. */
+export type KeyEffect = 'glow' | 'press' | 'fill' | 'ripple' | 'edge' | 'pop'
 ```
 
 Saved settings from before this change load fine: missing fields take their defaults. `customColour` is sanitized with `isHexColour` (anything else falls back to the default).
@@ -378,6 +381,8 @@ export interface PianoProps {
   /** slot -> label of the computer key that plays it. */
   keyLabels: ReadonlyMap<number, string>
   keyStyle: KeyStyle
+  /** What a key does when it is played. */
+  keyEffect: KeyEffect
   /** For the colour of lit keys (`paletteForNote`). */
   accent: AccentChoice
   customColour: string
@@ -399,7 +404,15 @@ Everything the piano of the first screen did stays (`docs/ARCHITECTURE.md` 5.6: 
   - *Midnight*: white keys are a very dark blue-grey with a faint lighter edge, black keys are pure black with a thin lighter outline, so the keyboard almost disappears until it is played; labels are light. Lit keys look the same as in Classic, which makes them stand out strongly.
   - *Glass*: keys are see-through: white keys are a faint light outline with a barely visible fill, black keys a slightly stronger fill; the stage shows through. Lit keys fill with the accent.
   Every style keeps the same geometry, the same label legibility (check contrast of keycaps and note names in each) and the same lit and selected states.
-- **Lit keys** glow in the accent: a white key fills with a vertical gradient from `--light-bright` at the top to a lighter tint at the bottom and casts a soft glow upward; a black key takes `--light` with a bright top edge. A pressed key **tilts** like a real one: it turns a few degrees around its top edge (`transform-origin: top`, a little `perspective`), so its near end dips, quickly on press (about 50 ms) and a little more softly on release (about 140 ms). When a key is released its light does not snap off: it **fades out** over about 250 ms (the afterglow). The glow of a lit key spills over its neighbours (a soft shadow in its own colour, scaled by `--glow`, drawn above the other keys), as in the reference picture. The labels on the key take their lit colours at once and go back to their own in one step, about 90 ms after the release (when the light is about half gone); a key that is struck again before that keeps them.
+- **Lit keys** glow in the accent: a white key fills with a vertical gradient from `--light-bright` at the top to a lighter tint at the bottom and casts a soft glow upward; a black key takes `--light` with a bright top edge. A pressed key **tilts** like a real one: it turns a few degrees around its top edge (`transform-origin: top`, a little `perspective`), so its near end dips. The key is on a spring: pressed, it goes down quickly, a little too far, and settles (about 100 ms); let go, it comes back up a little past its place and settles, more softly (about 170 ms). Both are the timing curve of the `transform` transition, nothing more. When a key is released its light does not snap off: it **fades out** over about 250 ms (the afterglow). The glow of a lit key spills over its neighbours (a soft shadow in its own colour, scaled by `--glow`, drawn above the other keys), as in the reference picture. The labels on the key take their lit colours at once and go back to their own in one step, about 90 ms after the release (when the light is about half gone); a key that is struck again before that keeps them.
+- **Key effects** (the `keyEffect` setting, a `data-key-effect` attribute on the piano; a prototype, for the owner to choose from). What is described above is the effect the piano starts with, **Glow**. Each of the five others is a block of rules in `piano.css` that changes the same two layers of a key (`::before` on its face, `::after` around or over it), so the component has no per-effect code, and every effect works with every key style and colour, on white and black keys, whatever plays the note:
+  - *Press*: the key goes down nearly twice as far, in shade, with only a little light: a tint that gathers at its near end and a lit front edge. No glow.
+  - *Fill*: the light of Glow pours down the key from its far end while the key is held (about 0.4 s for the whole key, fast at first so that a short note shows too) and runs back out when it is let go.
+  - *Ripple*: a wave of light runs down the key and fades; while the key is held, its far end stays lit.
+  - *Edge*: only the outline of the key and a bright line at its far end light up, with a tight glow; the face of the key keeps its own colour.
+  - *Pop*: a short bright flash and a small bounce, then about a third of the light of Glow for as long as the key is held.
+
+  Press, Ripple, Edge and Pop leave the face of the key (nearly) its own colour, so the labels keep their own colours there; with Fill they turn when the light reaches them. The rules of "A key press stays cheap" below hold for every effect: only `transform` and `opacity` change little by little, in transitions and in four small animations (`piano-pour`, `piano-ripple`, `piano-pop`, `piano-flash`), and no effect adds a wide soft shadow. An animation runs only while its key is played; when the key is let go sooner, a transition carries on from where the animation had got to. With reduced motion nothing pours, runs, flashes or bounces: a key shows at once what it looks like while held. The effect rules are written with `:where()`, which keeps them as weak as the piano's own rules, so the selected key still wins over them.
 - **A key press stays cheap.** Firefox paints the whole piano again whenever anything on it changes, so two rules keep that painting rare and light. Measured on a screen that shows 144 pictures a second, with the full piano: without them a run of quick notes showed about 75 pictures a second, with them 144. First, only the tilt and the light of a key change little by little (`transform` and `opacity`, which a browser moves without painting again); colours change in one step. Second, every gradient that is drawn on all the keys says `in srgb`: a gradient with a `color-mix()` in it is otherwise blended in Oklab, which Firefox works out again, stop by stop, for every key each time it paints. Those gradients only fade one colour out or run between two nearly equal darks, so they look the same either way. `Piano.pointer.test.tsx` checks both rules.
 - **Labels** scale with the key width (container query units). Keycaps are small rounded chips at the bottom of each key. With the full piano the keys are narrow (about 26 px at a 1366 px window), so: keycaps hold one character comfortably; note names are drawn on every white key only when keys are at least 30 px wide, otherwise only on the C keys; black keys show a keycap but no note name when narrow. Long labels ("Num 1") shrink and never overflow.
 - **The keyboard zone** is marked discreetly so the player sees where the computer keys are on a large piano: a 2 px line in a dim tint of the accent along the bottom edge of the zone's keys, with a 1 px dark hairline above it, so that it also shows when the colour is pale and the keys are ivory (White on Classic). Only shown when the piano is larger than the zone.
@@ -521,6 +534,7 @@ Tabs along the top of the panel (real tab semantics, arrow keys move between the
 |---|---|---|
 | Piano size | Auto / 88 / 61 / 49 / 37 keys (segmented) | "How many keys the piano has. Auto picks the biggest piano that fits your window. 88 is a full piano." |
 | Key style | Classic / Midnight / Glass (segmented, each option with a tiny picture of three keys in that style) | "Classic is ivory and black. Midnight is dark keys that glow. Glass is see-through." |
+| Key effect | Glow / Press / Fill / Ripple / Edge / Pop (segmented) | "What a key does when you play it. Try each one on the piano below." |
 | Labels on the keys | Keys and notes / Keys only / Notes only / No labels (select) | |
 | Note names | "C D E" / "Do Ré Mi" | "How notes are written on the piano." |
 

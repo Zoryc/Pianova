@@ -29,7 +29,7 @@ import {
 import type { PianoRange, PianoSize } from '../core/layout'
 import { isBlackKey, noteName, pitchName } from '../core/notes'
 import { BLACK_KEY_WIDTH_RATIO, keyRectOf, keyRects, whiteKeyCount } from '../core/pianoGeometry'
-import type { AccentChoice, KeyStyle, LabelMode, Midi, NoteNaming } from '../core/types'
+import type { AccentChoice, KeyEffect, KeyStyle, LabelMode, Midi, NoteNaming } from '../core/types'
 import { Piano } from './Piano'
 import type { PianoProps } from './Piano'
 import { BLACK_KEY_HEIGHT } from './pianoHitTest'
@@ -42,6 +42,8 @@ const LOWER_ROW = (1 + BLACK_KEY_HEIGHT) / 2
 const LABEL_MODES: readonly LabelMode[] = ['both', 'keys', 'notes', 'none']
 const NAMINGS: readonly NoteNaming[] = ['letters', 'solfege']
 const KEY_STYLES: readonly KeyStyle[] = ['classic', 'midnight', 'glass']
+/** Glow is the effect the piano starts with; the stylesheet has a block of rules for each of the others. */
+const KEY_EFFECTS: readonly KeyEffect[] = ['glow', 'press', 'fill', 'ripple', 'edge', 'pop']
 
 /**
  * Where the keys of a piano of 37 keys are. That piano is exactly the
@@ -176,6 +178,7 @@ function draw(options: DrawOptions = {}, strict = false): Harness {
     noteNaming: 'letters',
     keyLabels: new Map<number, string>(),
     keyStyle: 'classic',
+    keyEffect: 'glow',
     accent: 'red',
     customColour: ACCENT_COLOURS.red,
     onNoteDown: (midi) => log.push(`down ${midi}`),
@@ -1588,6 +1591,7 @@ describe('where the keys are drawn', () => {
         noteNaming="letters"
         keyLabels={new Map([[C4, 'A']])}
         keyStyle="glass"
+        keyEffect="glow"
         accent="rainbow"
         customColour={ACCENT_COLOURS.red}
         onNoteDown={() => {}}
@@ -1687,6 +1691,30 @@ describe('the look of the keys', () => {
     const h = draw()
     h.update({ keyStyle: 'midnight' })
     expect(h.piano.dataset.keyStyle).toBe('midnight')
+  })
+
+  it('names the key effect for the stylesheet, and changes it at once', () => {
+    for (const keyEffect of KEY_EFFECTS) {
+      const h = draw({ keyEffect })
+      expect(h.piano.dataset.keyEffect).toBe(keyEffect)
+      h.unmount()
+    }
+    const h = draw({ activeNotes: new Set([60]) })
+    h.update({ keyEffect: 'ripple' })
+    expect(h.piano.dataset.keyEffect).toBe('ripple')
+    // The effect is the stylesheet's business alone: a played key is marked the same way in all of them.
+    expect(h.key(C4).classList.contains('is-lit')).toBe(true)
+  })
+
+  it('draws the same keys, labels and states with every key effect', () => {
+    const keyLabels = new Map<number, string>([[C4, 'A']])
+    const drawn = KEY_EFFECTS.map((keyEffect) => {
+      const h = draw({ keyEffect, keyLabels, activeNotes: new Set([60, 61]) })
+      const html = h.piano.innerHTML
+      h.unmount()
+      return html
+    })
+    expect(new Set(drawn).size).toBe(1)
   })
 
   it('draws the same keys, labels and states in every key style', () => {
@@ -1883,11 +1911,19 @@ describe('what the stylesheet promises', () => {
     expect(styleValue('.piano-key--white', 'height')).toBe('100%')
   })
 
-  it('tilts a played key around its far end: quickly down, a little softer back up', () => {
+  it('tilts a played key around its far end, on a spring: quickly down, a little softer back up', () => {
     expect(styleValue('.piano-key', 'transform-origin')).toBe('top')
     expect(styleValue('.piano-key.is-lit', 'transform')).toMatch(/^perspective\(\d+px\) rotateX\(-\d+deg\)$/)
-    expect(styleValue('.piano-key', 'transition')).toContain('transform 140ms')
-    expect(styleValue('.piano-key.is-lit', 'transition-duration')).toMatch(/^50ms,/)
+    // Both ways the key goes a little past where it is going and settles: a curve that rises above 1.
+    const springBack = /^transform (\d+)ms cubic-bezier\(0\.\d+, (\d\.\d+), 0\.\d+, 1\),/.exec(styleValue('.piano-key', 'transition'))
+    const springDown = /^cubic-bezier\(0\.\d+, (\d\.\d+), 0\.\d+, 1\), ease-out, linear$/.exec(
+      styleValue('.piano-key.is-lit', 'transition-timing-function'),
+    )
+    expect(Number(springBack?.[2])).toBeGreaterThan(1)
+    expect(Number(springDown?.[1])).toBeGreaterThan(1)
+    const down = Number(/^(\d+)ms,/.exec(styleValue('.piano-key.is-lit', 'transition-duration'))?.[1])
+    expect(down).toBeLessThanOrEqual(120)
+    expect(Number(springBack?.[1])).toBeGreaterThan(down)
   })
 
   it('lets the light of a released key fade out over a quarter of a second, with the key still in front', () => {
@@ -1946,12 +1982,85 @@ describe('what the stylesheet promises', () => {
     const gradual = styleRules().flatMap(({ declarations }) => {
       const transition = /(?:^|;)\s*transition\s*:\s*([^;]+)/.exec(declarations)?.[1] ?? ''
       return transition
-        .split(',')
+        // At the commas between two transitions, not at the ones inside a timing curve.
+        .split(/,(?![^(]*\))/)
         .map((part) => part.trim().split(/\s+/))
         .filter(([property, duration]) => property !== undefined && property !== '' && duration !== '0s')
         .map(([property]) => property)
     })
     expect([...new Set(gradual)].sort()).toEqual(['filter', 'opacity', 'transform'])
+  })
+
+  describe('for the key effects', () => {
+    const OTHER_EFFECTS = KEY_EFFECTS.filter((effect) => effect !== 'glow')
+    /** The selectors of every rule that is written for one effect (or for several). */
+    const effectSelectors = styleRules().flatMap(({ selectors }) =>
+      selectors.filter((selector) => selector.includes('data-key-effect')),
+    )
+
+    it('has rules for each effect but Glow, which is the piano as it is without any', () => {
+      for (const effect of OTHER_EFFECTS) {
+        const own = effectSelectors.filter((selector) => selector.includes(`[data-key-effect='${effect}']`))
+        expect(own.length, effect).toBeGreaterThan(0)
+        // Something of the effect shows on a key that is played.
+        expect(own.some((selector) => selector.includes('.piano-key')), effect).toBe(true)
+      }
+      expect(effectSelectors.filter((selector) => selector.includes("'glow'"))).toEqual([])
+      // No effect the settings do not know.
+      const named = effectSelectors.flatMap((selector) => [...selector.matchAll(/data-key-effect='(\w+)'/g)].map((found) => found[1]))
+      expect([...new Set(named)].sort()).toEqual([...OTHER_EFFECTS].sort())
+    })
+
+    it('keeps every effect rule as weak as the rules of the piano, so that the selected key still wins', () => {
+      for (const selector of effectSelectors) {
+        expect(selector, selector).toMatch(/^:where\(/)
+      }
+    })
+
+    it('moves only what a browser can move without painting the piano again', () => {
+      // Each step of an animation sets nothing but the tilt, the stretch or the strength of a layer.
+      const frames = [...pianoCss.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g)]
+      expect(frames.map((found) => found[1]).sort()).toEqual(['piano-flash', 'piano-pop', 'piano-pour', 'piano-ripple'])
+      for (const [, name, steps] of frames) {
+        const properties = [...(steps ?? '').matchAll(/([\w-]+)\s*:/g)].map((found) => found[1])
+        expect(properties.length, name).toBeGreaterThan(0)
+        expect(properties.filter((property) => property !== 'transform' && property !== 'opacity'), name).toEqual([])
+      }
+      // And every animation that is used exists.
+      const used = [...pianoCss.matchAll(/animation:\s*([\w-]+)/g)].map((found) => found[1]).filter((name) => name !== 'none')
+      expect([...new Set(used)].sort()).toEqual(['piano-flash', 'piano-pop', 'piano-pour', 'piano-ripple'])
+    })
+
+    it('adds no wide soft shadow and nothing that only one browser has', () => {
+      const effectRules = styleRules().filter(({ selectors }) => selectors.some((selector) => selector.includes('data-key-effect')))
+      for (const { selectors, declarations } of effectRules) {
+        expect(declarations, selectors.join()).not.toMatch(/(?:^|[;\s])-(?:webkit|moz|ms|o)-/)
+        expect(declarations, selectors.join()).not.toMatch(/filter\s*:|backdrop-filter|clip-path|mask/)
+        // The blur of a shadow is its third length: at most a few pixels here.
+        const blurs = [...declarations.matchAll(/(?:inset )?-?[\d.]+(?:px)? -?[\d.]+(?:px)? (?:calc\(var\(--glow\) \* )?([\d.]+)px/g)].map((found) => Number(found[1]))
+        for (const blur of blurs) expect(blur, selectors.join()).toBeLessThanOrEqual(10)
+      }
+    })
+
+    it('leaves the labels their own colours where the key keeps its own colour', () => {
+      const quiet = effectSelectors.filter((selector) => selector.endsWith('.piano-key--white.is-lit'))
+      expect(quiet).toHaveLength(1)
+      for (const effect of ['press', 'ripple', 'edge', 'pop']) expect(quiet[0]).toContain(`'${effect}'`)
+      // Fill floods the key with light, like Glow: its labels turn dark with it.
+      expect(quiet[0]).not.toContain("'fill'")
+      expect(styleValue(quiet[0] ?? '', '--piano-cap-ink')).toBe('var(--piano-white-cap-ink)')
+      expect(styleValue(quiet[0] ?? '', '--piano-note-ink')).toBe('var(--piano-white-note-ink)')
+    })
+
+    it('stands still for someone who asked for less movement', () => {
+      const still = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(pianoCss)?.[1] ?? ''
+      expect(still).toContain('animation: none')
+      for (const layer of ['.piano-key.is-lit', '.piano-key.is-lit::before', '.piano-key.is-lit::after']) {
+        expect(still).toContain(`:where(.piano) ${layer}`)
+      }
+      // Press goes down no further than a key does in the other effects.
+      expect(still).toContain(styleValue('.piano-key.is-lit', 'transform'))
+    })
   })
 
   it('stacks a played key in front of its neighbours, and white keys under the black ones', () => {

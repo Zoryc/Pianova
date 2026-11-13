@@ -704,7 +704,7 @@ describe('top bar', () => {
     const names: Record<SettingsTab, string[]> = {
       Sound: ['Volume', 'Sustain', 'Advanced', 'Touch', 'Room echo', 'Note fade-out', 'Transpose'],
       Keys: ['Key layout', 'Change one key', 'Where your keys sit', 'Keyboard type'],
-      Piano: ['Piano size', 'Key style', 'Labels on the keys', 'Note names'],
+      Piano: ['Piano size', 'Key style', 'Key effect', 'Labels on the keys', 'Note names'],
       Look: [
         'Theme',
         'Fine-tune',
@@ -3021,7 +3021,7 @@ describe('ARIA', () => {
 
   it('groups each control with its visible label and its explanation', async () => {
     const user = await startApp()
-    const rows: Record<SettingsTab, number> = { Sound: 6, Keys: 2, Piano: 4, Look: 9, About: 0 }
+    const rows: Record<SettingsTab, number> = { Sound: 6, Keys: 2, Piano: 5, Look: 9, About: 0 }
     const cardGroups: Record<SettingsTab, number> = { Sound: 0, Keys: 1, Piano: 0, Look: 1, About: 0 }
 
     for (const tab of SETTINGS_TABS) {
