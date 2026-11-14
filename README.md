@@ -35,7 +35,15 @@ npm run dev
 
 Then open <http://localhost:5173>.
 
-On Windows you can skip both commands: double-click `start.bat`. It downloads what the app needs the first time, starts the app and opens it in your browser. Keep its window open while you play; close it to stop the app.
+On Windows you can skip the commands and double-click a file instead:
+
+| File | What it does |
+|---|---|
+| `start-dev.bat` | Starts the development version, the same as `npm run dev`. A change to the code shows at once. |
+| `start-release.bat` | Starts the release version: the compiled app, which answers a key press faster. It compiles the app first if that was never done, and tells you when the code has changed since. |
+| `compile.bat` | Compiles the app into the release version. Run it again after the code has changed. |
+
+Each file downloads what the app needs the first time. The two start files open the app in your browser at the same address, so your settings and songs are the same in both, and only one of them runs at a time. Keep the window open while you play; close it to stop the app.
 
 Other commands:
 
