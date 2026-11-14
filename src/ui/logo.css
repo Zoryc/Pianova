@@ -1,0 +1,58 @@
+/*
+ * The logo: the mark (src/ui/Logo.tsx) and the name written next to it. Both
+ * follow the light the player has chosen.
+ */
+
+/* Sits in a line of text like a big letter, its keys on the line the letters stand on. */
+.logo-mark {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  margin-right: 0.22em;
+  overflow: visible;
+  vertical-align: -0.24em;
+}
+
+.logo-mark__light {
+  stop-color: var(--light);
+}
+
+.logo-mark__deep {
+  stop-color: var(--light-deep);
+}
+
+.logo-mark__bright {
+  stop-color: var(--light-bright);
+}
+
+.logo-mark__ivory-shine {
+  stop-color: var(--key-ivory-shine);
+}
+
+.logo-mark__ivory-shade {
+  stop-color: var(--key-ivory-shade);
+}
+
+.logo-mark__key-shine {
+  fill: var(--light-bright);
+  opacity: 0.55;
+}
+
+.logo-mark__black {
+  fill: var(--key-ebony);
+  stroke: var(--key-ebony-edge);
+}
+
+.logo-mark__line {
+  fill: var(--light);
+}
+
+.logo-mark__spark {
+  fill: var(--light-bright);
+}
+
+/* "nova" in the light, glowing as strongly as the player's Glow setting asks. */
+.wordmark__lit {
+  color: var(--light);
+  text-shadow: 0 0 calc(14px * var(--glow)) var(--light);
+}

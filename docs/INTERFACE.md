@@ -243,6 +243,7 @@ Priority: an explicit keyboard type (not 'auto') wins over everything for the ke
 | `src/ui/Piano.tsx` + `piano.css`, `src/ui/pianoHitTest.ts` | The piano, restyled, drawing a `PianoRange`; which key lies under the mouse (pure). |
 | `src/ui/TopBar.tsx` | The auto-hiding bar: the Menu button, the player line, volume and sustain (5.3). |
 | `src/ui/StartBox.tsx` + `startBox.css`, `src/ui/FullscreenButton.tsx` | The start box, the small menu the app opens with (5.3a), and its full-screen line. |
+| `src/ui/Logo.tsx` + `logo.css` | The logo: its mark, in the player's light, and the name written "Pia" + "nova". At the head of the start box and of the About tab. |
 | `src/ui/useAutoHide.ts` | The hide-when-the-mouse-is-still logic (pure core + hook). |
 | `src/ui/SettingsPanel.tsx` + `src/ui/settings/*.tsx` + `settings.css` | The Settings panel and its five tabs (`SoundTab`, `KeysTab`, `PianoTab`, `LookTab`, `AboutTab`), with the pieces only they use (theme and layout cards, colour swatches, the tab strip…). |
 | `src/ui/useKeyEditor.ts`, `src/ui/keyEditorModel.ts` | Choosing the computer keys: the hook the app shell holds, and its rules (pure). |

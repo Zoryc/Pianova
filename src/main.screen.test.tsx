@@ -13,7 +13,7 @@ import indexHtml from '../index.html?raw'
 
 const MADE_UP_NAME = 'Quiet Otter Keys'
 
-vi.mock('./app/appInfo', () => ({ APP_NAME: 'Quiet Otter Keys' }))
+vi.mock('./app/appInfo', () => ({ APP_NAME: 'Quiet Otter Keys', APP_NAME_LIGHT_FROM: 6 }))
 
 vi.mock('./audio/audioEngine', async (importOriginal) => {
   const original = await importOriginal<typeof import('./audio/audioEngine')>()

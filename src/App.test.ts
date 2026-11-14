@@ -60,6 +60,7 @@ import { bus } from './app/pianoApp'
 import { SLOT_COUNT } from './core/layout'
 import { DEFAULT_SETTINGS, settingsStore } from './state/settings'
 import type { Settings } from './state/settings'
+import { Wordmark } from './ui/Logo'
 import { StartBox } from './ui/StartBox'
 import { TopBar } from './ui/TopBar'
 import { ConfirmButton } from './ui/controls'
@@ -86,6 +87,12 @@ function textOf(html: string): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+
+/**
+ * The name as this page's text reads it: the logo writes it in two parts
+ * ("Pia" and "nova", the second in the light), and textOf puts a space at each tag.
+ */
+const NAME_AS_TEXT = textOf(renderToString(createElement(Wordmark)))
 
 function draw(element: ReactElement): { html: string; text: string } {
   const html = renderToString(element)
@@ -171,7 +178,10 @@ describe('App, as first drawn', () => {
   const startLayer = html.slice(screenEnd)
 
   it('shows the name and the three ways to play, in the start box', () => {
-    expect(startLayer).toContain(`<h1 class="start-box__name">${APP_NAME}</h1>`)
+    const heading = startLayer.slice(startLayer.indexOf('<h1 class="start-box__name">'), startLayer.indexOf('</h1>'))
+    // The logo: its mark, a picture only, then the name.
+    expect(heading).toContain('<svg class="logo-mark"')
+    expect(heading.replace(/<[^>]+>/g, '')).toBe(APP_NAME)
     // The name is the one main heading of the page: the bar has none.
     expect(count(html, '<h1')).toBe(1)
     expect(textOf(startLayer)).toContain(
@@ -244,7 +254,7 @@ describe('App, as first drawn', () => {
   it('waits behind the start box, which is not part of what it covers', () => {
     // The box says what the app is, and ends with how to start it.
     const said = textOf(startLayer)
-    expect(said.startsWith(`${APP_NAME} A piano you play with your computer keyboard. `)).toBe(true)
+    expect(said.startsWith(`${NAME_AS_TEXT} A piano you play with your computer keyboard. `)).toBe(true)
     expect(said.endsWith(' Click or press any key to start')).toBe(true)
     expect(html).toMatch(/^<div class="app"[^>]*><div class="app__screen" inert="">/)
     expect(count(html, 'inert=""')).toBe(1)
@@ -301,7 +311,7 @@ describe('StartBox', () => {
     const opening = '<section id="start-box" class="start-box" role="dialog" aria-label="Menu" '
     expect(html.startsWith(opening)).toBe(true)
     expect(text).toBe(
-      `${APP_NAME} A piano you play with your computer keyboard. ` +
+      `${NAME_AS_TEXT} A piano you play with your computer keyboard. ` +
         'Play Free Play Play anything you like Practice The song waits for you Soon ' +
         'Real-time Your timing is scored Soon ' +
         'Songs Twinkle, Twinkle, Little Star 0:28 Mary Had a Little Lamb 0:17 Ode to Joy 0:34 ' +

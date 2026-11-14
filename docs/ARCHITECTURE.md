@@ -19,6 +19,7 @@ Hard rules that follow from that:
 
 - **Simple first, advanced on demand.** Easy for a beginner, customizable for an experienced pianist. The main screen stays simple and works with zero configuration. Everything an experienced player may want to tune lives in one **Settings** panel, grouped in tabs, where every option has a sensible default and can be reset, and every option that is not plain from its name has a one-line explanation. Later phases follow the same rule (their fine-tuning options go in the same panel).
 - The app's name, "Pianova", is set in one place (`APP_NAME` in `src/app/appInfo.ts`, plus the `<title>` in `index.html`). Never hard-code the name anywhere else.
+- **The logo** is a bar of light landing on a lit piano key, with a spark at the line, next to the name written "Pia" + "nova" (the second part in the light). `src/ui/Logo.tsx` draws it in the player's own colour (in the start box and the About tab); `public/favicon.svg` is the browser tab's icon, in the default light, and a test keeps their shapes the same. The README's pictures are in `docs/images/`.
 
 Phase 1 = **the playable piano (Free Play)**:
 
@@ -81,7 +82,7 @@ Inputs never talk to the sound engine or the UI directly. They call the bus. Con
 | `src/app/pianoApp.ts` | Creates the singletons (bus, engine) and wires bus → engine. |
 | `src/App.tsx`, `src/main.tsx`, `src/styles/app.css` | App shell and wiring. |
 | `src/ui/TopBar.tsx`, `src/ui/SettingsPanel.tsx`, `src/ui/StartBox.tsx` | The menu bar, the Settings panel (the computer keys are chosen in its Keys tab), the start box (the small menu the app opens with). |
-| `src/app/appInfo.ts` | `APP_NAME`, the app's name (Pianova). |
+| `src/app/appInfo.ts` | `APP_NAME`, the app's name (Pianova), and `APP_NAME_LIGHT_FROM`, where the part the logo writes in the light ("nova") begins. |
 
 The files of the screen are listed in full in `docs/INTERFACE.md` section 5, and those of songs in `docs/SONGS.md` section 3.
 

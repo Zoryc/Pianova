@@ -80,7 +80,7 @@ goto :start
 
 rem ---- Compiled before the code last changed? Then say so, and start it as it is ----
 :compiled
-node -e "const fs=require('fs');const built=fs.statSync('dist/index.html').mtimeMs;const files=['index.html','package.json','vite.config.ts'].concat(fs.readdirSync('src',{recursive:true}).map((f)=>'src/'+f));process.exit(files.some((f)=>!f.includes('.test.')&&fs.existsSync(f)&&fs.statSync(f).mtimeMs>built)?1:0)"
+node -e "const fs=require('fs');const built=fs.statSync('dist/index.html').mtimeMs;const files=['index.html','package.json','vite.config.ts'].concat(fs.readdirSync('src',{recursive:true}).map((f)=>'src/'+f)).concat(fs.readdirSync('public',{recursive:true}).map((f)=>'public/'+f));process.exit(files.some((f)=>!f.includes('.test.')&&fs.existsSync(f)&&fs.statSync(f).mtimeMs>built)?1:0)"
 if errorlevel 1 (
   echo The app's code has changed since the piano was last compiled.
   echo This starts the version compiled before.

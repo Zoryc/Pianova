@@ -1,12 +1,12 @@
 import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef } from 'react'
 import type { JSX, ReactNode, RefObject } from 'react'
-import { APP_NAME } from '../app/appInfo'
 import { formatDuration } from '../songs/song'
 import { useSongList } from '../songs/songLibrary'
 import { STARTER_SONGS } from '../songs/starterSongs'
 import './chrome.css'
 import { focusedOutside } from './FloatingPanel'
 import { FullscreenButton } from './FullscreenButton'
+import { LogoMark, Wordmark } from './Logo'
 import './startBox.css'
 import { controlsIn } from './useAutoHide'
 
@@ -98,7 +98,10 @@ export function StartBox(props: StartBoxProps): JSX.Element {
     <section ref={box} id={id} className="start-box" role="dialog" aria-label="Menu" tabIndex={-1}>
       <header className="start-box__head">
         <Picture />
-        <h1 className="start-box__name">{APP_NAME}</h1>
+        <h1 className="start-box__name">
+          <LogoMark />
+          <Wordmark />
+        </h1>
         <p className="start-box__tagline">A piano you play with your computer keyboard.</p>
       </header>
 

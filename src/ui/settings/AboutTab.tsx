@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { JSX } from 'react'
-import { APP_NAME } from '../../app/appInfo'
 import { settingsStore } from '../../state/settings'
 import { ConfirmButton } from '../controls'
+import { LogoMark, Wordmark } from '../Logo'
 import { forgetKeysBeforeSong } from '../useSongs'
 
 /** The licence of the piano recordings, which asks for the credit shown here. */
@@ -25,7 +25,10 @@ export function AboutTab(): JSX.Element {
 
   return (
     <div className="about">
-      <h3 className="about__name">{APP_NAME}</h3>
+      <h3 className="about__name">
+        <LogoMark />
+        <Wordmark />
+      </h3>
       <p className="about__tagline">A piano you play with your computer keyboard.</p>
 
       <p className="about__line">
