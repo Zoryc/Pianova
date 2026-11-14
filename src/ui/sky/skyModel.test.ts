@@ -32,6 +32,7 @@ import {
   firstUnfinishedNote,
   frameSeconds,
   hasSunk,
+  hintMiddle,
   impactsAreMoving,
   indexFallingNotes,
   keepHeldBars,
@@ -505,6 +506,138 @@ describe('where a falling note is', () => {
     expect(hasSunk(short, 5, speed)).toBe(false)
     expect(hasSunk(short, 5 + sinking * 0.9, speed)).toBe(false)
     expect(hasSunk(short, 5 + sinking * 1.1, speed)).toBe(true)
+  })
+})
+
+describe('where the key letter of a falling note goes', () => {
+  /** A sky 600 tall, and a letter 13 tall with 3 above and 3 below it. */
+  const SKY = 600
+  const ROOM = 19
+  /** Where a letter that rests on the line has its middle. */
+  const RESTING = SKY - ROOM / 2
+  /** The bar of the shortest note there is, once the gap above it is taken off. */
+  const SHORTEST = MIN_BAR_HEIGHT - 1.5
+
+  /** The letter of a bar `height` tall whose lower end is `bottom` down the sky. */
+  const letterOf = (bottom: number, height: number): number | null =>
+    hintMiddle(bottom - height, bottom, SKY, ROOM)
+
+  it('is at the lower end of a bar that can hold it, with a little room under it', () => {
+    expect(letterOf(300, 200)).toBe(300 - ROOM / 2)
+    expect(letterOf(300, 20)).toBe(300 - ROOM / 2)
+    // The letter and the room around it lie inside the bar.
+    for (const height of [19, 19.5, 25, 60, 1000]) {
+      const middle = letterOf(400, height) as number
+      expect(middle + ROOM / 2).toBeLessThanOrEqual(400)
+      expect(middle - ROOM / 2).toBeGreaterThanOrEqual(400 - height)
+    }
+  })
+
+  it('is across the middle of a bar too short to hold it', () => {
+    expect(letterOf(300, 10)).toBe(295)
+    expect(letterOf(300, SHORTEST)).toBe(300 - SHORTEST / 2)
+    expect(letterOf(300, 18.9)).toBeCloseTo(300 - 9.45, 10)
+    // The letter sticks out of such a bar by the same amount above and below.
+    for (const height of [SHORTEST, 6, 10, 15, 18.99]) {
+      const middle = letterOf(300, height) as number
+      expect(middle - (300 - height)).toBeCloseTo(300 - middle, 10)
+    }
+  })
+
+  it('does not jump between the two: a bar that just holds the letter has it in its middle and at its lower end at once', () => {
+    expect(letterOf(300, ROOM)).toBe(300 - ROOM / 2)
+    expect(letterOf(300, ROOM - 0.001)).toBeCloseTo(letterOf(300, ROOM + 0.001) as number, 2)
+    // From the shortest bar to a tall one, the letter never moves by more than the bar grew.
+    let before = letterOf(300, SHORTEST) as number
+    for (let height = SHORTEST; height <= 60; height += 0.25) {
+      const middle = letterOf(300, height) as number
+      expect(Math.abs(middle - before)).toBeLessThanOrEqual(0.25)
+      before = middle
+    }
+  })
+
+  it('shows on a tall bar once enough of the bar has come into the sky to hold it', () => {
+    // 200 tall, coming in at the top: 10 of it shows, then 18.9, then 19.
+    expect(letterOf(10, 200)).toBeNull()
+    expect(letterOf(18.9, 200)).toBeNull()
+    expect(letterOf(19, 200)).toBe(ROOM / 2)
+    expect(letterOf(50, 200)).toBe(50 - ROOM / 2)
+  })
+
+  it('rests on the line while a tall note sounds, for as long as enough of its bar is left to hold it', () => {
+    // The lower end is below the line: the note sounds.
+    expect(letterOf(SKY, 200)).toBe(RESTING)
+    expect(letterOf(SKY + 50, 200)).toBe(RESTING)
+    expect(letterOf(SKY + 181, 200)).toBe(RESTING)
+    // 18.9 of it are left above the line: too little.
+    expect(letterOf(SKY + 181.1, 200)).toBeNull()
+    expect(letterOf(SKY + 199, 200)).toBeNull()
+  })
+
+  it('shows on a short bar while the whole bar is in the sky, and not while it comes in or sinks', () => {
+    expect(letterOf(5, 10)).toBeNull()
+    expect(letterOf(9.99, 10)).toBeNull()
+    expect(letterOf(10, 10)).toBe(5)
+    expect(letterOf(SKY - 100, 10)).toBe(SKY - 105)
+    expect(letterOf(SKY, 10)).not.toBeNull()
+    // Its lower end is in the line: the note sounds, and its letter is gone.
+    expect(letterOf(SKY + 0.01, 10)).toBeNull()
+    expect(letterOf(SKY + 9, 10)).toBeNull()
+  })
+
+  it('never goes lower than a letter that rests on the line, so that the line does not cut it', () => {
+    for (const height of [SHORTEST, 6, 10, 15, 18.9]) {
+      // The middle of the bar is lower than a resting letter over the last stretch before the line.
+      const stopsAt = RESTING + height / 2
+      expect(stopsAt).toBeLessThan(SKY)
+      expect(letterOf(stopsAt - 1, height)).toBeCloseTo(RESTING - 1, 10)
+      expect(letterOf(stopsAt, height)).toBeCloseTo(RESTING, 10)
+      expect(letterOf((stopsAt + SKY) / 2, height)).toBe(RESTING)
+      expect(letterOf(SKY, height)).toBe(RESTING)
+    }
+  })
+
+  it('falls with its bar without ever going up or leaping, for a bar of any height', () => {
+    const step = 0.5
+    for (const height of [SHORTEST, 7, 12, 18.5, ROOM, 19.5, 30, 250, 900]) {
+      let before: number | null = null
+      let shown = 0
+      for (let bottom = -5; bottom <= SKY + height + 5; bottom += step) {
+        const middle = letterOf(bottom, height)
+        if (middle !== null) {
+          shown++
+          // All of the letter is above the line.
+          expect(middle + ROOM / 2).toBeLessThanOrEqual(SKY)
+          if (before !== null) {
+            expect(middle).toBeGreaterThanOrEqual(before)
+            expect(middle - before).toBeLessThanOrEqual(step + 1e-9)
+          }
+        }
+        before = middle
+      }
+      // Every note shows its letter for most of its way down the sky.
+      expect(shown * step).toBeGreaterThan(SKY - 2 * ROOM)
+    }
+  })
+
+  it('gives the same letter as before to a bar that holds it: only short bars are placed differently', () => {
+    // The rule the sky had before short notes got their letters.
+    const formerly = (top: number, bottom: number): number | null => {
+      const restsAt = Math.min(bottom, SKY)
+      return restsAt - Math.max(top, 0) < ROOM ? null : restsAt - ROOM / 2
+    }
+    for (const height of [ROOM, 19.5, 24, 61.3, 244, 1500]) {
+      for (let bottom = -10; bottom <= SKY + height + 10; bottom += 0.37) {
+        expect(letterOf(bottom, height)).toBe(formerly(bottom - height, bottom))
+      }
+    }
+  })
+
+  it('gives no letter to a bar of no height, or to numbers that are none', () => {
+    expect(hintMiddle(300, 300, SKY, ROOM)).toBeNull()
+    expect(hintMiddle(310, 300, SKY, ROOM)).toBeNull()
+    expect(hintMiddle(Number.NaN, 300, SKY, ROOM)).toBeNull()
+    expect(hintMiddle(290, Number.NaN, SKY, ROOM)).toBeNull()
   })
 })
 

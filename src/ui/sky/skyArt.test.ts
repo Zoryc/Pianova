@@ -243,9 +243,16 @@ describe('the art made for each colour', () => {
     const { art } = newArt()
     art.prepare({ ...spec, barStyle: 'neon' })
     const neon = art.of(RED)
-    expect([neon.ink, neon.inkEdge]).toEqual([RED.bright, null])
+    expect(neon.ink).toBe(RED.bright)
+    // The dark edge it has is only for a letter that sticks out of a bar too short to hold it.
+    expect(neon.inkEdgeInside).toBe(false)
+    expect(neon.inkEdge.startsWith('#000000')).toBe(true)
     expect(neon.neonLine).toBe(RED.bright)
     expect(neon.neonFill.startsWith(RED.light)).toBe(true)
+    // On solid bars the edge goes with every letter.
+    art.prepare(spec)
+    expect(art.of(RED).inkEdgeInside).toBe(true)
+    expect(art.of(paletteFor('amber', '')).inkEdgeInside).toBe(true)
   })
 
   it('does not keep the art of every colour a player drags through', () => {
@@ -387,22 +394,57 @@ describe('the letters made for the keys', () => {
     expect((hint?.height ?? 0) - (written?.y ?? 0)).toBeGreaterThanOrEqual(13 / 2 + reach)
   })
 
-  it('write dark letters with a pale edge on a light colour, and bright letters without an edge in neon bars', () => {
+  it('write dark letters with a pale edge on a light colour, and bright letters in neon bars', () => {
     const art = newArt()
     const dark = art.hint(C4, 'A', AMBER, 21, CENTRE)
     expect(contextOf(dark?.letter).texts[0]?.colour).toBe('#000000')
     expect(String(contextOf(dark?.edge).textEdges[0]?.colour).startsWith(AMBER.bright)).toBe(true)
+    // On a solid bar the edge always goes with the letter.
+    expect(dark?.edgeInside).toBe(true)
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)?.edgeInside).toBe(true)
 
     art.prepare({ ...spec, barStyle: 'neon' })
     const neon = art.hint(C4, 'A', RED, 21, CENTRE)
-    expect(neon?.edge).toBeNull()
     expect(contextOf(neon?.letter).texts[0]?.colour).toBe(RED.bright)
+    // Inside a neon bar the letter has no edge. The dark one made for it is for where it sticks out of a short bar.
+    expect(neon?.edgeInside).toBe(false)
+    expect(String(contextOf(neon?.edge).textEdges[0]?.colour).startsWith('#000000')).toBe(true)
+  })
+
+  it('are one size on the whole piano: on the narrower bars of the black keys as large as on the white keys', () => {
+    // The bars of a full piano in a window 1920 wide.
+    const art = newArt()
+    art.prepare({ ...spec, whiteBarWidth: 31, blackBarWidth: 19.2 })
+    const onWhite = art.hint(C4, 'A', RED, 31, CENTRE)
+    const onBlack = art.hint(C4 + 1, 'W', RED, 19.2, CENTRE + 18)
+    // 0.62 of the width of a white-key bar, in whole pixels.
+    expect(onWhite?.size).toBe(19)
+    expect(onBlack?.size).toBe(19)
+    expect(contextOf(onBlack?.letter).texts[0]?.font).toBe('700 19px monospace')
+    // Never larger than 20, however wide the keys are.
+    art.prepare({ ...spec, whiteBarWidth: 80, blackBarWidth: 48 })
+    expect(art.hint(C4, 'A', RED, 80, CENTRE)?.size).toBe(20)
+    expect(art.hint(C4 + 1, 'W', RED, 48, CENTRE + 40)?.size).toBe(20)
+  })
+
+  it('are written smaller only where the label would not fit across its bar with room on either side', () => {
+    // The stand-in canvas makes every character 0.6 times as wide as the font is tall.
+    const art = newArt()
+    // 21 and 13 wide: a letter 13 tall is 7.8 wide, and the narrow bar has 7 to give. One 11 tall fits.
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)?.size).toBe(13)
+    expect(art.hint(C4 + 1, 'W', RED, 13, 300)?.size).toBe(11)
+    // A label of five characters on the wide bars of a small piano: as large as fits, 8 at the least.
+    art.prepare({ ...spec, whiteBarWidth: 54, blackBarWidth: 33 })
+    expect(art.hint(C4, 'A', RED, 54, CENTRE)?.size).toBe(20)
+    expect(art.hint(C4 + 4, 'Num 1', RED, 54, CENTRE + 120)?.size).toBe(16)
+    expect(art.hint(C4 + 3, 'Num 1', RED, 33, CENTRE + 90)?.size).toBe(9)
+    expect(art.hint(C4 + 6, 'Num 12', RED, 33, CENTRE + 150)).toBeNull()
   })
 
   it('give no letter to a bar narrower than 13 pixels, nor to a label too long for its bar', () => {
     const art = newArt()
     expect(art.hint(C4 + 1, 'W', RED, 12.9, 300)).toBeNull()
-    expect(art.hint(C4 + 1, 'W', RED, 13, 300)?.size).toBe(8)
+    expect(art.hint(C4 + 1, 'W', RED, 13, 300)).not.toBeNull()
     expect(art.hint(C4, 'Backspace', RED, 21, CENTRE)).toBeNull()
     // What does not fit is remembered too: it is not tried again on every frame.
     const pictures = browser.contexts().length

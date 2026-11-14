@@ -278,6 +278,37 @@ export function hasSunk(note: PlayableNote, position: number, speed: number): bo
   return fallingBottom(note, position, speed) + fallingHeight(note, speed) <= 0
 }
 
+/**
+ * Where the key letter of a falling note goes: how far down the sky the
+ * middle of the letter is, or null while the note shows no letter. `top` and
+ * `bottom` are the two ends of the bar, measured down from the top of the
+ * sky; the bottom is below the line (further down than `skyHeight`) once the
+ * note sounds and sinks. `room` is the height a letter takes, with the space
+ * kept above and below it.
+ *
+ * A bar that can hold the letter carries it at its lower end, the end that
+ * lands first. While the note sounds the letter rests on the line, for as
+ * long as enough of the bar is left above the line to hold it.
+ *
+ * A bar too short to hold the letter carries it all the same, across its
+ * middle, where the letter sticks out above and below: the shortest note
+ * says which key plays it too. That letter shows while the whole bar is in
+ * the sky, and goes no lower than a letter that rests on the line.
+ */
+export function hintMiddle(
+  top: number,
+  bottom: number,
+  skyHeight: number,
+  room: number,
+): number | null {
+  if (!(bottom > top)) return null
+  // What must show of the bar for its letter to show: room for the letter, or all of a bar that has less.
+  const needed = Math.min(room, bottom - top)
+  const restsAt = Math.min(bottom, skyHeight)
+  if (restsAt - Math.max(top, 0) < needed) return null
+  return Math.min(restsAt - needed / 2, skyHeight - room / 2)
+}
+
 // ---------------------------------------------------------------------------
 // Where a sounding note meets the line
 // ---------------------------------------------------------------------------

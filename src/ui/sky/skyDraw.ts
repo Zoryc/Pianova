@@ -18,6 +18,7 @@ import {
   firstNoteFrom,
   firstUnfinishedNote,
   hasSunk,
+  hintMiddle,
   lineGlow,
   skySpeed,
   sparkStrength,
@@ -511,8 +512,9 @@ export class SkyPainter {
 
   /**
    * Puts, on each falling note that a computer key can play, the letter of
-   * that key: at the lower end of the bar, which is the end that lands first.
-   * While the note sounds the letter rests on the line.
+   * that key: at the lower end of the bar, which is the end that lands first,
+   * or across the middle of a bar too short to hold it. While the note sounds
+   * the letter rests on the line. Where exactly is `hintMiddle` in skyModel.ts.
    *
    * The letters are ready-made pictures, copied pixel for pixel, so a letter
    * moves down the sky in whole canvas pixels. That is how Firefox moves a
@@ -540,11 +542,9 @@ export class SkyPainter {
 
       const bottom = surface.height - fallingBottom(note, song.position, speed)
       const top = bottom - fallingHeight(note, speed) + FALLING_GAP
-      const restsAt = Math.min(bottom, surface.height)
-      // Only when the part of the bar that shows is tall enough to hold the letter.
-      if (restsAt - Math.max(top, 0) < hint.size + HINT_PADDING * 2) continue
-
-      const middle = restsAt - HINT_PADDING - hint.size / 2
+      const room = hint.size + HINT_PADDING * 2
+      const middle = hintMiddle(top, bottom, surface.height, room)
+      if (middle === null) continue
       // The letter fades with its bar at the top of the sky.
       context.globalAlpha = Math.min(1, Math.max(0, middle / fade))
       const row = Math.round(middle * surface.scaleY + hint.baselineDrop) - hint.baselineRow
@@ -553,7 +553,8 @@ export class SkyPainter {
       const width = hint.width / surface.scaleX
       const height = hint.height / surface.scaleY
       // The edge first, the letter over it: only the half of the edge that lies outside the letter shows.
-      if (hint.edge) context.drawImage(hint.edge, x, y, width, height)
+      // Inside a neon bar the letter has no edge; where it sticks out of a bar too short to hold it, it has.
+      if (hint.edgeInside || bottom - top < room) context.drawImage(hint.edge, x, y, width, height)
       context.drawImage(hint.letter, x, y, width, height)
     }
   }

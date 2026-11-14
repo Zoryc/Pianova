@@ -54,11 +54,14 @@ export interface LightArt {
    * far from the line and nearly white on it, so no colour alone reads on
    * all of it: `inkEdge` is a thin edge drawn around the letter in the
    * opposite tone, which shows only where the bar comes close to the colour
-   * of the letter. Inside a neon bar the letter is the bright tint and has
-   * no edge (null).
+   * of the letter. Inside a neon bar the letter is the bright tint and needs
+   * no edge (`inkEdgeInside` is false). Its edge is for the letter of a note
+   * too short to hold it: the letter sticks out of the bar, and without a
+   * dark edge the bright outline of the bar would run through it.
    */
   ink: string
-  inkEdge: string | null
+  inkEdge: string
+  inkEdgeInside: boolean
   /** The glow of a white-key bar and of a black-key bar. Null when there is no glow. */
   whiteGlow: BarGlow | null
   blackGlow: BarGlow | null
@@ -77,8 +80,10 @@ export interface LightArt {
 export interface HintPicture {
   /** The letter alone. */
   letter: HTMLCanvasElement
-  /** The edge around the letter, alone. Null when the letter has no edge. */
-  edge: HTMLCanvasElement | null
+  /** The edge around the letter, alone. */
+  edge: HTMLCanvasElement
+  /** False when the edge is left out while the letter lies inside its bar (neon bars): see `inkEdgeInside`. */
+  edgeInside: boolean
   /** The height the letter is written at, in CSS pixels. */
   size: number
   /** Width and height of both pictures, in canvas pixels. */
@@ -152,10 +157,13 @@ const DARK_INK_FROM = 0.4
 const INK_EDGE_ALPHA = 0.7
 
 /**
- * Key letters: only on bars at least this wide, between these sizes, with
- * this much room around them. The narrowest bar gets the smallest letter:
- * the black keys of the full piano in a window 1366 pixels wide have bars
- * between 13 and 14 pixels wide, and their notes must carry a letter too.
+ * Key letters are one size on the whole piano: a share of the width of a
+ * white-key bar, between these sizes. On the narrower bars of the black keys
+ * the letter is as large as on the others, so that it reads as well. Only a
+ * label too wide for its bar, with this much room on either side, is written
+ * smaller, and a bar narrower than this carries none. (The black keys of the
+ * full piano in a window 1366 pixels wide have bars between 13 and 14 pixels
+ * wide, and their notes must carry a letter too.)
  */
 const MIN_HINT_BAR_WIDTH = 13
 const MIN_HINT_SIZE = 8
@@ -215,7 +223,7 @@ interface KeptHint {
   barWidth: number
   centre: number
   ink: string
-  inkEdge: string | null
+  inkEdge: string
   picture: HintPicture | null
 }
 
@@ -269,12 +277,17 @@ export function createSkyArt(context: CanvasRenderingContext2D, fontFamily: stri
     return width
   }
 
-  /** The largest whole size at which `label` fits a bar `barWidth` wide. 0 when the bar is too narrow for any letter. */
+  /**
+   * The size of the letter `label` on a bar `barWidth` wide: the size all
+   * the letters of this piano have, or, when that is smaller, the largest
+   * whole size at which the label still fits across its bar. 0 when the bar
+   * is too narrow for any letter.
+   */
   const sizeFor = (label: string, barWidth: number): number => {
-    if (barWidth < MIN_HINT_BAR_WIDTH) return 0
+    if (!current || barWidth < MIN_HINT_BAR_WIDTH) return 0
     const labelWidth = widthOf(label)
     const fitting = labelWidth > 0 ? (barWidth - HINT_PADDING * 2) / labelWidth : MAX_HINT_SIZE
-    return Math.floor(Math.min(MAX_HINT_SIZE, barWidth * HINT_SIZE_SHARE, fitting))
+    return Math.floor(Math.min(MAX_HINT_SIZE, current.whiteBarWidth * HINT_SIZE_SHARE, fitting))
   }
 
   const hint = (
@@ -284,7 +297,7 @@ export function createSkyArt(context: CanvasRenderingContext2D, fontFamily: stri
     barWidth: number,
     centre: number,
   ): HintPicture | null => {
-    const { ink, inkEdge } = of(palette)
+    const { ink, inkEdge, inkEdgeInside } = of(palette)
     const kept = hints.get(midi)
     if (
       kept &&
@@ -307,6 +320,7 @@ export function createSkyArt(context: CanvasRenderingContext2D, fontFamily: stri
             centre,
             ink,
             inkEdge,
+            inkEdgeInside,
           })
         : null
     hints.set(midi, { label, barWidth, centre, ink, inkEdge, picture })
@@ -365,18 +379,22 @@ function makeBarFill(
   return fill
 }
 
-type Ink = Pick<LightArt, 'ink' | 'inkEdge'>
+type Ink = Pick<LightArt, 'ink' | 'inkEdge' | 'inkEdgeInside'>
 
-/** Inside a neon bar there is hardly any colour: the letter is the bright tint, with nothing around it. */
+/**
+ * Inside a neon bar there is hardly any colour: the letter is the bright
+ * tint, with nothing around it. Only where it sticks out of a short bar does
+ * it get a dark edge, to stand clear of the bright outline of the bar.
+ */
 function neonInk(palette: LightPalette): Ink {
-  return { ink: palette.bright, inkEdge: null }
+  return { ink: palette.bright, inkEdge: withAlpha('#000000', INK_EDGE_ALPHA), inkEdgeInside: false }
 }
 
 /** White letters with a dark edge on a bar of a dark colour, dark letters with a pale edge on a bar of a light one. */
 function solidInk(palette: LightPalette): Ink {
   return lightnessOf(palette.light) >= DARK_INK_FROM
-    ? { ink: '#000000', inkEdge: withAlpha(palette.bright, INK_EDGE_ALPHA) }
-    : { ink: '#ffffff', inkEdge: withAlpha('#000000', INK_EDGE_ALPHA) }
+    ? { ink: '#000000', inkEdge: withAlpha(palette.bright, INK_EDGE_ALPHA), inkEdgeInside: true }
+    : { ink: '#ffffff', inkEdge: withAlpha('#000000', INK_EDGE_ALPHA), inkEdgeInside: true }
 }
 
 /** One letter to make a picture of. Sizes and places in CSS pixels. */
@@ -389,7 +407,8 @@ interface HintWanted {
   /** Where across the sky the letter is centred. */
   centre: number
   ink: string
-  inkEdge: string | null
+  inkEdge: string
+  inkEdgeInside: boolean
 }
 
 /**
@@ -401,7 +420,7 @@ interface HintWanted {
 function makeHint(page: Document, scale: number, wanted: HintWanted): HintPicture | null {
   const { size } = wanted
   // The line the edge is drawn with. Half of it lies outside the letter: that half shows.
-  const line = wanted.inkEdge ? Math.max(MIN_HINT_EDGE, size * HINT_EDGE_SHARE) : 0
+  const line = Math.max(MIN_HINT_EDGE, size * HINT_EDGE_SHARE)
   const room = line / 2 + HINT_MARGIN
   // From the point the letter is centred on to the sides of the picture, in whole canvas pixels.
   const halfWidth = Math.ceil((wanted.width / 2 + room) * scale)
@@ -412,32 +431,30 @@ function makeHint(page: Document, scale: number, wanted: HintWanted): HintPictur
   const left = Math.floor(centre) - halfWidth
 
   const letter = newPicture(page, width, height)
-  const edge = wanted.inkEdge ? newPicture(page, width, height) : null
-  if (!letter || (wanted.inkEdge && !edge)) return null
+  const edge = newPicture(page, width, height)
+  if (!letter || !edge) return null
   const x = (centre - left) / scale
   const y = halfHeight / scale
   for (const picture of [edge, letter]) {
-    if (!picture) continue
     // From here on, one unit is one CSS pixel.
     picture.context.setTransform(scale, 0, 0, scale, 0, 0)
     picture.context.font = wanted.font
     picture.context.textAlign = 'center'
     picture.context.textBaseline = 'middle'
   }
-  if (edge && wanted.inkEdge) {
-    // Round corners on the edge of the letters: a pointed one would stick out of a sharp letter like A or W.
-    edge.context.lineJoin = 'round'
-    edge.context.lineWidth = line
-    edge.context.strokeStyle = wanted.inkEdge
-    edge.context.strokeText(wanted.label, x, y)
-  }
+  // Round corners on the edge of the letters: a pointed one would stick out of a sharp letter like A or W.
+  edge.context.lineJoin = 'round'
+  edge.context.lineWidth = line
+  edge.context.strokeStyle = wanted.inkEdge
+  edge.context.strokeText(wanted.label, x, y)
   letter.context.fillStyle = wanted.ink
   letter.context.fillText(wanted.label, x, y)
 
   const baselineDrop = baselineBelowMiddle(letter.context, wanted.label) * scale
   return {
     letter: letter.canvas,
-    edge: edge ? edge.canvas : null,
+    edge: edge.canvas,
+    edgeInside: wanted.inkEdgeInside,
     size,
     width,
     height,
