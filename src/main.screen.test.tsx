@@ -122,7 +122,7 @@ describe('main.tsx', () => {
     expect(wholePage(), 'the player line').not.toContain(realName)
 
     // The song is put away again, so that nothing goes on playing after this test.
-    fireEvent.click(within(playerLine).getByRole('button', { name: 'Close' }))
+    fireEvent.click(within(playerLine).getByRole('button', { name: 'Stop' }))
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
 
     // After all of that the name is still in its two places: the browser tab,

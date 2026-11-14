@@ -952,7 +952,7 @@ describe('the keyboard focus after a click with the mouse', () => {
     clickWithMouse(button('Import a MIDI file'))
     clickWithMouse(button('Close Songs'))
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
     expect(document.activeElement).toBe(document.body)
   })
@@ -1178,10 +1178,10 @@ describe('someone with the keyboard alone', () => {
         'Menu',
         'Pause',
         'Restart',
+        'Stop',
         'Position in the song',
         'Speed',
         'Song options▾',
-        'Close',
         'Volume',
         'Sustain',
       ])
@@ -1617,7 +1617,7 @@ describe('the words over the sky, in the whole app', () => {
     key('keydown', 'KeyA')
     expect(noteNames()).toEqual([])
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     // The key is still down: its note is named now, with the next one.
     key('keydown', 'KeyS')
     expect(noteNames()).toEqual(['C4', 'D4'])
@@ -1647,7 +1647,7 @@ describe('the words over the sky, in the whole app', () => {
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(hint()).toBe('stage__hint stage__hint--gone')
   })
 })

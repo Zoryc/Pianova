@@ -401,11 +401,11 @@ The Songs panel is opened from the start box, with its line "All songs…" (`doc
 
 Shown in the top bar whenever a song is loaded (`docs/INTERFACE.md` section 9 says where in it):
 
-- **Play / Pause** (one button whose label and icon change), **Restart** (takes the song back to its beginning, where it waits: Play starts it again from there. In the player this is `stop()`; the button is not called "Stop" because, next to Pause and Close, players could not tell what it did).
+- **Play / Pause** (one button whose label and icon change), **Restart** (takes the song back to its beginning, where it waits: Play starts it again from there. In the player this is `stop()`) and **Stop** (ends the song and takes it away: the song is unloaded and the line hides. It stands right after Restart, with the other buttons that act on the song; as "Close" at the far end of the line it was hard to find and hard to tell what it closed).
 - The song title (cut with an ellipsis when long).
 - The progress slider (`aria-label="Position in the song"`), with the elapsed and total time on either side (`formatDuration`). Dragging it seeks. The total is the length of what is played, lead-in included (`docs/INTERFACE.md` section 9).
 - **Speed**: a slider from 50% to 150% in steps of 5, showing the value ("100%").
-- **"Song options"** (quiet button, `aria-expanded`) and **"Close"** (unloads the song and hides the line).
+- **"Song options"** (quiet button, `aria-expanded`), the last control of the line.
 
 Song options, shown under the line when open:
 

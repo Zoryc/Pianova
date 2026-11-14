@@ -514,7 +514,7 @@ describe('listeners', () => {
       click('button', /^Play Twinkle/)
       expect(screen.getByRole('region', { name: 'Song player' })).toBeTruthy()
       click('button', /^Song options/)
-      click('button', 'Close')
+      click('button', 'Stop')
       expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
       act(() => settingsStore.set({ showTrails: round % 2 === 0 }))
     }

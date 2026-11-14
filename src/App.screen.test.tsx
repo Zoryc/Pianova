@@ -2424,7 +2424,7 @@ describe('after a click with the mouse the player can go straight back to playin
       await expectStraightBackToPlaying(user)
     }
 
-    await user.click(within(player).getByRole('button', { name: 'Close' }))
+    await user.click(within(player).getByRole('button', { name: 'Stop' }))
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
     await expectStraightBackToPlaying(user)
   }, LONG_WALK_MS)

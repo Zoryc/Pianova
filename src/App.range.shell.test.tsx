@@ -430,7 +430,7 @@ describe('a song and the piano on screen', () => {
     // Held on the piano the song brought: let go when the piano the player had comes back.
     key('keydown', 'KeyA')
     expect(heldNotes()).toEqual([36])
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(3)
     expect(pianoOnScreen()).toEqual({ first: 48, last: 84 })
     expect(skyProps().range).toEqual({ first: 48, last: 84 })
@@ -443,7 +443,7 @@ describe('a song and the piano on screen', () => {
     const settings = openSettingsOn('Keys')
     clickWithMouse(within(settings).getByRole('button', { name: /Higher/ }))
     expect(settingsStore.get().baseOctave).toBe(2)
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(2)
     expect(pianoOnScreen()).toEqual({ first: 36, last: 72 })
   })

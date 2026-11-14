@@ -359,10 +359,10 @@ describe('someone with the keyboard alone', () => {
       [
         'Pause',
         'Restart',
+        'Stop',
         'Position in the song',
         'Speed',
         'Song options',
-        'Close',
         'Right · Instrument · 2 notes',
         'Left · Instrument · 2 notes',
         'Melody only',

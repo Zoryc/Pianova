@@ -1227,7 +1227,7 @@ describe('a song in the player', () => {
     expect(document.querySelector('.song-progress')).not.toBeNull()
     expect(menu().contains(document.querySelector('.song-progress'))).toBe(false)
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(skyProps().falling).toBeNull()
     expect(document.querySelector('.song-progress')).toBeNull()
   })
@@ -1383,7 +1383,7 @@ describe('the menu', () => {
     expect(isHidden()).toBe(true)
   })
 
-  // "Close" takes the player line away from under the mouse, which is then
+  // "Stop" takes the player line away from under the mouse, which is then
   // over the sky without having moved. Nothing says that it left the menu.
   // What a browser does say then depends on the browser.
   it.each([
@@ -1396,13 +1396,13 @@ describe('the menu', () => {
       () => fireEvent.mouseMove(emptySky(), { screenX: 900, screenY: 80 }),
     ],
   ])(
-    'hides again after "Close" under a mouse that stands still (the browser says %s)',
+    'hides again after "Stop" under a mouse that stands still (the browser says %s)',
     (_what, browserSays) => {
       startApp()
       act(() => {
         playSong(A_STARTER_SONG)
       })
-      const close = button('Close')
+      const close = button('Stop')
       fireEvent.mouseOver(close)
       fireEvent.mouseMove(close, { screenX: 900, screenY: 80 })
       wait(AUTO_HIDE_DELAY_MS * 4)
@@ -1520,23 +1520,23 @@ describe('the keyboard focus', () => {
     expect(document.activeElement).toBe(button('Menu'))
   })
 
-  it('goes to the Menu button when Enter on "Close" takes the player line away', () => {
+  it('goes to the Menu button when Enter on "Stop" takes the player line away', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    pressEnterOn(button('Close'))
+    pressEnterOn(button('Stop'))
 
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
     expect(document.activeElement).toBe(button('Menu'))
   })
 
-  it('is not put on the Menu button when "Close" is clicked with the mouse', () => {
+  it('is not put on the Menu button when "Stop" is clicked with the mouse', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(document.activeElement).toBe(document.body)
   })
 

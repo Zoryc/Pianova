@@ -294,7 +294,7 @@ export function App(): JSX.Element {
     if (!editing && holdsFocus(document.getElementById(stageId))) startBoxButton.current?.focus()
   }, [editing, stageId])
 
-  // The same when the player line goes away under the focus: "Close", pressed with Enter.
+  // The same when the player line goes away under the focus: "Stop", pressed with Enter.
   useEffect(() => {
     if (!song.loaded && clickedWithKeyboard.current && focusIsNowhere()) {
       startBoxButton.current?.focus()

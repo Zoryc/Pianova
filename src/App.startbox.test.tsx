@@ -1534,12 +1534,12 @@ describe('Enter held down a little too long', () => {
       },
     ],
     [
-      '"Close" on the player line',
+      '"Stop" on the player line',
       (): HTMLElement => {
         act(() => {
           playSong(TWINKLE)
         })
-        return button('Close')
+        return button('Stop')
       },
     ],
   ])('on %s opens no box from the Menu button, where the focus goes', async (_what, find) => {
@@ -2107,12 +2107,12 @@ describe('the keyboard focus, for someone who works with the keyboard', () => {
     expect(document.activeElement).toBe(menuButton())
   })
 
-  it('goes to the Menu button when Enter on "Close" takes the player line away', () => {
+  it('goes to the Menu button when Enter on "Stop" takes the player line away', () => {
     startApp()
     act(() => {
       playSong(TWINKLE)
     })
-    pressEnterOn(button('Close'))
+    pressEnterOn(button('Stop'))
 
     expect(playerLine()).toBeNull()
     expect(document.activeElement).toBe(menuButton())
@@ -2235,7 +2235,7 @@ describe('the keyboard focus, for someone who works with the mouse', () => {
     startApp()
     openBox()
     clickWithMouse(line(PLAY_TWINKLE))
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
 
     expect(playerLine()).toBeNull()
     expect(document.activeElement).toBe(document.body)

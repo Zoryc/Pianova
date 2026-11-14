@@ -20,23 +20,34 @@ import './songs.css'
 /** The speed slider moves in steps of this many percent. */
 const SPEED_STEP = 5
 
-/** The shapes of the three icons, drawn in a square of 16 by 16. Restart is a bar with an arrow pointing back at it. */
+/** The shapes of the four icons, drawn in a square of 16 by 16. Restart is a bar with an arrow pointing back at it. */
 const PLAY_ICON = 'M4 2.5v11l9-5.5z'
 const PAUSE_ICON = 'M3.5 2.5h3v11h-3zm6 0h3v11h-3z'
 const RESTART_ICON = 'M3 2.5h2v11H3zM13 2.5v11L5.5 8z'
+const STOP_ICON = 'M3 3h10v10H3z'
 
 /**
  * Takes the song back to its beginning, where it waits: "Play" starts it
- * again from there. The button is named for where the song goes, not "Stop":
- * next to "Pause" and "Close", a button that stops was one too many to tell apart.
+ * again from there. The button is named for where the song goes. (In the
+ * player this is `stop()`, but the button that says "Stop" is the next one.)
  */
 function restart(): void {
   player.stop()
 }
 
 /**
- * The line of controls for the song in the player: play, pause, restart, where
- * the song is, how fast it goes, and its options. Nothing when no song is loaded.
+ * Ends the song and takes it away, and the line with it: the piano is free
+ * again. The button stands with the other buttons that act on the song, right
+ * after "Restart", and says "Stop": as "Close" at the far end of the line it
+ * was hard to find and hard to tell what it closed.
+ */
+function endSong(): void {
+  closeSong()
+}
+
+/**
+ * The line of controls for the song in the player: play, pause, restart, stop,
+ * where the song is, how fast it goes, and its options. Nothing when no song is loaded.
  */
 export function PlayerLine(): JSX.Element | null {
   const loaded = useLoadedSong()
@@ -100,6 +111,10 @@ function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
           <Icon shape={RESTART_ICON} />
           Restart
         </button>
+        <button type="button" className="button" onClick={endSong}>
+          <Icon shape={STOP_ICON} />
+          Stop
+        </button>
         <span className="player-line__title" title={state.title}>
           {state.title}
         </span>
@@ -117,9 +132,6 @@ function LoadedPlayerLine({ loaded }: { loaded: LoadedSong }): JSX.Element {
           <span className="button__chevron" aria-hidden="true">
             ▾
           </span>
-        </button>
-        <button type="button" className="button button--quiet" onClick={() => closeSong()}>
-          Close
         </button>
       </div>
       {optionsOpen && <SongOptions id={optionsId} loaded={loaded} opener={optionsButton} />}

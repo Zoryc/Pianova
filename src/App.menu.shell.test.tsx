@@ -239,7 +239,7 @@ describe('the menu stays while the mouse is over it', () => {
     expect(isHidden()).toBe(true)
   })
 
-  // "Close" is in the player line, which goes away under the mouse: the mouse
+  // "Stop" is in the player line, which goes away under the mouse: the mouse
   // is then over the sky, and the menu must hide like any other time.
   it.each(AFTER_THE_MENU_CHANGED_UNDER_THE_MOUSE)(
     'hides again after a song was closed with the mouse, which is then over the sky (%s)',
@@ -248,7 +248,7 @@ describe('the menu stays while the mouse is over it', () => {
       act(() => {
         playSong(A_STARTER_SONG)
       })
-      const close = button('Close')
+      const close = button('Stop')
       moveMouse(sky(), close)
       wait(AUTO_HIDE_DELAY_MS * 2)
       expect(isHidden()).toBe(false)
@@ -588,12 +588,12 @@ describe('the menu stays while the keyboard focus is inside it', () => {
     expect(isHidden()).toBe(false)
   })
 
-  it('when Enter on "Close" took the player line away, and the focus went to "Menu"', () => {
+  it('when Enter on "Stop" took the player line away, and the focus went to "Menu"', () => {
     startApp()
     act(() => {
       playSong(A_STARTER_SONG)
     })
-    pressEnterOn(button('Close'))
+    pressEnterOn(button('Stop'))
     expect(document.activeElement).toBe(button('Menu'))
 
     wait(AUTO_HIDE_DELAY_MS * 2)
@@ -689,7 +689,7 @@ describe('the menu is pinned', () => {
     wait(AUTO_HIDE_DELAY_MS * 2)
     expect(isHidden()).toBe(false)
 
-    pressEnterOn(button('Close'))
+    pressEnterOn(button('Stop'))
     expect(document.activeElement).toBe(button('Menu'))
     act(() => button('Menu').blur())
     wait(AUTO_HIDE_DELAY_MS - 1)

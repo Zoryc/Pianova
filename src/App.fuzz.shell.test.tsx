@@ -255,7 +255,7 @@ function settingsTab(name: string): HTMLElement | null {
 
 function closeSongButton(): HTMLElement | null {
   const buttons = [...document.querySelectorAll<HTMLElement>('.player-line button')]
-  return buttons.find((button) => button.textContent === 'Close') ?? null
+  return buttons.find((button) => button.textContent === 'Stop') ?? null
 }
 
 function songOptionsButton(): HTMLElement | null {

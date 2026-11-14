@@ -658,9 +658,9 @@ describe('a note of a song never stays stuck', () => {
     expect(player.getState().status).toBe('playing')
   })
 
-  it('stops at Close', () => {
+  it('ends at Stop', () => {
     playUntilFirstNote()
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expectSilence()
 
     const { started, stop } = notesStartedFromNow()
@@ -800,7 +800,7 @@ describe('a note of a song never stays stuck', () => {
     expectSilence()
     wait(200)
     expect(heldNotes()).toEqual([71])
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expectSilence()
   })
 
@@ -840,7 +840,7 @@ describe('the computer keys that a song moved', () => {
     startSong(low)
     expect(settingsStore.get().baseOctave).toBe(2)
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(3)
     // What is saved is where the player had them: the next visit starts there too.
     expect(savedBaseOctave()).toBe(3)
@@ -872,7 +872,7 @@ describe('the computer keys that a song moved', () => {
     startSong(TWINKLE)
     expect(settingsStore.get().baseOctave).toBe(3)
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(4)
   })
 
@@ -887,7 +887,7 @@ describe('the computer keys that a song moved', () => {
     expect(settingsStore.get().baseOctave).toBe(1)
     closeSettings()
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(1)
     expect(savedBaseOctave()).toBe(1)
   })
@@ -1184,7 +1184,7 @@ describe('a long session', () => {
     clickWithMouse(button('Song options'))
     clickWithMouse(button('Song options'))
     wait(300)
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
 
     for (const code of ['KeyA', 'KeyD', 'KeyG']) tap(code)
     act(() => {
@@ -1291,7 +1291,7 @@ describe('a long session', () => {
       startApp()
       startSong(TWINKLE)
       wait(500)
-      clickWithMouse(button('Close'))
+      clickWithMouse(button('Stop'))
       // The test page tidies up the keyboard focus a moment after the button
       // that had it has gone, with a timer of its own. That is over before the
       // app is taken away, so that every timer counted below is the app's.

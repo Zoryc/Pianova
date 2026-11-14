@@ -929,8 +929,8 @@ describe('where the computer keys sit, and a song', () => {
     expect(player.getState().status).toBe('stopped')
     expect(settingsStore.get().baseOctave).toBe(2)
 
-    // Nor by "Close": the player moved them after the song did, and that is where they stay.
-    clickWithMouse(button('Close'))
+    // Nor by "Stop": the player moved them after the song did, and that is where they stay.
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(2)
   })
 
@@ -942,7 +942,7 @@ describe('where the computer keys sit, and a song', () => {
     expect(settingsStore.get().baseOctave).toBe(1)
     expect(skyProps().hints.get(36)).toBe('A')
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(3)
     // In free play the A key is middle C again, as before the song.
     key('keydown', 'KeyA')
@@ -974,7 +974,7 @@ describe('where the computer keys sit, and a song', () => {
     playFromList('High')
     expect(settingsStore.get().baseOctave).toBe(4)
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(settingsStore.get().baseOctave).toBe(3)
   })
 
@@ -1063,10 +1063,10 @@ describe('nothing is left playing or lit', () => {
     expect(litKeys()).toEqual([])
   }
 
-  it('after "Close"', () => {
+  it('after "Stop"', () => {
     startApp()
     playUntilANoteSounds(/^Play Twinkle/)
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
 
     expect(playerLine()).toBeNull()
     expect(skyProps().falling).toBeNull()
@@ -1175,14 +1175,14 @@ describe('nothing is left playing or lit', () => {
     expectSilenceFromNowOn()
   })
 
-  it('but a key the player is holding stays down through "Close"', () => {
+  it('but a key the player is holding stays down through "Stop"', () => {
     startApp()
     playFromList(/^Play Twinkle/)
     wait(LEAD_IN_MS + 100)
     key('keydown', 'KeyD')
     expect(heldNotes()).toEqual([60, 64])
 
-    clickWithMouse(button('Close'))
+    clickWithMouse(button('Stop'))
     expect(heldNotes()).toEqual([64])
     expect(litKeys()).toEqual([64])
     key('keyup', 'KeyD')
@@ -1216,10 +1216,10 @@ describe('someone with the keyboard alone', () => {
     expect(stops.map((stop) => stop.getAttribute('aria-label') ?? stop.textContent?.replace('▾', ''))).toEqual([
       'Pause',
       'Restart',
+      'Stop',
       'Position in the song',
       'Speed',
       'Song options',
-      'Close',
     ])
   })
 
@@ -1379,7 +1379,7 @@ describe('a long session with songs, in any order', () => {
           if (stop) clickWithMouse(stop)
         },
         close() {
-          const close = screen.queryByRole('button', { name: 'Close' })
+          const close = screen.queryByRole('button', { name: 'Stop' })
           if (close) clickWithMouse(close)
         },
         seek() {
@@ -1498,7 +1498,7 @@ describe('a long session with songs, in any order', () => {
       }
 
       for (const code of [...down]) key('keyup', code)
-      const close = screen.queryByRole('button', { name: 'Close' })
+      const close = screen.queryByRole('button', { name: 'Stop' })
       if (close) clickWithMouse(close)
       const events = listenToBus()
       wait(20_000)

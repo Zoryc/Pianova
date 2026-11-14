@@ -133,10 +133,10 @@ describe('the player line', () => {
     expect(controls).toEqual([
       'Pause',
       'Restart',
+      'Stop',
       'Position in the song',
       'Speed',
       'Song options▾',
-      'Close',
     ])
     expect(within(line).getByText('Moonlight').title).toBe('Moonlight')
   })
@@ -179,7 +179,7 @@ describe('the player line', () => {
 
   it('closes the song and goes away', async () => {
     await playOnScreen('Moonlight.mid')
-    click(button('Close'))
+    click(button('Stop'))
 
     expect(player.getState()).toMatchObject({ status: 'empty', songId: null })
     expect(screen.queryByRole('region', { name: 'Song player' })).toBeNull()
@@ -355,10 +355,10 @@ describe('song options', () => {
     openOptions()
 
     act(() => toggle('Melody only').focus())
-    act(() => button('Close').focus())
+    act(() => button('Stop').focus())
     expect(screen.queryByRole('group', { name: 'Song options' })).not.toBeNull()
     // A button that lets go of the focus after a click with the mouse has not moved it anywhere.
-    act(() => button('Close').blur())
+    act(() => button('Stop').blur())
     expect(screen.queryByRole('group', { name: 'Song options' })).not.toBeNull()
 
     act(() => toggle('Melody only').focus())

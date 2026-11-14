@@ -221,7 +221,7 @@ function watchPage(
   let lastY = Number.NaN
 
   /*
-   * A focused control that is taken off the page (the player line's "Close"
+   * A focused control that is taken off the page (the player line's "Stop"
    * button, pressed with Enter) sends no event, and the menu would wait for
    * ever for the focus to leave. So the focus is looked up again each time
    * the player does something.
@@ -233,7 +233,7 @@ function watchPage(
   /*
    * The menu hears the mouse come and go (onMouseEnter and onMouseLeave), but
    * not always. When what is under the mouse is taken off the page (the player
-   * line at "Close"), nothing tells
+   * line at "Stop"), nothing tells
    * the menu that the mouse has left it; and a mouse that rests on the menu
    * while the page is drawn never arrives. So where the mouse is, is also
    * read from whatever the browser says about it: that it is over something
@@ -289,7 +289,7 @@ function watchPage(
 /**
  * What the mouse is over, as `event` says. Except when it names the menu
  * itself: once something inside the menu has been taken away from under the
- * mouse (the player line at "Close"), Chrome goes on naming the menu in its
+ * mouse (the player line at "Stop"), Chrome goes on naming the menu in its
  * place, also where the menu no longer reaches, and may never say anything
  * else while the mouse stands still. So the page is asked what is at that
  * place. (A test's simulated page cannot say: the event is then believed.)
