@@ -24,7 +24,7 @@ import { Sky } from './Sky'
 import type { FallingSource, SkyProps } from './Sky'
 import { MAX_BARS, MAX_SPARKS, SKY_SECONDS, skySpeed } from './skyModel'
 import { BLOOM_PICTURE_SIZE, SPARK_PICTURE_SIZE } from './skySprites'
-import { FRAME_MS, FakeGradient, installFakeBrowser } from './skyTestKit'
+import { FRAME_MS, FakeGradient, carriesText, installFakeBrowser } from './skyTestKit'
 import type { FakeBrowser, FakeContext, PaintedBar, StampedImage } from './skyTestKit'
 
 const FULL = pianoRange(88, 3)
@@ -55,7 +55,7 @@ afterEach(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-type StampKind = 'spark' | 'bloom' | 'backdrop' | 'glow'
+type StampKind = 'spark' | 'bloom' | 'backdrop' | 'letter' | 'glow'
 
 interface MountedSky {
   bus: NoteBus
@@ -108,6 +108,7 @@ function kindOf(stamp: StampedImage): StampKind {
   if (source.width === SPARK_PICTURE_SIZE && source.height === SPARK_PICTURE_SIZE) return 'spark'
   if (source.width === BLOOM_PICTURE_SIZE && source.height === BLOOM_PICTURE_SIZE) return 'bloom'
   if (stamp.width === browser.size.width && stamp.height === browser.size.height) return 'backdrop'
+  if (carriesText(source)) return 'letter'
   return 'glow'
 }
 
@@ -185,9 +186,9 @@ describe('key letters on falling notes', () => {
     // A song that is loaded and not playing: this picture stays on screen until something changes.
     const song = fakeSong(scale)
     const sky = mount({ falling: song.source, hints })
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['A', 'S', 'D', 'F'])
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['A', 'S', 'D', 'F'])
     // A white-key bar is 21 wide here: its letter is about 13 tall.
-    for (const text of sky.context.texts) {
+    for (const text of sky.context.letters) {
       expect(sizeOf(text.font), `the size of "${text.text}"`).toBeGreaterThanOrEqual(SMALLEST_LETTER)
       expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(LARGEST_LETTER)
     }
@@ -198,7 +199,7 @@ describe('key letters on falling notes', () => {
     const sky = mount({ falling: song.source, hints })
     // One more picture: by now every letter above has been measured.
     sky.update({ glow: 0.7 })
-    const before = sky.context.texts.map((text) => sizeOf(text.font))
+    const before = sky.context.letters.map((text) => sizeOf(text.font))
 
     // Another keyboard type (or other keys chosen in Settings): the same notes, other letters.
     const azerty = new Map<Midi, string>([
@@ -208,8 +209,8 @@ describe('key letters on falling notes', () => {
       [F4, 'R'],
     ])
     sky.update({ hints: azerty })
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['Q', 'Z', 'E', 'R'])
-    expect(sky.context.texts.map((text) => sizeOf(text.font))).toEqual(before)
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['Q', 'Z', 'E', 'R'])
+    expect(sky.context.letters.map((text) => sizeOf(text.font))).toEqual(before)
   })
 
   it('writes a letter that is seen for the first time in the middle of a song at the size of its bar', () => {
@@ -218,8 +219,8 @@ describe('key letters on falling notes', () => {
     // The player drags the progress slider while the song is paused: two letters not seen before.
     song.state.position = 8
     sky.update({})
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['D', 'F'])
-    for (const text of sky.context.texts) {
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['D', 'F'])
+    for (const text of sky.context.letters) {
       expect(sizeOf(text.font), `the size of "${text.text}"`).toBeLessThanOrEqual(LARGEST_LETTER)
     }
   })
@@ -227,11 +228,11 @@ describe('key letters on falling notes', () => {
   it('writes the same letters in the same places in every picture, from the very first one', () => {
     const song = fakeSong(scale)
     const sky = mount({ falling: song.source, hints })
-    const first = sky.context.texts.map(({ text, x, y, font }) => ({ text, x, y, font }))
+    const first = sky.context.letters.map(({ text, x, y, font }) => ({ text, x, y, font }))
     expect(first.map(({ text }) => text)).toEqual(['A', 'S', 'D', 'F'])
     for (const glow of [0.7, 0.8]) {
       sky.update({ glow })
-      expect(sky.context.texts.map(({ text, x, y, font }) => ({ text, x, y, font }))).toEqual(first)
+      expect(sky.context.letters.map(({ text, x, y, font }) => ({ text, x, y, font }))).toEqual(first)
     }
     for (const text of first) expect(sizeOf(text.font)).toBeLessThanOrEqual(LARGEST_LETTER)
   })
@@ -248,8 +249,8 @@ describe('key letters on falling notes', () => {
     const narrowest = only(barsOn(sky, C_SHARP_4))
     expect(narrowest.width).toBeGreaterThanOrEqual(13)
     expect(narrowest.width).toBeLessThan(13.1)
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['A', 'W'])
-    const letter = sky.context.texts[1]
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['A', 'W'])
+    const letter = sky.context.letters[1]
     expect(letter?.x).toBeCloseTo(centreOf(narrowest), 6)
     expect(sizeOf(letter?.font ?? '')).toBeGreaterThanOrEqual(SMALLEST_LETTER)
     // The stand-in canvas makes every character 0.6 times as wide as the font is tall.
@@ -258,16 +259,16 @@ describe('key letters on falling notes', () => {
     browser.resizeTo(1280, 600)
     expect(only(barsOn(sky, C_SHARP_4)).width).toBeLessThan(13)
     // Only the width keeps the letter out: the bar is as tall as before, and the white key still has its own.
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['A'])
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['A'])
   })
 
   it('follows the letters when they change, and writes none once they are switched off', () => {
     const song = fakeSong(scale)
     const sky = mount({ falling: song.source, hints })
     sky.update({ hints: new Map<Midi, string>([[D4, 'X']]) })
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['X'])
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['X'])
     sky.update({ hints: NO_HINTS })
-    expect(sky.context.texts).toEqual([])
+    expect(sky.context.letters).toEqual([])
     expect(browser.frames.requested).toBe(0)
   })
 
@@ -281,7 +282,7 @@ describe('key letters on falling notes', () => {
     const song = fakeSong(scale)
     for (const range of [FULL, SMALL]) {
       const sky = mount({ falling: song.source, hints: odd, range })
-      for (const text of sky.context.texts) {
+      for (const text of sky.context.letters) {
         const size = sizeOf(text.font)
         const bar = only(sky.bars().filter((candidate) => Math.abs(centreOf(candidate) - text.x) < 0.01))
         expect(size).toBeGreaterThanOrEqual(SMALLEST_LETTER)
@@ -302,7 +303,7 @@ describe('key letters on falling notes', () => {
     for (const position of [1.5, 60, 2500, 5000.8]) {
       song.state.position = position
       sky.update({})
-      const text = only(sky.context.texts)
+      const text = only(sky.context.letters)
       expect(text.y).toBeLessThan(600)
       expect(text.y).toBeGreaterThan(580)
       expect(text.alpha).toBe(1)
@@ -764,7 +765,7 @@ describe('every look', () => {
               browser.frame()
               // Three notes of the song are on the piano and on screen; one of them carries a letter.
               expect(sky.bars(), JSON.stringify(look)).toHaveLength(3)
-              expect(sky.context.texts.map((text) => text.text)).toEqual(['A'])
+              expect(sky.context.letters.map((text) => text.text)).toEqual(['A'])
               expect(sky.stamps('backdrop').length).toBeGreaterThanOrEqual(1)
               sky.unmount()
               browser.frames.pending.clear()
@@ -931,13 +932,13 @@ describe('odd sizes', () => {
     expect(sky.bars()).toHaveLength(2)
     browser.resizeTo(0, 0)
     expect(sky.bars()).toEqual([])
-    expect(sky.context.texts).toEqual([])
+    expect(sky.context.letters).toEqual([])
     browser.resizeTo(1300, 900)
     const [c, d] = sky.bars()
     expect(sky.bars()).toHaveLength(2)
     expect(900 - ((c?.y ?? 0) + (c?.height ?? 0))).toBeCloseTo(1 * skySpeed(900), 6)
     expect(900 - ((d?.y ?? 0) + (d?.height ?? 0))).toBeCloseTo(2 * skySpeed(900), 6)
-    expect(sky.context.texts.map((text) => text.text)).toEqual(['A'])
+    expect(sky.context.letters.map((text) => text.text)).toEqual(['A'])
     expect(browser.frames.requested).toBe(0)
   })
 

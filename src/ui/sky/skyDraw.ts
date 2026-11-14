@@ -2,6 +2,7 @@ import { paletteFor, paletteForNote } from '../../core/colour'
 import type { LightPalette } from '../../core/colour'
 import type { PianoRange } from '../../core/layout'
 import { BLACK_KEY_WIDTH_RATIO, keyRectOf, whiteKeyCount } from '../../core/pianoGeometry'
+import type { KeyRect } from '../../core/pianoGeometry'
 import type { AccentChoice, BackgroundName, BarStyle, Midi } from '../../core/types'
 import { paintBackdrop, sameBackdrop } from './skyBackdrop'
 import type { BackdropSpec } from './skyBackdrop'
@@ -23,14 +24,19 @@ import {
   stillGlowHeight,
 } from './skyModel'
 import type { FallingIndex, Impact, RisingBar, Sparks } from './skyModel'
-import { SPARK_CORE_SHARE, createSkyArt } from './skySprites'
-import type { ArtSpec, BarGlow, LightArt, SkyArt } from './skySprites'
+import { HINT_PADDING, SPARK_CORE_SHARE, createSkyArt } from './skySprites'
+import type { ArtSpec, BarGlow, HintPicture, LightArt, SkyArt } from './skySprites'
 
 /*
  * Draws one picture of the sky. Everything here runs on every frame while
- * something moves, so it makes nothing new as it goes: gradients and glows
- * come ready-made from skySprites.ts, the background from skyBackdrop.ts,
- * and the few things kept between frames live in the painter.
+ * something moves, so it makes nothing new as it goes: gradients, glows and
+ * key letters come ready-made from skySprites.ts, the background from
+ * skyBackdrop.ts, and the few things kept between frames live in the painter.
+ *
+ * Nothing here asks the canvas to write, to change its font or to measure a
+ * text: each of those makes the browser bring the styles of the whole page
+ * up to date, and Firefox then paints the whole page for that frame (see
+ * skySprites.ts).
  *
  * Light is added to light ("lighter" blending): where two glows overlap the
  * sky gets brighter, as it would with real light. The one exception is the
@@ -86,24 +92,6 @@ const FALLING_GAP = 1.5
 /** A crowded song never asks for more bars than this in one picture: the ones furthest away wait. */
 const MAX_FALLING_BARS = 400
 
-/**
- * Key letters: only on bars at least this wide, between these sizes, with
- * this much room around them. The narrowest bar gets the smallest letter:
- * the black keys of the full piano in a window 1366 pixels wide have bars
- * between 13 and 14 pixels wide, and their notes must carry a letter too.
- */
-const MIN_HINT_BAR_WIDTH = 13
-const MIN_HINT_SIZE = 8
-const MAX_HINT_SIZE = 20
-/** The edge around a letter: the width of its line as a share of the size of the letter, and at least this many pixels. Half of it shows. */
-const HINT_EDGE_SHARE = 0.22
-const MIN_HINT_EDGE = 2
-const HINT_SIZE_SHARE = 0.62
-const HINT_PADDING = 3
-/** Letters are measured once, at this size, and scaled from there. */
-const HINT_MEASURE_SIZE = 100
-const MAX_REMEMBERED_HINTS = 200
-
 /** The bloom where a note meets the line: about two key widths of bright light, with a faint edge beyond. */
 const BLOOM_KEY_WIDTHS = 4.8
 /** At no glow the bloom would be this share of its full size. */
@@ -138,7 +126,6 @@ const TOO_FAINT = 0.004
 /** Draws pictures of the sky on one canvas, and keeps between frames what would be costly to make again. */
 export class SkyPainter {
   private readonly context: CanvasRenderingContext2D
-  private readonly fontFamily: string
   private readonly art: SkyArt
   private readonly artSpec: ArtSpec = {
     skyHeight: 0,
@@ -169,17 +156,10 @@ export class SkyPainter {
   private fallingFrom = 0
   private fallingTo = 0
 
-  /** How wide each key letter is when written one pixel tall, and the font for each whole size. */
-  private readonly hintWidths = new Map<string, number>()
-  private readonly hintFonts: string[] = []
-  /** The size the canvas is set to write letters at. 0 when that is not known: the font is then set before the next letter. */
-  private hintFontSize = 0
-
   /** `fontFamily` is the typeface of the key letters. */
   constructor(context: CanvasRenderingContext2D, fontFamily: string) {
     this.context = context
-    this.fontFamily = fontFamily
-    this.art = createSkyArt(context)
+    this.art = createSkyArt(context, fontFamily)
   }
 
   /** Empties the canvas. */
@@ -190,16 +170,31 @@ export class SkyPainter {
   }
 
   /**
-   * Forgets the pictures that were made in advance (the glows, the sparks
-   * and the background), so that the next picture makes them anew. For when
-   * the browser took the drawing away and gave it back: those pictures may
-   * have been emptied along with the canvas.
+   * Forgets the pictures that were made in advance (the glows, the sparks,
+   * the key letters and the background), so that they are made anew when
+   * next needed. For when the browser took the drawing away and gave it
+   * back: those pictures may have been emptied along with the canvas.
    */
   forget(): void {
     this.art.forget()
     // A new canvas, not the old one painted again: the old one may be lost as well.
     this.backdrop = null
     this.backdropPainted = null
+  }
+
+  /**
+   * Makes the letters of all the keys now, for pictures like `picture`. To
+   * be called when the letters, the size of the sky or its look change: a
+   * frame of a playing song then finds every letter ready, and has none to
+   * write.
+   */
+  prepare(picture: SkyPicture): void {
+    this.prepareArt(picture)
+    if (!picture.song) return
+    for (const [midi, label] of picture.song.hints) {
+      const key = label ? keyRectOf(midi, picture.range) : null
+      if (key) this.hintFor(picture, midi, label, key)
+    }
   }
 
   /**
@@ -515,9 +510,15 @@ export class SkyPainter {
   // -------------------------------------------------------------------------
 
   /**
-   * Writes, on each falling note that a computer key can play, the letter of
+   * Puts, on each falling note that a computer key can play, the letter of
    * that key: at the lower end of the bar, which is the end that lands first.
    * While the note sounds the letter rests on the line.
+   *
+   * The letters are ready-made pictures, copied pixel for pixel, so a letter
+   * moves down the sky in whole canvas pixels. That is how Firefox moves a
+   * text written on a canvas too: it rounds the line the text stands on to a
+   * whole pixel. The row is chosen by that same rule here, so that a stamped
+   * letter lies exactly where a written one would.
    */
   private drawHints(picture: SkyPicture, song: SongPicture): void {
     if (song.hints.size === 0) return
@@ -526,13 +527,7 @@ export class SkyPainter {
     const { notes } = song.index
     const speed = skySpeed(surface.height)
     const fade = fadeHeight(surface.height)
-    // A canvas forgets its font when it is resized, so what an earlier picture set is not relied on.
-    this.hintFontSize = 0
     context.globalCompositeOperation = 'source-over'
-    context.textAlign = 'center'
-    context.textBaseline = 'middle'
-    // Round corners on the edge of the letters: a pointed one would stick out of a sharp letter like A or W.
-    context.lineJoin = 'round'
 
     for (let i = this.fallingFrom; i < this.fallingTo; i++) {
       const note = notes[i]
@@ -540,55 +535,40 @@ export class SkyPainter {
       const label = song.hints.get(note.midi)
       const key = label ? keyRectOf(note.midi, range) : null
       if (!label || !key) continue
-      const keyWidth = key.width * surface.width
-      const width = barWidth(keyWidth)
-      if (width < MIN_HINT_BAR_WIDTH) continue
+      const hint = this.hintFor(picture, note.midi, label, key)
+      if (!hint) continue
 
-      const size = this.hintSize(label, width)
       const bottom = surface.height - fallingBottom(note, song.position, speed)
       const top = bottom - fallingHeight(note, speed) + FALLING_GAP
       const restsAt = Math.min(bottom, surface.height)
       // Only when the part of the bar that shows is tall enough to hold the letter.
-      if (size < MIN_HINT_SIZE || restsAt - Math.max(top, 0) < size + HINT_PADDING * 2) continue
+      if (restsAt - Math.max(top, 0) < hint.size + HINT_PADDING * 2) continue
 
-      if (size !== this.hintFontSize) {
-        context.font = this.hintFont(size)
-        this.hintFontSize = size
-      }
-      const middle = restsAt - HINT_PADDING - size / 2
+      const middle = restsAt - HINT_PADDING - hint.size / 2
       // The letter fades with its bar at the top of the sky.
       context.globalAlpha = Math.min(1, Math.max(0, middle / fade))
-      const art = this.artFor(picture, note.midi)
-      const centre = barLeft(key.left * surface.width, keyWidth) + width / 2
+      const row = Math.round(middle * surface.scaleY + hint.baselineDrop) - hint.baselineRow
+      const x = hint.left / surface.scaleX
+      const y = row / surface.scaleY
+      const width = hint.width / surface.scaleX
+      const height = hint.height / surface.scaleY
       // The edge first, the letter over it: only the half of the edge that lies outside the letter shows.
-      if (art.inkEdge) {
-        context.lineWidth = Math.max(MIN_HINT_EDGE, size * HINT_EDGE_SHARE)
-        context.strokeStyle = art.inkEdge
-        context.strokeText(label, centre, middle)
-      }
-      context.fillStyle = art.ink
-      context.fillText(label, centre, middle)
+      if (hint.edge) context.drawImage(hint.edge, x, y, width, height)
+      context.drawImage(hint.letter, x, y, width, height)
     }
-    context.lineJoin = 'miter'
   }
 
-  /** The largest whole size at which `label` fits a bar `width` wide. Each label is measured only once. */
-  private hintSize(label: string, width: number): number {
-    let labelWidth = this.hintWidths.get(label)
-    if (labelWidth === undefined) {
-      this.context.font = this.hintFont(HINT_MEASURE_SIZE)
-      // Measuring changed the font of the canvas: it has to be set again before a letter is written.
-      this.hintFontSize = 0
-      labelWidth = this.context.measureText(label).width / HINT_MEASURE_SIZE
-      if (this.hintWidths.size >= MAX_REMEMBERED_HINTS) this.hintWidths.clear()
-      this.hintWidths.set(label, labelWidth)
-    }
-    const fitting = labelWidth > 0 ? (width - HINT_PADDING * 2) / labelWidth : MAX_HINT_SIZE
-    return Math.floor(Math.min(MAX_HINT_SIZE, width * HINT_SIZE_SHARE, fitting))
-  }
-
-  private hintFont(size: number): string {
-    return (this.hintFonts[size] ??= `700 ${size}px ${this.fontFamily}`)
+  /** The ready-made letter `label` for the notes of one key. Null when the bars of that key are too narrow to hold it. */
+  private hintFor(picture: SkyPicture, midi: Midi, label: string, key: KeyRect): HintPicture | null {
+    const keyWidth = key.width * picture.surface.width
+    const width = barWidth(keyWidth)
+    return this.art.hint(
+      midi,
+      label,
+      paletteForNote(midi, picture.accent, picture.customColour),
+      width,
+      barLeft(key.left * picture.surface.width, keyWidth) + width / 2,
+    )
   }
 
   // -------------------------------------------------------------------------

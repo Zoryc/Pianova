@@ -1,15 +1,23 @@
 import type { LightPalette } from '../../core/colour'
-import type { BarStyle } from '../../core/types'
+import type { BarStyle, Midi } from '../../core/types'
 import { barRadius } from './skyModel'
 import { lightnessOf, withAlpha } from './skyColour'
 
 /*
  * The pieces of light that are made once and then used many times a frame:
- * the glow of a bar, a spark, the bloom where a note meets the line, and the
- * gradient that fills the bars. The glows are "sprites": small pictures,
- * blurred once when they are made, that are then stamped onto the sky.
- * Stamping a picture costs almost nothing; asking the canvas to blur
- * something on every frame does not.
+ * the glow of a bar, a spark, the bloom where a note meets the line, the
+ * gradient that fills the bars, and the key letters on the falling notes.
+ * The glows are "sprites": small pictures, blurred once when they are made,
+ * that are then stamped onto the sky. Stamping a picture costs almost
+ * nothing; asking the canvas to blur something on every frame does not.
+ *
+ * The letters are pictures for another reason. Every time a canvas is asked
+ * to write (or only to change its font, or to measure a text), the browser
+ * first brings the styles of the whole page up to date. While something on
+ * the page is fading (the progress line of a song always is), Firefox then
+ * paints the whole page again, piano included: once for every frame. So no
+ * canvas is asked to write during a frame: each letter is written once, on a
+ * small canvas of its own, and stamped from there.
  */
 
 /** The glow of a bar, as a picture that can be stretched to any height. */
@@ -59,6 +67,34 @@ export interface LightArt {
   bloom: HTMLCanvasElement | null
 }
 
+/**
+ * The letter of a computer key, written once, to be stamped onto every
+ * falling note of that key. The letter and the edge around it are two
+ * pictures of the same size, stamped one over the other, the edge first:
+ * through a letter that fades at the top of the sky its edge shows a little,
+ * which one picture of both would lose.
+ */
+export interface HintPicture {
+  /** The letter alone. */
+  letter: HTMLCanvasElement
+  /** The edge around the letter, alone. Null when the letter has no edge. */
+  edge: HTMLCanvasElement | null
+  /** The height the letter is written at, in CSS pixels. */
+  size: number
+  /** Width and height of both pictures, in canvas pixels. */
+  width: number
+  height: number
+  /** Where the pictures go across the sky: their left edge, in whole canvas pixels. */
+  left: number
+  /**
+   * How far the line the letter stands on is below the middle of the letter,
+   * and which row of the pictures that line is on. In canvas pixels. See
+   * `drawHints` in skyDraw.ts.
+   */
+  baselineDrop: number
+  baselineRow: number
+}
+
 /** What the art is made for. It is made again when any of this changes. */
 export interface ArtSpec {
   /** Height of the sky, in CSS pixels. */
@@ -78,6 +114,20 @@ export interface SkyArt {
   prepare(spec: ArtSpec): void
   /** The art for one palette: made the first time it is asked for, remembered after that. */
   of(palette: LightPalette): LightArt
+  /**
+   * The letter `label` for the falling notes of the key of `midi`, whose bars
+   * are `barWidth` wide and centred on `centre` (CSS pixels across the sky),
+   * in the ink of `palette`. Made the first time it is asked for and
+   * remembered after that, one per key. Null when the bar is too narrow to
+   * hold the letter.
+   */
+  hint(
+    midi: Midi,
+    label: string,
+    palette: LightPalette,
+    barWidth: number,
+    centre: number,
+  ): HintPicture | null
   /** Forgets everything made so far, so that it is made anew when next asked for: the pictures may have been emptied. */
   forget(): void
 }
@@ -100,6 +150,28 @@ const MAX_HOT_HEIGHT = 64
 const DARK_INK_FROM = 0.4
 /** How solid the edge around a key letter is. */
 const INK_EDGE_ALPHA = 0.7
+
+/**
+ * Key letters: only on bars at least this wide, between these sizes, with
+ * this much room around them. The narrowest bar gets the smallest letter:
+ * the black keys of the full piano in a window 1366 pixels wide have bars
+ * between 13 and 14 pixels wide, and their notes must carry a letter too.
+ */
+const MIN_HINT_BAR_WIDTH = 13
+const MIN_HINT_SIZE = 8
+const MAX_HINT_SIZE = 20
+const HINT_SIZE_SHARE = 0.62
+export const HINT_PADDING = 3
+/** The edge around a letter: the width of its line as a share of the size of the letter, and at least this many pixels. Half of it shows. */
+const HINT_EDGE_SHARE = 0.22
+const MIN_HINT_EDGE = 2
+/** Letters are measured once, at this size, and scaled from there. */
+const HINT_MEASURE_SIZE = 100
+const MAX_REMEMBERED_HINTS = 200
+/** No letter reaches further above or below its middle than this share of its size. */
+const HINT_REACH = 0.75
+/** Spare pixels around a letter in its picture, for the soft rim of its edge. */
+const HINT_MARGIN = 1
 
 /** How far the glow of a bar reaches at full strength, in CSS pixels. */
 const MAX_GLOW_BLUR = 30
@@ -137,19 +209,39 @@ const MAX_PALETTES = 48
 /** How much two sizes may differ and still share their art, in CSS pixels. */
 const SAME_SIZE = 0.01
 
+/** The letter kept for one key, and what it was made for: asked for anything else, it is made again. */
+interface KeptHint {
+  label: string
+  barWidth: number
+  centre: number
+  ink: string
+  inkEdge: string | null
+  picture: HintPicture | null
+}
+
 /**
- * Makes and remembers the art for each palette. `context` is the sky's own
- * drawing context: the gradients are made by it, and the small pictures by
- * canvases created next to it.
+ * Makes and remembers the art for each palette, and the letter of each key.
+ * `context` is the sky's own drawing context: the gradients are made by it,
+ * and the small pictures by canvases created next to it. `fontFamily` is the
+ * typeface of the key letters.
  */
-export function createSkyArt(context: CanvasRenderingContext2D): SkyArt {
+export function createSkyArt(context: CanvasRenderingContext2D, fontFamily: string): SkyArt {
+  const page = context.canvas.ownerDocument
   const made = new Map<LightPalette, LightArt>()
+  const hints = new Map<Midi, KeptHint>()
   let current: ArtSpec | null = null
+
+  /** How wide each label is when written one pixel tall, and the font for each whole size. */
+  const labelWidths = new Map<string, number>()
+  const fonts: string[] = []
+  /** Only ever measures. Made when the first label is measured; null when the browser gives none. */
+  let measurer: CanvasRenderingContext2D | null | undefined
 
   const prepare = (spec: ArtSpec): void => {
     if (current && sameSpec(current, spec)) return
     current = { ...spec }
     made.clear()
+    hints.clear()
   }
 
   const of = (palette: LightPalette): LightArt => {
@@ -161,11 +253,72 @@ export function createSkyArt(context: CanvasRenderingContext2D): SkyArt {
     return art
   }
 
-  const forget = (): void => {
-    made.clear()
+  const fontOf = (size: number): string => (fonts[size] ??= `700 ${size}px ${fontFamily}`)
+
+  /** Each label is measured only once. */
+  const widthOf = (label: string): number => {
+    const known = labelWidths.get(label)
+    if (known !== undefined) return known
+    if (measurer === undefined) {
+      measurer = newPicture(page, 1, 1)?.context ?? null
+      if (measurer) measurer.font = fontOf(HINT_MEASURE_SIZE)
+    }
+    const width = measurer ? measurer.measureText(label).width / HINT_MEASURE_SIZE : 0
+    if (labelWidths.size >= MAX_REMEMBERED_HINTS) labelWidths.clear()
+    labelWidths.set(label, width)
+    return width
   }
 
-  return { prepare, of, forget }
+  /** The largest whole size at which `label` fits a bar `barWidth` wide. 0 when the bar is too narrow for any letter. */
+  const sizeFor = (label: string, barWidth: number): number => {
+    if (barWidth < MIN_HINT_BAR_WIDTH) return 0
+    const labelWidth = widthOf(label)
+    const fitting = labelWidth > 0 ? (barWidth - HINT_PADDING * 2) / labelWidth : MAX_HINT_SIZE
+    return Math.floor(Math.min(MAX_HINT_SIZE, barWidth * HINT_SIZE_SHARE, fitting))
+  }
+
+  const hint = (
+    midi: Midi,
+    label: string,
+    palette: LightPalette,
+    barWidth: number,
+    centre: number,
+  ): HintPicture | null => {
+    const { ink, inkEdge } = of(palette)
+    const kept = hints.get(midi)
+    if (
+      kept &&
+      kept.label === label &&
+      kept.barWidth === barWidth &&
+      kept.centre === centre &&
+      kept.ink === ink &&
+      kept.inkEdge === inkEdge
+    ) {
+      return kept.picture
+    }
+    const size = sizeFor(label, barWidth)
+    const picture =
+      current && size >= MIN_HINT_SIZE
+        ? makeHint(page, current.pixelRatio, {
+            label,
+            font: fontOf(size),
+            size,
+            width: widthOf(label) * size,
+            centre,
+            ink,
+            inkEdge,
+          })
+        : null
+    hints.set(midi, { label, barWidth, centre, ink, inkEdge, picture })
+    return picture
+  }
+
+  const forget = (): void => {
+    made.clear()
+    hints.clear()
+  }
+
+  return { prepare, of, hint, forget }
 }
 
 function sameSpec(a: ArtSpec, b: ArtSpec): boolean {
@@ -224,6 +377,83 @@ function solidInk(palette: LightPalette): Ink {
   return lightnessOf(palette.light) >= DARK_INK_FROM
     ? { ink: '#000000', inkEdge: withAlpha(palette.bright, INK_EDGE_ALPHA) }
     : { ink: '#ffffff', inkEdge: withAlpha('#000000', INK_EDGE_ALPHA) }
+}
+
+/** One letter to make a picture of. Sizes and places in CSS pixels. */
+interface HintWanted {
+  label: string
+  font: string
+  size: number
+  /** How wide the label is at that size. */
+  width: number
+  /** Where across the sky the letter is centred. */
+  centre: number
+  ink: string
+  inkEdge: string | null
+}
+
+/**
+ * Writes one letter, and the edge around it, each on a small canvas of its
+ * own, exactly as they would be written on the sky itself: the same calls,
+ * at the same part of a pixel across the sky, so that the stamped letter is
+ * the written one, pixel for pixel.
+ */
+function makeHint(page: Document, scale: number, wanted: HintWanted): HintPicture | null {
+  const { size } = wanted
+  // The line the edge is drawn with. Half of it lies outside the letter: that half shows.
+  const line = wanted.inkEdge ? Math.max(MIN_HINT_EDGE, size * HINT_EDGE_SHARE) : 0
+  const room = line / 2 + HINT_MARGIN
+  // From the point the letter is centred on to the sides of the picture, in whole canvas pixels.
+  const halfWidth = Math.ceil((wanted.width / 2 + room) * scale)
+  const halfHeight = Math.ceil((size * HINT_REACH + room) * scale)
+  const width = halfWidth * 2 + 1
+  const height = halfHeight * 2 + 1
+  const centre = wanted.centre * scale
+  const left = Math.floor(centre) - halfWidth
+
+  const letter = newPicture(page, width, height)
+  const edge = wanted.inkEdge ? newPicture(page, width, height) : null
+  if (!letter || (wanted.inkEdge && !edge)) return null
+  const x = (centre - left) / scale
+  const y = halfHeight / scale
+  for (const picture of [edge, letter]) {
+    if (!picture) continue
+    // From here on, one unit is one CSS pixel.
+    picture.context.setTransform(scale, 0, 0, scale, 0, 0)
+    picture.context.font = wanted.font
+    picture.context.textAlign = 'center'
+    picture.context.textBaseline = 'middle'
+  }
+  if (edge && wanted.inkEdge) {
+    // Round corners on the edge of the letters: a pointed one would stick out of a sharp letter like A or W.
+    edge.context.lineJoin = 'round'
+    edge.context.lineWidth = line
+    edge.context.strokeStyle = wanted.inkEdge
+    edge.context.strokeText(wanted.label, x, y)
+  }
+  letter.context.fillStyle = wanted.ink
+  letter.context.fillText(wanted.label, x, y)
+
+  const baselineDrop = baselineBelowMiddle(letter.context, wanted.label) * scale
+  return {
+    letter: letter.canvas,
+    edge: edge ? edge.canvas : null,
+    size,
+    width,
+    height,
+    left,
+    baselineDrop,
+    baselineRow: Math.round(halfHeight + baselineDrop),
+  }
+}
+
+/**
+ * How far the line a text stands on is below its middle, for a context that
+ * writes text around its middle. 0 when the browser does not say.
+ */
+function baselineBelowMiddle(context: CanvasRenderingContext2D, label: string): number {
+  const drop = -context.measureText(label).alphabeticBaseline
+  return Number.isFinite(drop) ? drop : 0
 }
 
 /** A bar standing in a picture of its glow: where it is, in CSS pixels. */

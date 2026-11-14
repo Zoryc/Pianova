@@ -82,7 +82,7 @@ describe('the art made for each colour', () => {
   function newArt() {
     const canvas = document.createElement('canvas')
     const context = browser.contextOf(canvas)
-    const art = createSkyArt(context as unknown as CanvasRenderingContext2D)
+    const art = createSkyArt(context as unknown as CanvasRenderingContext2D, 'monospace')
     return { art, context }
   }
 
@@ -284,6 +284,156 @@ describe('the art made for each colour', () => {
     const red = art.of(RED)
     expect(red.barFill).toBeDefined()
     expect([red.whiteGlow, red.blackGlow, red.spark, red.bloom]).toEqual([null, null, null, null])
+  })
+})
+
+describe('the letters made for the keys', () => {
+  const spec: ArtSpec = {
+    skyHeight: 600,
+    whiteBarWidth: 21,
+    blackBarWidth: 13,
+    barStyle: 'solid',
+    glow: 0.6,
+    pixelRatio: 1,
+  }
+  const AMBER = paletteFor('amber', '')
+  const C4 = 60
+  const D4 = 62
+  /** Where the bar of C4 is centred in these tests, in CSS pixels across the sky. */
+  const CENTRE = 500.3
+
+  function newArt() {
+    const canvas = document.createElement('canvas')
+    const art = createSkyArt(browser.contextOf(canvas) as unknown as CanvasRenderingContext2D, 'monospace')
+    art.prepare(spec)
+    return art
+  }
+
+  const contextOf = (picture: HTMLCanvasElement | null | undefined) =>
+    browser.contextOf(picture as HTMLCanvasElement)
+
+  it('are made once per key and remembered', () => {
+    const art = newArt()
+    const a = art.hint(C4, 'A', RED, 21, CENTRE)
+    expect(a).not.toBeNull()
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)).toBe(a)
+    // Blue bars carry white letters with a dark edge, as red ones do: the same picture serves.
+    expect(art.hint(C4, 'A', BLUE, 21, CENTRE)).toBe(a)
+    // Another key has its own, even with the same letter.
+    expect(art.hint(D4, 'A', RED, 21, CENTRE + 25)).not.toBe(a)
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)).toBe(a)
+  })
+
+  it('are made again for another letter, another ink, another width or another place of the bar', () => {
+    const art = newArt()
+    let before = art.hint(C4, 'A', RED, 21, CENTRE)
+    for (const again of [
+      () => art.hint(C4, 'Q', RED, 21, CENTRE),
+      () => art.hint(C4, 'Q', AMBER, 21, CENTRE),
+      () => art.hint(C4, 'Q', AMBER, 30, CENTRE),
+      () => art.hint(C4, 'Q', AMBER, 30, CENTRE + 0.5),
+    ]) {
+      const after = again()
+      expect(after).not.toBeNull()
+      expect(after).not.toBe(before)
+      expect(again()).toBe(after)
+      before = after
+    }
+  })
+
+  it('are forgotten with the other pictures: at another size, style, glow or pixel ratio, and when the drawing was taken away', () => {
+    const changes: Partial<ArtSpec>[] = [
+      { skyHeight: 500 },
+      { whiteBarWidth: 30 },
+      { blackBarWidth: 18 },
+      { barStyle: 'neon' },
+      { glow: 0.7 },
+      { pixelRatio: 2 },
+    ]
+    for (const change of changes) {
+      const art = newArt()
+      const before = art.hint(C4, 'A', RED, 21, CENTRE)
+      art.prepare({ ...spec, ...change })
+      expect(art.hint(C4, 'A', RED, 21, CENTRE)).not.toBe(before)
+    }
+    const art = newArt()
+    const before = art.hint(C4, 'A', RED, 21, CENTRE)
+    art.forget()
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)).not.toBe(before)
+  })
+
+  it('hold the letter in one picture and its edge in another of the same size', () => {
+    const hint = newArt().hint(C4, 'A', RED, 21, CENTRE)
+    expect(hint?.edge).not.toBe(hint?.letter)
+    expect([hint?.edge?.width, hint?.edge?.height]).toEqual([hint?.letter.width, hint?.letter.height])
+    expect([hint?.width, hint?.height]).toEqual([hint?.letter.width, hint?.letter.height])
+
+    // A bar 21 wide holds a letter 13 tall.
+    expect(hint?.size).toBe(13)
+    const [written] = contextOf(hint?.letter).texts
+    expect(contextOf(hint?.letter).textEdges).toEqual([])
+    expect([written?.text, written?.font, written?.colour]).toEqual(['A', '700 13px monospace', '#ffffff'])
+
+    const [edge] = contextOf(hint?.edge).textEdges
+    expect(contextOf(hint?.edge).texts).toEqual([])
+    expect([edge?.text, edge?.font, edge?.x, edge?.y]).toEqual(['A', written?.font, written?.x, written?.y])
+    expect(String(edge?.colour).startsWith('#000000')).toBe(true)
+    expect(edge?.lineJoin).toBe('round')
+    // The whole letter and half its edge fit in the picture, with a pixel to spare.
+    const reach = (edge?.lineWidth ?? 0) / 2 + 1
+    expect(written?.x).toBeGreaterThanOrEqual((13 * 0.6) / 2 + reach)
+    expect((hint?.width ?? 0) - (written?.x ?? 0)).toBeGreaterThanOrEqual((13 * 0.6) / 2 + reach)
+    expect(written?.y).toBeGreaterThanOrEqual(13 / 2 + reach)
+    expect((hint?.height ?? 0) - (written?.y ?? 0)).toBeGreaterThanOrEqual(13 / 2 + reach)
+  })
+
+  it('write dark letters with a pale edge on a light colour, and bright letters without an edge in neon bars', () => {
+    const art = newArt()
+    const dark = art.hint(C4, 'A', AMBER, 21, CENTRE)
+    expect(contextOf(dark?.letter).texts[0]?.colour).toBe('#000000')
+    expect(String(contextOf(dark?.edge).textEdges[0]?.colour).startsWith(AMBER.bright)).toBe(true)
+
+    art.prepare({ ...spec, barStyle: 'neon' })
+    const neon = art.hint(C4, 'A', RED, 21, CENTRE)
+    expect(neon?.edge).toBeNull()
+    expect(contextOf(neon?.letter).texts[0]?.colour).toBe(RED.bright)
+  })
+
+  it('give no letter to a bar narrower than 13 pixels, nor to a label too long for its bar', () => {
+    const art = newArt()
+    expect(art.hint(C4 + 1, 'W', RED, 12.9, 300)).toBeNull()
+    expect(art.hint(C4 + 1, 'W', RED, 13, 300)?.size).toBe(8)
+    expect(art.hint(C4, 'Backspace', RED, 21, CENTRE)).toBeNull()
+    // What does not fit is remembered too: it is not tried again on every frame.
+    const pictures = browser.contexts().length
+    const textCalls = browser.contexts().reduce((sum, context) => sum + context.textCalls, 0)
+    expect(art.hint(C4, 'Backspace', RED, 21, CENTRE)).toBeNull()
+    expect(browser.contexts().length).toBe(pictures)
+    expect(browser.contexts().reduce((sum, context) => sum + context.textCalls, 0)).toBe(textCalls)
+  })
+
+  it('write the letter on the same part of a pixel across the sky as its bar, in a picture that lies on whole pixels', () => {
+    for (const pixelRatio of [1, 1.5, 2]) {
+      const art = newArt()
+      art.prepare({ ...spec, pixelRatio })
+      const hint = art.hint(C4, 'A', RED, 21, CENTRE)
+      const picture = contextOf(hint?.letter)
+      expect(Number.isInteger(hint?.left)).toBe(true)
+      expect([picture.zoom.x, picture.zoom.y]).toEqual([pixelRatio, pixelRatio])
+      // Left edge of the picture + where the letter is centred in it = where the bar is centred, in canvas pixels.
+      expect((hint?.left ?? 0) + (picture.texts[0]?.x ?? 0) * pixelRatio).toBeCloseTo(CENTRE * pixelRatio, 9)
+      // Down the picture the letter is written around a whole pixel.
+      expect((picture.texts[0]?.y ?? 0) * pixelRatio).toBeCloseTo(((hint?.height ?? 0) - 1) / 2, 9)
+      // A denser screen gets a picture of more pixels, for a letter of the same size.
+      expect(hint?.size).toBe(13)
+      expect(hint?.height).toBeGreaterThanOrEqual(13 * 1.5 * pixelRatio)
+    }
+  })
+
+  it('give no letter, and do not fail, when the browser gives no drawing context for the pictures', () => {
+    const art = newArt()
+    HTMLCanvasElement.prototype.getContext = (() => null) as HTMLCanvasElement['getContext']
+    expect(art.hint(C4, 'A', RED, 21, CENTRE)).toBeNull()
   })
 })
 

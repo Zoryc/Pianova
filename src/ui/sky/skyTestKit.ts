@@ -48,6 +48,37 @@ export interface TextEdge extends WrittenText {
   lineJoin: string
 }
 
+/**
+ * A key letter on a canvas: a ready-made picture of it that was copied
+ * there. What it says and how it was written is read from the small canvas
+ * the picture was made on.
+ */
+export interface StampedLetter {
+  text: string
+  /** The point the letter is centred on, on the canvas it was copied to (CSS pixels). */
+  x: number
+  y: number
+  /** The font and the colour it was written in when its picture was made. */
+  font: string
+  colour: unknown
+  /** How solid it was copied. */
+  alpha: number
+  /** The edge that was copied under it, from a picture of its own. Null when the letter has none. */
+  edge: StampedEdge | null
+}
+
+export interface StampedEdge {
+  text: string
+  /** The point the edge is centred on, as for the letter. */
+  x: number
+  y: number
+  font: string
+  colour: unknown
+  alpha: number
+  lineWidth: number
+  lineJoin: string
+}
+
 export interface FilledRect {
   x: number
   y: number
@@ -93,6 +124,8 @@ interface PathRect {
 
 /** Every drawing context made in a test, so that a test can ask what all of them were asked to do. */
 const everyContext = new Set<FakeContext>()
+/** The drawing context of each canvas: how a copied picture is traced back to what was drawn on it. */
+const contextOfCanvas = new WeakMap<object, FakeContext>()
 
 export class FakeContext {
   fillStyle: unknown = '#000000'
@@ -101,7 +134,6 @@ export class FakeContext {
   lineJoin = 'miter'
   globalAlpha = 1
   globalCompositeOperation = 'source-over'
-  font = '10px sans-serif'
   textAlign = 'start'
   textBaseline = 'alphabetic'
   shadowColor = 'rgba(0, 0, 0, 0)'
@@ -119,16 +151,58 @@ export class FakeContext {
   wipes = 0
   gradientsMade = 0
   blursAsked = 0
+  /**
+   * How often the canvas was asked to write, to outline or to measure a
+   * text, or to change its font. Each of those makes a real browser bring
+   * the styles of the whole page up to date.
+   */
+  textCalls = 0
   /** Canvas pixels per unit, as last set with setTransform. */
   zoom = { x: 1, y: 1 }
 
   private blur = 0
+  private typeface = '10px sans-serif'
   private path: PathRect[] = []
   private pathDiscs = 0
   private readonly saved: ContextState[] = []
 
   constructor(readonly canvas: HTMLCanvasElement) {
     everyContext.add(this)
+    contextOfCanvas.set(canvas, this)
+  }
+
+  get font(): string {
+    return this.typeface
+  }
+  set font(value: string) {
+    this.textCalls++
+    this.typeface = value
+  }
+
+  /**
+   * The key letters that were copied onto this canvas since it was last
+   * wiped, in the order they were copied. An edge counts with the letter
+   * that was copied over it.
+   */
+  get letters(): StampedLetter[] {
+    const letters: StampedLetter[] = []
+    let edge: StampedEdge | null = null
+    for (const stamp of this.images) {
+      const picture = contextOfCanvas.get(stamp.image as object)
+      const outlined = picture?.textEdges[0]
+      const written = picture?.texts[0]
+      if (picture && outlined) {
+        edge = { ...outlined, ...placeOf(stamp, picture, outlined), alpha: stamp.alpha }
+      } else if (picture && written) {
+        const place = placeOf(stamp, picture, written)
+        const under = edge && edge.x === place.x && edge.y === place.y ? edge : null
+        letters.push({ ...written, ...place, alpha: stamp.alpha, edge: under })
+        edge = null
+      } else {
+        edge = null
+      }
+    }
+    return letters
   }
 
   /** Blurring is the costly thing a canvas can be asked for, so every request is counted. */
@@ -176,7 +250,7 @@ export class FakeContext {
 
   save(): void {
     const { fillStyle, strokeStyle, lineWidth, globalAlpha, globalCompositeOperation } = this
-    const { font, textAlign, textBaseline, shadowColor, shadowOffsetX, blur } = this
+    const { typeface: font, textAlign, textBaseline, shadowColor, shadowOffsetX, blur } = this
     this.saved.push({
       fillStyle,
       strokeStyle,
@@ -194,7 +268,10 @@ export class FakeContext {
 
   restore(): void {
     const state = this.saved.pop()
-    if (state) Object.assign(this, state)
+    if (!state) return
+    const { font, ...rest } = state
+    Object.assign(this, rest)
+    this.typeface = font
   }
 
   beginPath(): void {
@@ -260,11 +337,13 @@ export class FakeContext {
   }
 
   fillText(text: string, x: number, y: number): void {
+    this.textCalls++
     this.texts.push({ text, x, y, font: this.font, colour: this.fillStyle, alpha: this.globalAlpha })
   }
 
   /** The outline of a text: kept apart from the texts themselves. */
   strokeText(text: string, x: number, y: number): void {
+    this.textCalls++
     this.textEdges.push({
       text,
       x,
@@ -279,8 +358,30 @@ export class FakeContext {
 
   /** Every character is 0.6 times as wide as the font is tall, as in a typewriter face. */
   measureText(text: string): { width: number } {
+    this.textCalls++
     const size = Number.parseFloat(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? '10')
     return { width: text.length * size * 0.6 }
+  }
+}
+
+/** True for a picture that something was written on: a key letter, or the edge of one. */
+export function carriesText(image: unknown): boolean {
+  const picture = contextOfCanvas.get(image as object)
+  return picture !== undefined && picture.texts.length + picture.textEdges.length > 0
+}
+
+/**
+ * Where a point of a copied picture came to lie on the canvas it was copied
+ * to: `at` is the point as it was handed to the picture's own canvas.
+ */
+function placeOf(
+  stamp: StampedImage,
+  picture: FakeContext,
+  at: { x: number; y: number },
+): { x: number; y: number } {
+  return {
+    x: stamp.x + (at.x * picture.zoom.x * stamp.width) / picture.canvas.width,
+    y: stamp.y + (at.y * picture.zoom.y * stamp.height) / picture.canvas.height,
   }
 }
 

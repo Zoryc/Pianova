@@ -493,15 +493,15 @@ describe('what the sky reads from the page', () => {
   it('writes the key letters in the typeface the page names', () => {
     vi.stubGlobal('getComputedStyle', () => ({ fontFamily: '"Test Mono", monospace' }))
     const sky = mount({ falling: stillSong(song), hints })
-    expect(only(sky.context.texts).text).toBe('A')
-    expect(only(sky.context.texts).font).toMatch(/^700 \d+px "Test Mono", monospace$/)
+    expect(only(sky.context.letters).text).toBe('A')
+    expect(only(sky.context.letters).font).toMatch(/^700 \d+px "Test Mono", monospace$/)
   })
 
   it('falls back to a plain typewriter face when the page names none, instead of failing', () => {
     vi.stubGlobal('getComputedStyle', () => ({ fontFamily: '' }))
     const sky = mount({ falling: stillSong(song), hints })
-    expect(only(sky.context.texts).text).toBe('A')
-    expect(only(sky.context.texts).font).toMatch(/^700 \d+px monospace$/)
+    expect(only(sky.context.letters).text).toBe('A')
+    expect(only(sky.context.letters).font).toMatch(/^700 \d+px monospace$/)
   })
 })
 
@@ -531,7 +531,7 @@ describe('key letters on the narrowest keys that Auto draws', () => {
       expect(bar.width).toBeCloseTo(barWidth(keySpan(C_SHARP_4, range, width).width), 6)
       expect(bar.width).toBeGreaterThanOrEqual(13)
       expect(bar.width).toBeLessThan(14)
-      expect(only(sky.context.texts).text).toBe('W')
+      expect(only(sky.context.letters).text).toBe('W')
     },
   )
 })

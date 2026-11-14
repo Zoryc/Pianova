@@ -115,7 +115,9 @@ export class SkyRunner {
     if (!previous) this.showHeldNotes()
     else this.follow(previous, next)
     this.watchSong(next.falling !== null)
-    this.wake(!previous || !sameLook(previous, next) || this.songMoved())
+    const changed = !previous || !sameLook(previous, next)
+    if (changed) this.prepare()
+    this.wake(changed || this.songMoved())
   }
 
   /** Undoes everything: no listener, no timer and no frame is left behind, and the canvas is empty. */
@@ -160,6 +162,7 @@ export class SkyRunner {
     } else if (!hadArea) {
       this.showHeldNotes()
     }
+    this.prepare()
     // Resizing wipes a canvas, so it is painted again straight away instead of flickering until the next frame.
     this.draw()
     this.wake(false)
@@ -177,6 +180,7 @@ export class SkyRunner {
    */
   private readonly onContextRestored = (): void => {
     this.painter.forget()
+    this.prepare()
     this.draw()
   }
 
@@ -327,19 +331,30 @@ export class SkyRunner {
     }
   }
 
+  /**
+   * The key letters are written here, not in a frame: when the letters, the
+   * look or the size of the sky change. Writing on a canvas makes Firefox
+   * paint the whole page, which a frame of a playing song must never do.
+   */
+  private prepare(): void {
+    const { scene, surface } = this
+    if (scene && surface) this.painter.prepare(this.currentPicture(scene, surface))
+  }
+
   private draw(): void {
     const { scene, surface } = this
     if (!scene || !surface) {
       this.painter.clear()
       return
     }
-    this.painter.draw(this.currentPicture(scene, surface))
+    const picture = this.currentPicture(scene, surface)
+    this.drawnPosition = picture.song ? picture.song.position : null
+    this.painter.draw(picture)
   }
 
   /** What to draw right now. The same objects are filled in again each time. */
   private currentPicture(scene: SkyScene, surface: Surface): SkyPicture {
     const song = this.currentSong(scene)
-    this.drawnPosition = song ? song.position : null
     const picture = (this.picture ??= {
       surface,
       range: scene.range,

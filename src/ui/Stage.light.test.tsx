@@ -274,11 +274,11 @@ describe('what the settings do to the sky', () => {
     const song = fakeSong([note(60, 1, 1), note(62, 1.5, 1)])
     const hints = new Map<Midi, string>([[60, 'A']])
     const stage = drawStage({ falling: song.source, hints, settings: withSettings({ pianoSize: 37 }) })
-    expect(stage.context.texts.map((text) => text.text)).toEqual(['A'])
+    expect(stage.context.letters.map((text) => text.text)).toEqual(['A'])
     const bar = barOver(stage.context, 60)
-    expect(stage.context.texts[0]?.x).toBeCloseTo((bar?.x ?? 0) + (bar?.width ?? 0) / 2, 6)
+    expect(stage.context.letters[0]?.x).toBeCloseTo((bar?.x ?? 0) + (bar?.width ?? 0) / 2, 6)
     stage.redraw({ hints: new Map() })
-    expect(stage.context.texts).toEqual([])
+    expect(stage.context.letters).toEqual([])
   })
 
   // "Auto" shows a piano as soon as its white keys are 26 pixels wide. A black
@@ -303,13 +303,13 @@ describe('what the settings do to the sky', () => {
       ])
       const stage = drawStage({ falling: song.source, hints })
       expect(notesOnPiano()).toHaveLength(keys)
-      expect(stage.context.texts.map((text) => text.text)).toEqual(['A', 'W', 'E', 'T'])
+      expect(stage.context.letters.map((text) => text.text)).toEqual(['A', 'W', 'E', 'T'])
 
       for (const [midi, letter] of [...hints].slice(1)) {
         const bar = barOver(stage.context, midi) as PaintedBar
         expect(bar.width, `the bar of ${letter}`).toBeGreaterThanOrEqual(13)
         expect(bar.width, `the bar of ${letter}`).toBeLessThan(14)
-        const written = stage.context.texts.find((text) => text.text === letter)
+        const written = stage.context.letters.find((text) => text.text === letter)
         expect(written?.x).toBeCloseTo(bar.x + bar.width / 2, 6)
         // Small, but not too small to read, and inside its bar. (On the
         // stand-in canvas a character is 0.6 times as wide as it is tall.)
