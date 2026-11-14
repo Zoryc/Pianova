@@ -1,6 +1,6 @@
 /**
- * Placeholder name until the real one is chosen. Everything that shows the
- * app's name reads it from here, so renaming is a one-line change (plus the
- * <title> in index.html, which is what shows before the app loads).
+ * The app's name: piano + nova, a star that flares up, like a key when it is
+ * played. Everything that shows the name reads it from here (plus the <title>
+ * in index.html, which is what shows before the app loads).
  */
-export const APP_NAME = 'PianoApp'
+export const APP_NAME = 'Pianova'

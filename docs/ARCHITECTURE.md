@@ -18,7 +18,7 @@ Hard rules that follow from that:
 - **Elegant and interactive with the piano.** The piano is the centre of the screen and reacts to everything: keys light up and dip when played, bars of light rise from the keys being played (`docs/INTERFACE.md` 5.2), hovering a key gives gentle feedback. Polished, restrained, never gaudy.
 
 - **Simple first, advanced on demand.** Easy for a beginner, customizable for an experienced pianist. The main screen stays simple and works with zero configuration. Everything an experienced player may want to tune lives in one **Settings** panel, grouped in tabs, where every option has a sensible default and can be reset, and every option that is not plain from its name has a one-line explanation. Later phases follow the same rule (their fine-tuning options go in the same panel).
-- The app's name is a **placeholder** (`APP_NAME` in `src/app/appInfo.ts`, currently "PianoApp"). Never hard-code the name anywhere else.
+- The app's name, "Pianova", is set in one place (`APP_NAME` in `src/app/appInfo.ts`, plus the `<title>` in `index.html`). Never hard-code the name anywhere else.
 
 Phase 1 = **the playable piano (Free Play)**:
 
@@ -81,7 +81,7 @@ Inputs never talk to the sound engine or the UI directly. They call the bus. Con
 | `src/app/pianoApp.ts` | Creates the singletons (bus, engine) and wires bus → engine. |
 | `src/App.tsx`, `src/main.tsx`, `src/styles/app.css` | App shell and wiring. |
 | `src/ui/TopBar.tsx`, `src/ui/SettingsPanel.tsx`, `src/ui/StartBox.tsx` | The menu bar, the Settings panel (the computer keys are chosen in its Keys tab), the start box (the small menu the app opens with). |
-| `src/app/appInfo.ts` | `APP_NAME`, the placeholder app name. |
+| `src/app/appInfo.ts` | `APP_NAME`, the app's name (Pianova). |
 
 The files of the screen are listed in full in `docs/INTERFACE.md` section 5, and those of songs in `docs/SONGS.md` section 3.
 

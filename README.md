@@ -1,6 +1,4 @@
-# PianoApp
-
-> "PianoApp" is a placeholder name until the real one is chosen.
+# Pianova
 
 A piano you play with your computer keyboard, in the browser. One key plays one note: no Shift, no key combinations, nothing to hold down.
 

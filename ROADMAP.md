@@ -10,7 +10,7 @@ A browser piano played with the computer keyboard. How it is built: `docs/ARCHIT
 - Every key is customizable (click a note, press the key you want), saved automatically, with a reset.
 - **Simple first, advanced on demand.** The app works with no setup. Everything an experienced player may want to tune (touch strength, transpose, C D E or Do Ré Mi, room echo, note fade-out, piano size, colours and light) is in one Settings panel, grouped in tabs. Later phases put their options there too.
 - Easy to navigate (one screen, one small menu for everything that is not needed while playing, every control labelled in plain words) and elegant, with a piano that reacts to the player (lit keys, bars of light, sparks).
-- The app name is a placeholder ("PianoApp", in `src/app/appInfo.ts`); the real name will be chosen later.
+- The app is called **Pianova** (piano + nova), set in one place: `src/app/appInfo.ts`.
 - Three modes: Free Play, Practice (the song waits for you), Real-time (the song keeps its tempo and you are scored).
 - Real instruments **without MIDI** (many older keyboards) must be supported: their audio output can be plugged into the PC's mic/line input. The future "real piano" feature therefore listens to audio first (line-in, with a microphone as a fallback); MIDI input can be added for instruments that have it.
 - **Desktop only**: the app is for a PC with a keyboard and a mouse. No phone or tablet support.
