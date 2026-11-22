@@ -7,6 +7,10 @@
   One key plays one note: no Shift, no key combinations, nothing to hold down.
 </p>
 
+<h3 align="center">
+  <a href="https://zoryc.github.io/Pianova/">▶ Play Pianova in your browser</a>
+</h3>
+
 <p align="center">
   <a href="LICENSE"><img alt="Licence: MIT" src="https://img.shields.io/badge/licence-MIT-ff2a2a"></a>
   <img alt="Runs in Chrome, Edge and Firefox" src="https://img.shields.io/badge/runs%20in-Chrome%20%7C%20Edge%20%7C%20Firefox-2b2a33">
@@ -46,7 +50,9 @@ C   D   E   F   G   A   B   C   D   E   F  (from middle C)
 
 ## Quick start
 
-You need [Node.js](https://nodejs.org) 22 (22.22.2 or newer), 24 (24.15 or newer) or 26 and later, and a current version of Chrome, Edge or Firefox.
+The easiest way: open **<https://zoryc.github.io/Pianova/>** in Chrome, Edge or Firefox and press a key. There is nothing to install.
+
+To run it on your own computer, you need [Node.js](https://nodejs.org) 22 (22.22.2 or newer), 24 (24.15 or newer) or 26 and later, and a current version of Chrome, Edge or Firefox.
 
 ```bash
 npm install
@@ -99,6 +105,8 @@ Everything stays in your browser. Settings, custom keys and imported songs are s
 | `npm test` | Runs the unit tests |
 | `npm run typecheck` | Checks the TypeScript types |
 | `npm run build` | Builds the app into `dist/` |
+
+Every change pushed to `main` is published on GitHub Pages by [`.github/workflows/pages.yml`](.github/workflows/pages.yml).
 
 TypeScript, React and Vite, with [Tone.js](https://tonejs.github.io) for sound. Every input (computer keyboard, mouse, a song being played, and later a real instrument) sends the same "note on / note off" events through one bus, and everything else (sound, the on-screen piano, the light, later the practice modes) listens to that bus.
 
