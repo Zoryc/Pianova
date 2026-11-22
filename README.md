@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.svg" alt="Pianova: a piano you play with your computer keyboard" width="860">
+  <img src="docs/images/pianova-banner.svg" alt="Pianova: a piano you play with your computer keyboard" width="860">
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/images/playing.png" alt="A song playing: its notes fall toward the piano, each marked with the computer key that plays it"></td>
-    <td width="50%"><img src="docs/images/start-box.png" alt="The small menu the app opens with: the ways to play, a few songs, Settings and full screen"></td>
+    <td width="50%"><img src="docs/images/start-menu.png" alt="The small menu the app opens with: the ways to play, a few songs, Settings and full screen"></td>
   </tr>
   <tr>
     <td align="center"><sub>A song plays while its notes fall onto the keys</sub></td>
