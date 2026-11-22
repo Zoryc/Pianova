@@ -161,16 +161,26 @@ describe('package.json', () => {
   }
 
   it('has what the app needs to run as dependencies, and nothing else', () => {
-    expect(Object.keys(manifest.dependencies).sort()).toEqual(['midi-file', 'react', 'react-dom', 'tone'])
+    // The typeface of the logo is built into the app, so that no font is fetched from elsewhere.
+    expect(Object.keys(manifest.dependencies).sort()).toEqual([
+      '@fontsource-variable/fraunces',
+      'midi-file',
+      'react',
+      'react-dom',
+      'tone',
+    ])
   })
 
   it('every dependency is really imported by the app, and none by a test only', () => {
     const appCode = appCodeFiles().map(read).join('\n')
+    // `from 'name'`, `import('name')`, or `import 'name/…'` for a file loaded for its effect, such as a typeface's styles.
+    const importOf = (name: string) =>
+      new RegExp(`from '${literally(name)}(/[^']*)?'|import\\('${literally(name)}'\\)|import '${literally(name)}(/[^']*)?'`)
     for (const name of Object.keys(manifest.dependencies)) {
-      expect(appCode, name).toMatch(new RegExp(`from '${name}(/[^']*)?'|import\\('${name}'\\)`))
+      expect(appCode, name).toMatch(importOf(name))
     }
     for (const name of Object.keys(manifest.devDependencies)) {
-      expect(appCode, name).not.toMatch(new RegExp(`from '${name}(/[^']*)?'|import\\('${name}'\\)`))
+      expect(appCode, name).not.toMatch(importOf(name))
     }
   })
 

@@ -1,29 +1,43 @@
 import { useId } from 'react'
 import type { JSX } from 'react'
+import '@fontsource-variable/fraunces/opsz.css'
+import '@fontsource-variable/fraunces/opsz-italic.css'
 import { APP_NAME, APP_NAME_LIGHT_FROM } from '../app/appInfo'
 import './logo.css'
 
 /**
- * The shapes of the mark, in a square of 64 by 64: three keys under the line
- * of light, the middle one lit by a bar that has just come down onto it, and
- * a spark where it lands. public/favicon.svg, the browser tab's icon, draws
- * the same shapes in the default light; a test keeps the two the same.
+ * The shapes of the mark, in a square of 64 by 64: a black grand piano seen
+ * from above, drawn round with one line of light that also runs over its keys,
+ * so that the case and the keys set into its front are one piece.
  */
 export const LOGO_SHAPES = {
-  whiteKeys: ['M6 43h15.5v15q0 3-3 3h-9.5q-3 0-3-3Z', 'M42.5 43h15.5v15q0 3-3 3h-9.5q-3 0-3-3Z'],
-  litKey: 'M24.25 43h15.5v15q0 3-3 3h-9.5q-3 0-3-3Z',
-  litKeyTop: 'M24.25 43h15.5v2.5h-15.5Z',
-  blackKeys: ['M18.875 43h8v9.5q0 1.5-1.5 1.5h-5q-1.5 0-1.5-1.5Z', 'M37.125 43h8v9.5q0 1.5-1.5 1.5h-5q-1.5 0-1.5-1.5Z'],
-  line: 'M4 40h56v2h-56Z',
-  bar: 'M32 3a5.5 5.5 0 0 1 5.5 5.5v22a5.5 5.5 0 0 1-11 0v-22A5.5 5.5 0 0 1 32 3Z',
-  spark: 'M32 32Q33.7 39.3 45 41Q33.7 42.7 32 50Q30.3 42.7 19 41Q30.3 39.3 32 32Z',
-  /** The little sparks thrown sideways: x, y, radius. */
-  sparks: [
-    [21, 35.5, 1.1],
-    [44, 34.5, 1.3],
-    [17.5, 38.5, 0.8],
-    [47.5, 38, 0.9],
+  /** The case: long straight left side, rounded tail, the curved side, short right side, the front. */
+  case: 'M8 57.5V16C8 8.5 13 4.5 19.5 4.5 26 4.5 29.3 8.8 30.8 14.5 32.8 22.5 37.5 27.5 45.5 30.2 52.5 32.6 56 35 56 39V57.5Q56 59 54.5 59H9.5Q8 59 8 57.5Z',
+  /** The line of light over the keys. */
+  fallboard: 'M8 43H56',
+  /** The white keys: one ivory band, cut to the case, and the lines between them. */
+  keys: 'M8 43H56V59H8Z',
+  seams: 'M16.29 43V59M22.57 43V59M28.86 43V59M35.14 43V59M41.43 43V59M47.71 43V59',
+  /** Five black keys, in a group of two and a group of three. */
+  blackKeys: [
+    'M14.69 42h2.5q.6 0 .6.6v9.2q0 .6-.6.6h-2.5q-.6 0-.6-.6v-9.2q0-.6.6-.6Z',
+    'M21.67 42h2.5q.6 0 .6.6v9.2q0 .6-.6.6h-2.5q-.6 0-.6-.6v-9.2q0-.6.6-.6Z',
+    'M33.44 42h2.5q.6 0 .6.6v9.2q0 .6-.6.6h-2.5q-.6 0-.6-.6v-9.2q0-.6.6-.6Z',
+    'M40.18 42h2.5q.6 0 .6.6v9.2q0 .6-.6.6h-2.5q-.6 0-.6-.6v-9.2q0-.6.6-.6Z',
+    'M46.91 42h2.5q.6 0 .6.6v9.2q0 .6-.6.6h-2.5q-.6 0-.6-.6v-9.2q0-.6.6-.6Z',
   ],
+} as const
+
+/**
+ * The browser tab's icon, public/favicon.svg: the same piano made simpler for
+ * 16 px, with a thicker line and three black keys, every straight edge on a
+ * pixel (4 units of the square). A test keeps the file and these the same.
+ */
+export const TAB_ICON_SHAPES = {
+  case: 'M10 55V17C10 9.8 15 6 21.5 6 28 6 31.3 10.1 32.8 15.5 34.8 23.2 39.5 27.9 47.5 30.5 54.5 32.8 58 35.1 58 39V55Q58 58 55 58H13Q10 58 10 55Z',
+  fallboard: 'M10 42H58',
+  keys: 'M12 44H56V56H12Z',
+  blackKeys: ['M20 44h4v8h-4Z', 'M28 44h4v8h-4Z', 'M44 44h4v8h-4Z'],
 } as const
 
 /**
@@ -34,9 +48,8 @@ export function LogoMark({ className }: { className?: string }): JSX.Element {
   // Ids of its own for each copy, so that two marks on screen never share a gradient.
   const id = useId().replace(/[^A-Za-z0-9_-]/g, '')
   const glow = `${id}-glow`
-  const bar = `${id}-bar`
-  const lit = `${id}-lit`
   const ivory = `${id}-ivory`
+  const inCase = `${id}-case`
   const shapes = LOGO_SHAPES
   return (
     <svg className={['logo-mark', className].filter(Boolean).join(' ')} viewBox="0 0 64 64" aria-hidden="true">
@@ -50,44 +63,39 @@ export function LogoMark({ className }: { className?: string }): JSX.Element {
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
-        <linearGradient id={bar} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" className="logo-mark__deep" />
-          <stop offset="0.45" className="logo-mark__light" />
-          <stop offset="0.85" className="logo-mark__light" />
-          <stop offset="1" className="logo-mark__bright" />
-        </linearGradient>
-        <linearGradient id={lit} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" className="logo-mark__light" />
-          <stop offset="1" className="logo-mark__deep" />
-        </linearGradient>
         <linearGradient id={ivory} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" className="logo-mark__ivory-shine" />
           <stop offset="1" className="logo-mark__ivory-shade" />
         </linearGradient>
+        <clipPath id={inCase}>
+          <path d={shapes.case} />
+        </clipPath>
       </defs>
-      {shapes.whiteKeys.map((d) => (
-        <path key={d} d={d} fill={`url(#${ivory})`} />
-      ))}
-      <path d={shapes.litKey} fill={`url(#${lit})`} />
-      <path d={shapes.litKeyTop} className="logo-mark__key-shine" />
-      {shapes.blackKeys.map((d) => (
-        <path key={d} d={d} className="logo-mark__black" />
-      ))}
-      <g filter={`url(#${glow})`}>
-        <path d={shapes.line} className="logo-mark__line" />
-        <path d={shapes.bar} fill={`url(#${bar})`} />
-        <path d={shapes.spark} className="logo-mark__spark" />
-        {shapes.sparks.map(([x, y, r]) => (
-          <circle key={`${x},${y}`} cx={x} cy={y} r={r} className="logo-mark__spark" />
+      <path d={shapes.case} className="logo-mark__body" />
+      {/* The line's soft glow, under the keys so that it never tints them. */}
+      <g className="logo-mark__line logo-mark__halo" filter={`url(#${glow})`}>
+        <path d={shapes.case} />
+        <path d={shapes.fallboard} />
+      </g>
+      <g clipPath={`url(#${inCase})`}>
+        <path d={shapes.keys} fill={`url(#${ivory})`} />
+        <path d={shapes.seams} className="logo-mark__seams" />
+        {shapes.blackKeys.map((d) => (
+          <path key={d} d={d} className="logo-mark__black" />
         ))}
+      </g>
+      <g className="logo-mark__line">
+        <path d={shapes.case} />
+        <path d={shapes.fallboard} />
       </g>
     </svg>
   )
 }
 
 /**
- * The name as the logo writes it: its first part in the colour of the text,
- * the rest ("nova") in the light. Read aloud, it is the name in one word.
+ * The name as the logo writes it, in the logo's own typeface: its first part
+ * in the colour of the text, the rest ("nova") in italics in the light. Read
+ * aloud, it is the name in one word.
  */
 export function Wordmark(): JSX.Element {
   const plain = APP_NAME.slice(0, APP_NAME_LIGHT_FROM)

@@ -13,16 +13,23 @@
   vertical-align: -0.24em;
 }
 
-.logo-mark__light {
-  stop-color: var(--light);
+/* The case: black, with the faintest touch of the light. */
+.logo-mark__body {
+  fill: color-mix(in srgb, var(--light) 5%, var(--key-ebony));
 }
 
-.logo-mark__deep {
-  stop-color: var(--light-deep);
+/* The line of light round the case and over the keys. */
+.logo-mark__line {
+  fill: none;
+  stroke: var(--light);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
-.logo-mark__bright {
-  stop-color: var(--light-bright);
+/* Its glow, as strong as the player's Glow setting asks (half strength at the default). */
+.logo-mark__halo {
+  opacity: calc(var(--glow) / 1.2);
 }
 
 .logo-mark__ivory-shine {
@@ -33,26 +40,27 @@
   stop-color: var(--key-ivory-shade);
 }
 
-.logo-mark__key-shine {
-  fill: var(--light-bright);
-  opacity: 0.55;
+.logo-mark__seams {
+  fill: none;
+  stroke: var(--key-ebony);
+  stroke-opacity: 0.7;
+  stroke-width: 1;
 }
 
 .logo-mark__black {
   fill: var(--key-ebony);
-  stroke: var(--key-ebony-edge);
 }
 
-.logo-mark__line {
-  fill: var(--light);
+/* The name, in the logo's typeface (Fraunces, built into the app). */
+.wordmark {
+  font-family: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
-.logo-mark__spark {
-  fill: var(--light-bright);
-}
-
-/* "nova" in the light, glowing as strongly as the player's Glow setting asks. */
+/* "nova": in italics, in the light, glowing as strongly as the player's Glow setting asks. */
 .wordmark__lit {
   color: var(--light);
-  text-shadow: 0 0 calc(14px * var(--glow)) var(--light);
+  font-style: italic;
+  text-shadow: 0 0 calc(0.37em * var(--glow)) color-mix(in srgb, var(--light) 45%, transparent);
 }
